@@ -1,0 +1,11 @@
+{
+  "name": "@gym-dash/shared",
+  "private": true,
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "dependencies": {
+    "firebase": "^12.3.0"
+  }
+}
+

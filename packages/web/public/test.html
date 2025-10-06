@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firebase Auth Test</title>
+</head>
+<body>
+    <h1>Firebase Auth Initialization Test</h1>
+    <p>Check the browser's developer console for logs.</p>
+
+    <!-- 1. Import Firebase SDKs directly from the CDN -->
+    <!-- This bypasses any potential issues with Vite or node_modules -->
+    <script type="module">
+        // Import the necessary functions from the Firebase SDK
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js";
+        import { getAuth } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-auth.js";
+
+        console.log("🔵 Test Page: Script starting...");
+
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyB1Gqh9nheKlvHvKz423p7fcMnR-6AwWy8",
+            authDomain: "gymdash-4e911.firebaseapp.com",
+            projectId: "gymdash-4e911",
+            storageBucket: "gymdash-4e911.firebasestorage.app",
+            messagingSenderId: "463663738859",
+            appId: "1:463663738859:web:bc322e57eb96ae5aafb3ae",
+            measurementId: "G-06K7E6518J"
+        };
+
+        try {
+            // 2. Initialize the Firebase App
+            console.log("🟡 Test Page: Initializing Firebase App...");
+            const app = initializeApp(firebaseConfig);
+            console.log("🟢 Test Page: Firebase App Initialized:", app);
+
+            // 3. THE CRITICAL TEST: Attempt to get the Auth service
+            // We wrap this in its own try/catch to see if this specific call fails.
+            try {
+                const auth = getAuth(app);
+                console.log("✅✅✅ SUCCESS: Auth service retrieved successfully!", auth);
+            } catch (authError) {
+                console.error("❌❌❌ FAILURE: Failed to get Auth service.", authError);
+            }
+
+        } catch (e) {
+            console.error("❌ Test Page: A critical error occurred during initialization.", e);
+        }
+    </script>
+</body>
+</html>
