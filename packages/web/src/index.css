@@ -1,5 +1,14 @@
-/* /packages/web/src/index.css */
+/* Replace the old @tailwind directives with this single import */
+@import "tailwindcss";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/*
+ * Use the new @source directive to tell Tailwind what to scan.
+ * These paths are relative to this CSS file's location.
+ */
+
+/* Scan files in the current 'web' package */
+@source "./**/*.{js,ts,jsx,tsx}";
+@source "../../index.html";
+
+/* Scan files in the sibling 'shared' package */
+@source "../../../packages/shared/components/**/*.{js,ts,jsx,tsx}";

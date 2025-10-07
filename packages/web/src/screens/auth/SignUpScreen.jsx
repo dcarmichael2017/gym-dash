@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { signUpWithEmail } from '../../../../shared/api/auth.js';
+import { signUpWithEmail } from '../../../../shared/api/auth.js'; // Corrected import
+import { Building } from 'lucide-react'; // A nice icon for branding
 
 export const SignUpScreen = () => {
   const [email, setEmail] = useState('');
@@ -21,8 +22,7 @@ export const SignUpScreen = () => {
     setIsLoading(false);
 
     if (result.success) {
-      console.log('Sign up successful! User ID:', result.userId);
-      // On success, navigate to the first step of the onboarding wizard
+      console.log('Sign up successful! User ID:', result.user.uid);
       navigate('/onboarding/step-1');
     } else {
       setError(result.error);
@@ -30,12 +30,19 @@ export const SignUpScreen = () => {
   };
 
   return (
-    <div className="bg-white p-8 rounded-lg shadow-md w-full">
-      <h2 className="text-2xl font-bold text-center text-gray-800 mb-6">Create Your Admin Account</h2>
+    <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md border">
+      
+      <div className="flex flex-col items-center mb-6">
+        <div className="bg-slate-800 p-3 rounded-full mb-3">
+          <Building className="text-white h-8 w-8" />
+        </div>
+        <h1 className="text-3xl font-bold text-gray-800">Welcome to GymDash</h1>
+        <p className="text-gray-500 mt-1">Create an account to manage your gym.</p>
+      </div>
       
       <form onSubmit={handleSignUp}>
         <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="email">
+          <label className="block text-gray-700 text-sm font-semibold mb-2 text-left" htmlFor="email">
             Email Address
           </label>
           <input
@@ -43,13 +50,13 @@ export const SignUpScreen = () => {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+            className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 block w-full rounded-md shadow-sm py-2 px-3"
             required
             placeholder="you@example.com"
           />
         </div>
         <div className="mb-6">
-          <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
+          <label className="block text-gray-700 text-sm font-semibold mb-2 text-left" htmlFor="password">
             Password
           </label>
           <input
@@ -57,19 +64,19 @@ export const SignUpScreen = () => {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline"
+            className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 block w-full rounded-md shadow-sm py-2 px-3"
             required
             placeholder="••••••••••"
           />
         </div>
 
-        {error && <p className="text-red-500 text-xs italic mb-4">{error}</p>}
+        {error && <p className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md p-3 mb-4">{error}</p>}
 
-        <div className="flex items-center justify-between">
+        <div>
           <button
             type="submit"
             disabled={isLoading}
-            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full disabled:bg-gray-400"
+            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-slate-800 hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-700 disabled:bg-slate-400 transition-colors"
           >
             {isLoading ? 'Creating Account...' : 'Sign Up'}
           </button>
@@ -78,3 +85,4 @@ export const SignUpScreen = () => {
     </div>
   );
 };
+

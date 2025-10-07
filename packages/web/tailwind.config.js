@@ -1,11 +1,12 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  // The 'content' array is intentionally removed.
   theme: {
-    extend: {},
+    extend: {
+      borderRadius: {
+        '4xl': '2rem',
+      }
+    },
   },
   plugins: [],
 }
