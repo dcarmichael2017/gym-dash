@@ -1,3 +1,5 @@
+// /packages/shared/api/firestore.js
+
 import { doc, setDoc, addDoc, collection, updateDoc, getDocs, getDoc, deleteDoc } from "firebase/firestore";
 // Import the already-initialized db service from our new central file
 import { db } from "./firebaseConfig.js";
