@@ -1,8 +1,7 @@
-// /packages/web/src/screens/onboarding/Step5_AppPreviewScreen.jsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { getGymDetails, getClasses } from '../../../../shared/api/firestore.js'; // Using the all-in-one service file
-import { MobileSchedulePreview } from '../../../../shared/components/MobileSchedulePreview.jsx'; // Importing our new shared component
+import { getGymDetails, getClasses } from '../../../../shared/api/firestore.js';
+import { MobileSchedulePreview } from '../../../../shared/components/MobileSchedulePreview.jsx';
 
 export const Step5_AppPreviewScreen = () => {
   const [gymDetails, setGymDetails] = useState(null);
@@ -51,7 +50,8 @@ export const Step5_AppPreviewScreen = () => {
   }, [location.state]);
 
   const handleNext = () => {
-    navigate('/onboarding/step-6', { state: { gymId: gymId } });
+    // This would eventually navigate to the final step or dashboard
+    alert("Onboarding Complete! (For now)");
   };
 
   if (isLoading) {
@@ -67,11 +67,11 @@ export const Step5_AppPreviewScreen = () => {
       <h2 className="text-2xl font-bold text-gray-800 mb-2">Your App Preview</h2>
       <p className="text-gray-600 mb-6">Here’s how your gym's branding and schedule will look to your members.</p>
       
-      <div className="mb-8">
+      <div className="mb-8 flex justify-center">
         <MobileSchedulePreview 
           gymName={gymDetails?.name}
-          logoUrl={gymDetails?.branding?.logoUrl}
-          themeColor={gymDetails?.branding?.themeColor}
+          logoUrl={gymDetails?.logoUrl}
+          themeColor={gymDetails?.theme?.primaryColor}
           classList={classList}
         />
       </div>
@@ -79,10 +79,9 @@ export const Step5_AppPreviewScreen = () => {
       <div className="flex justify-between items-center mt-8">
         <button type="button" onClick={() => navigate('/onboarding/step-4', { state: { gymId } })} className="text-sm font-medium text-gray-600 hover:underline">Back</button>
         <button type="button" onClick={handleNext} className="bg-green-600 text-white font-semibold py-2 px-6 rounded-md hover:bg-green-700 transition-colors">
-          Looks Good, Next!
+          Looks Good, Finish!
         </button>
       </div>
     </div>
   );
 };
-
