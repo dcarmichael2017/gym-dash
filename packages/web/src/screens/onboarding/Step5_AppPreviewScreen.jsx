@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { getGymDetails, getClasses } from '../../../../shared/api/firestore.js';
-import { MobileSchedulePreview } from '../../../../shared/components/MobileSchedulePreview.jsx';
+import { getGymDetails, getClasses } from '@shared/api/firestore.js';
+import { MobileSchedulePreview } from '@shared/components/MobileSchedulePreview.jsx';
 
 export const Step5_AppPreviewScreen = () => {
   const [gymDetails, setGymDetails] = useState(null);
@@ -14,8 +14,9 @@ export const Step5_AppPreviewScreen = () => {
   const location = useLocation();
 
   useEffect(() => {
-    if (location.state && location.state.gymId) {
-      const currentGymId = location.state.gymId;
+    // Correctly using the alias now
+    const currentGymId = location.state?.gymId;
+    if (currentGymId) {
       setGymId(currentGymId);
       
       const fetchData = async () => {
@@ -71,7 +72,9 @@ export const Step5_AppPreviewScreen = () => {
         <MobileSchedulePreview 
           gymName={gymDetails?.name}
           logoUrl={gymDetails?.logoUrl}
-          themeColor={gymDetails?.theme?.primaryColor}
+          // PASSING BOTH COLORS: Pass both primary and secondary colors to the component
+          primaryColor={gymDetails?.theme?.primaryColor}
+          secondaryColor={gymDetails?.theme?.secondaryColor}
           classList={classList}
         />
       </div>
@@ -85,3 +88,4 @@ export const Step5_AppPreviewScreen = () => {
     </div>
   );
 };
+

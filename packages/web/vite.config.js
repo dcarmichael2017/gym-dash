@@ -2,6 +2,7 @@ import { defineConfig, searchForWorkspaceRoot } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/postcss';
 import autoprefixer from 'autoprefixer';
+import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
@@ -11,6 +12,11 @@ export default defineConfig({
         tailwindcss(), // This now looks for a tailwind.config.js file
         autoprefixer(),
       ],
+    },
+  },
+  resolve: {
+    alias: {
+      '@shared': path.resolve(__dirname, '../shared'),
     },
   },
   server: {
