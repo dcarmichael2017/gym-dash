@@ -14,7 +14,6 @@ export const Step5_AppPreviewScreen = () => {
   const location = useLocation();
 
   useEffect(() => {
-    // Correctly using the alias now
     const currentGymId = location.state?.gymId;
     if (currentGymId) {
       setGymId(currentGymId);
@@ -51,8 +50,8 @@ export const Step5_AppPreviewScreen = () => {
   }, [location.state]);
 
   const handleNext = () => {
-    // This would eventually navigate to the final step or dashboard
-    alert("Onboarding Complete! (For now)");
+    // Navigate to Step 6 and pass the gymId in the state
+    navigate('/onboarding/step-6', { state: { gymId } });
   };
 
   if (isLoading) {
@@ -72,7 +71,6 @@ export const Step5_AppPreviewScreen = () => {
         <MobileSchedulePreview 
           gymName={gymDetails?.name}
           logoUrl={gymDetails?.logoUrl}
-          // PASSING BOTH COLORS: Pass both primary and secondary colors to the component
           primaryColor={gymDetails?.theme?.primaryColor}
           secondaryColor={gymDetails?.theme?.secondaryColor}
           classList={classList}
@@ -82,7 +80,7 @@ export const Step5_AppPreviewScreen = () => {
       <div className="flex justify-between items-center mt-8">
         <button type="button" onClick={() => navigate('/onboarding/step-4', { state: { gymId } })} className="text-sm font-medium text-gray-600 hover:underline">Back</button>
         <button type="button" onClick={handleNext} className="bg-green-600 text-white font-semibold py-2 px-6 rounded-md hover:bg-green-700 transition-colors">
-          Looks Good, Finish!
+          Looks Good, Next!
         </button>
       </div>
     </div>

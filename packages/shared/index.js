@@ -2,5 +2,6 @@
 // We will export everything from here.
 
 export * from './api/auth.js';
+export * from './api/storage.js';
 export * from './api/firestore.js';
 export * from './api/firebaseConfig.js';

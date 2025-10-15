@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "dependencies": {
-    "firebase": "^12.3.0"
+    "firebase": "^12.3.0",
+    "stripe": "^19.1.0"
   }
 }
-
