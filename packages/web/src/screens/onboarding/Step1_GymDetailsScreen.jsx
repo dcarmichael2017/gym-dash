@@ -27,16 +27,19 @@ export const Step1_GymDetailsScreen = () => {
     const gymData = {
       name: gymName,
       description: description,
+      ownerId: user.uid, 
     };
 
-    const result = await createGym(user.uid, gymData);
+    const result = await createGym(gymData);
     setIsLoading(false);
 
     if (result.success) {
       console.log('Gym created successfully! Gym ID:', result.gymId);
       navigate('/onboarding/step-2', { state: { gymId: result.gymId } });
     } else {
-      setError(result.error);
+      // Log the specific Firebase error
+      console.error("Error creating gym:", result.error);
+      setError("Error creating gym. Please try again.");
     }
   };
 
@@ -88,4 +91,3 @@ export const Step1_GymDetailsScreen = () => {
     </div>
   );
 };
-

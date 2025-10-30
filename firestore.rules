@@ -1,0 +1,42 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Gyms Collection (Your existing rules are great)
+    match /gyms/{gymId} {
+    
+      // CREATE: A user can create a gym if they are logged in
+      // and they are stamping their own UID as the 'ownerId'
+      allow create: if request.auth != null
+                      && request.resource.data.ownerId == request.auth.uid;
+                  
+      // READ, UPDATE, DELETE:
+      // A user can read, update, or delete a gym if they are logged in
+      // and their UID matches the 'ownerId' stored on the gym document.
+      allow read, update, delete: if request.auth != null
+                                      && get(/databases/$(database)/documents/gyms/$(gymId)).data.ownerId == request.auth.uid;
+    
+      // SUB-COLLECTIONS (Staff, Classes, etc.)
+      // Allow the gym owner (and only the owner) full access to
+      // all sub-collections (staff, classes, etc.) within their gym.
+      match /{allSubcollections=**} {
+        allow read, write: if request.auth != null
+                                && get(/databases/$(database)/documents/gyms/$(gymId)).data.ownerId == request.auth.uid;
+      }
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      
+        // Allow a user to create their own profile
+        // (This is needed for your createUserProfile function)
+        allow create: if request.auth != null && request.auth.uid == userId;
+
+        // Allow a user to read or update their own profile
+        // (This 'update' is what the createGym function needs)
+        allow read, update: if request.auth != null && request.auth.uid == userId;
+    }
+
+  }
+}

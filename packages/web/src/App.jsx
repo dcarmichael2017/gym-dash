@@ -12,7 +12,7 @@ import { Step3_StaffScreen } from './screens/onboarding/Step3_StaffScreen.jsx';
 import { Step4_ClassScreen } from './screens/onboarding/Step4_ClassScreen.jsx';
 import { Step5_AppPreviewScreen } from './screens/onboarding/Step5_AppPreviewScreen.jsx';
 import { Step6_ConnectPaymentsScreen } from './screens/onboarding/Step6_ConnectPaymentsScreen.jsx';
-import { Step7_StripeSuccessScreen } from './screens/onboarding/StripeSuccessScreen.jsx';
+import { StripeSuccessScreen } from './screens/onboarding/StripeSuccessScreen.jsx';
 
 
 function App() {
@@ -28,7 +28,7 @@ function App() {
           <Route path="/onboarding/step-4" element={<Step4_ClassScreen />} />
           <Route path="/onboarding/step-5" element={<Step5_AppPreviewScreen />} />
           <Route path="/onboarding/step-6" element={<Step6_ConnectPaymentsScreen />} />
-          <Route path="/onboarding/stripe-success" element={<Step7_StripeSuccessScreen />} />
+          <Route path="/onboarding/stripe-success" element={<StripeSuccessScreen />} />
 
           {/* Redirect the root URL to the signup page for now */}
           <Route path="/" element={<Navigate to="/signup" replace />} />

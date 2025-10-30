@@ -21,17 +21,27 @@ export const createUserProfile = async (userId, data) => {
 };
 
 // Creates a new gym and links it to the owner
-export const createGym = async (userId, gymData) => {
+export const createGym = async (gymData) => {
   try {
-    // 1. Create a new document in the 'gyms' collection
+    // 1. Extract the ownerId from the gymData object.
+    // This is required for Step 2 (updating the user).
+    const userId = gymData.ownerId;
+
+    // Safety check to ensure the frontend is sending the required data
+    if (!userId) {
+      throw new Error("createGym failed: gymData object must include an ownerId field.");
+    }
+
+    // 2. Create a new document in the 'gyms' collection
+    // We spread the entire gymData object, which already includes the
+    // ownerId, thus satisfying the security rule.
     const gymRef = await addDoc(collection(db, "gyms"), {
-      ownerId: userId,
       ...gymData,
       createdAt: new Date(),
     });
 
-    // 2. Update the user's profile to link them to the new gym
-    const userRef = doc(db, "users", userId);
+    // 3. Update the user's profile to link them to the new gym
+    const userRef = doc(db, "users", userId); // Use the extracted userId
     await setDoc(userRef, {
       gymId: gymRef.id, // The ID of the newly created gym document
       role: 'owner'
