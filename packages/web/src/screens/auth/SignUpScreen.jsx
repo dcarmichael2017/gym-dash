@@ -1,8 +1,15 @@
 // /packages/web/src/screens/auth/SignUpScreen.jsx
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { signUpWithEmail } from '../../../../shared/api/auth.js'; // Corrected import
+// --- FIX: Import Link ---
+import { useNavigate, Link } from 'react-router-dom';
+
+// --- FIX: Correct import path and add createUserProfile ---
+// From /packages/web/src/screens/auth/ -> ../../../../ -> /packages/
+import { signUpWithEmail } from '../../../../shared/api/auth.js';
+import { createUserProfile } from '../../../../shared/api/firestore.js';
+// --- END FIX ---
+
 import { Building } from 'lucide-react'; // A nice icon for branding
 
 export const SignUpScreen = () => {
@@ -17,15 +24,44 @@ export const SignUpScreen = () => {
     setError(null);
     setIsLoading(true);
 
-    const result = await signUpWithEmail(email, password);
+    const authResult = await signUpWithEmail(email, password);
 
-    setIsLoading(false);
+    if (authResult.success) {
+      console.log('Sign up successful! User ID:', authResult.user.uid);
 
-    if (result.success) {
-      console.log('Sign up successful! User ID:', result.user.uid);
-      navigate('/onboarding/step-1');
+      // --- FIX: Create the user profile in Firestore AFTER auth ---
+      // This is the missing step. We must create the Firestore doc.
+      const profileData = { email: authResult.user.email };
+      const profileResult = await createUserProfile(authResult.user.uid, profileData);
+      
+      setIsLoading(false); // Move loading stop here
+
+      if (profileResult.success) {
+        // Now navigate. ProtectedRoute will find the new doc (with 'step1_gymDetails')
+        // and correctly redirect to /onboarding/step-1
+        navigate('/');
+      } else {
+        // This is a rare error, but we should handle it.
+        setError("Account created, but failed to save profile. Please contact support.");
+      }
+      // --- END FIX ---
+
     } else {
-      setError(result.error);
+      setIsLoading(false); // Stop loading on auth failure
+      // --- FIX: Add error handling for existing email ---
+      if (authResult.error.includes("auth/email-already-in-use")) {
+        setError(
+          <span>
+            This email is already registered.{" "}
+            <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
+              Try logging in?
+            </Link>
+          </span>
+        );
+      } else {
+        setError(authResult.error);
+      }
+      // --- END FIX ---
     }
   };
 
@@ -70,7 +106,12 @@ export const SignUpScreen = () => {
           />
         </div>
 
-        {error && <p className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md p-3 mb-4">{error}</p>}
+        {/* --- FIX: Display React node error --- */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md p-3 mb-4">
+            {error}
+          </div>
+        )}
 
         <div>
           <button
@@ -82,7 +123,16 @@ export const SignUpScreen = () => {
           </button>
         </div>
       </form>
+
+      {/* --- FIX: Add the "Log In" link --- */}
+      <p className="text-sm text-center text-gray-600 mt-6">
+        Already have an account?{' '}
+        <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
+          Log In
+        </Link>
+      </p>
+      {/* --- END FIX --- */}
+
     </div>
   );
 };
-

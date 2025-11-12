@@ -1,7 +1,16 @@
+// /packages/web/src/screens/onboarding/Step4_ClassScreen.jsx
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { createClass, getStaffList, getClasses, deleteClass } from '@shared/api/firestore.js';
-import { Trash2, PlusCircle, CalendarX } from 'lucide-react'; // Added icons
+import { getAuth } from 'firebase/auth'; // --- 1. ADDED IMPORT ---
+import {
+  createClass,
+  getStaffList,
+  getClasses,
+  deleteClass,
+  updateUserOnboardingStep // --- 1. ADDED IMPORT ---
+} from '@shared/api/firestore.js';
+import { Trash2, PlusCircle, CalendarX } from 'lucide-react';
 
 const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const frequencyOptions = ["Weekly", "Bi-Weekly", "Every Three Weeks", "Once a Month"];
@@ -21,12 +30,17 @@ export const Step4_ClassScreen = () => {
   
   // UI state
   const [error, setError] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // For adding classes
   const [isFetching, setIsFetching] = useState(true); // Separate state for initial data load
+  const [isNavigating, setIsNavigating] = useState(false); // --- 2. ADDED STATE ---
   const [gymId, setGymId] = useState(null);
 
   const navigate = useNavigate();
   const location = useLocation();
+
+  // --- 3. ADDED AUTH ---
+  const auth = getAuth();
+  const user = auth.currentUser;
 
   useEffect(() => {
     if (location.state && location.state.gymId) {
@@ -40,6 +54,7 @@ export const Step4_ClassScreen = () => {
         
         if (staffResult.success) {
           setStaffList(staffResult.staffList);
+          // Fix: Check if staffList is not empty before accessing index 0
           if (staffResult.staffList.length > 0 && !instructor) {
             setInstructor(staffResult.staffList[0].id);
           }
@@ -60,7 +75,8 @@ export const Step4_ClassScreen = () => {
       setError("Gym ID not found. Please start over.");
       setIsFetching(false);
     }
-  }, [location.state, instructor]);
+  // Removed 'instructor' from dependency array to prevent re-fetching on select change
+  }, [location.state]); 
 
   const handleDayToggle = (day) => {
     setSelectedDays(prev => 
@@ -77,6 +93,10 @@ export const Step4_ClassScreen = () => {
     if (selectedDays.length === 0) {
         setError("Please select at least one day for the class.");
         return;
+    }
+    if (!instructor) {
+      setError("Please select an instructor.");
+      return;
     }
     setError(null);
     setIsLoading(true);
@@ -115,8 +135,25 @@ export const Step4_ClassScreen = () => {
     }
   };
 
-  const handleNext = () => {
-    navigate('/onboarding/step-5', { state: { gymId: gymId } });
+  // --- 4. UPDATED handleNext ---
+  const handleNext = async () => {
+    if (!user) {
+      setError("User not found. Please refresh and log in.");
+      return;
+    }
+
+    setIsNavigating(true);
+    setError(null);
+
+    // Tell the database we are done with step 4
+    const stepResult = await updateUserOnboardingStep(user.uid, 'step5_appPreview');
+
+    if (stepResult.success) {
+      navigate('/onboarding/step-5', { state: { gymId: gymId } });
+    } else {
+      setError("Failed to save progress. Please try again.");
+    }
+    setIsNavigating(false);
   };
   
   // Reusable style for form inputs
@@ -166,7 +203,7 @@ export const Step4_ClassScreen = () => {
                 ))}
             </div>
         </div>
-        <button type="submit" disabled={isLoading} className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white font-semibold py-3 px-4 rounded-md hover:bg-blue-700 disabled:bg-blue-400 transition-colors">
+        <button type="submit" disabled={isLoading || isNavigating} className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white font-semibold py-3 px-4 rounded-md hover:bg-blue-700 disabled:bg-blue-400 transition-colors">
           <PlusCircle size={20} />
           {isLoading ? 'Adding Class...' : 'Add Class to Schedule'}
         </button>
@@ -203,8 +240,13 @@ export const Step4_ClassScreen = () => {
 
       <div className="flex justify-between items-center mt-10 border-t pt-6">
         <button type="button" onClick={() => navigate('/onboarding/step-3', { state: { gymId } })} className="text-sm font-medium text-gray-600 hover:underline">Back</button>
-        <button type="button" onClick={handleNext} disabled={!gymId || classList.length === 0} className="bg-green-600 text-white font-semibold py-2 px-6 rounded-md hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed">
-          Next
+        <button
+          type="button"
+          onClick={handleNext}
+          disabled={!gymId || classList.length === 0 || isNavigating || isLoading}
+          className="bg-green-600 text-white font-semibold py-2 px-6 rounded-md hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+        >
+          {isNavigating ? 'Saving...' : 'Next'}
         </button>
       </div>
     </div>

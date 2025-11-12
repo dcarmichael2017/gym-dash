@@ -11,6 +11,7 @@ export const createUserProfile = async (userId, data) => {
     await setDoc(userRef, {
       uid: userId,
       ...data,
+      onboardingStep: 'step1_gymDetails',
       createdAt: new Date(),
     });
     return { success: true };
@@ -50,6 +51,30 @@ export const createGym = async (gymData) => {
     return { success: true, gymId: gymRef.id };
   } catch (error) {
     console.error("Error creating gym:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const updateGymDetails = async (gymId, gymData) => {
+  try {
+    const gymRef = doc(db, "gyms", gymId);
+    await updateDoc(gymRef, gymData);
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating gym details:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const updateUserOnboardingStep = async (userId, newStep) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    await updateDoc(userRef, {
+      onboardingStep: newStep
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating user onboarding step:", error);
     return { success: false, error: error.message };
   }
 };
