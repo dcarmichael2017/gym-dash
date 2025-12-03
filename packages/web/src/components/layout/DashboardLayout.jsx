@@ -191,7 +191,52 @@ const DashboardLayout = () => {
           </div>
         </header>
 
-        {/* Mobile Menu Omitted for Brevity (Same logic applies) */}
+        {/* Mobile Menu (Overlay) */}
+        {isMobileMenuOpen && (
+          <div className="md:hidden absolute top-16 left-0 w-full bg-white border-b border-gray-200 z-50 shadow-xl">
+            <nav className="p-4 space-y-2">
+              {navItems.map((item) => {
+                const isActive = location.pathname === item.path || (item.path !== '/dashboard' && location.pathname.startsWith(item.path));
+                
+                // Dynamic styles for the mobile menu items
+                const activeStyle = {
+                    backgroundColor: `${theme.primaryColor}15`, // 10% opacity
+                    color: theme.primaryColor
+                };
+
+                return (
+                  <Link
+                    key={item.name}
+                    to={item.path}
+                    onClick={() => setIsMobileMenuOpen(false)} // Close menu on click
+                    style={isActive ? activeStyle : {}}
+                    className={`flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors ${
+                      isActive 
+                        ? '' 
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }`}
+                  >
+                    <item.icon className="h-5 w-5 mr-3" />
+                    {item.name}
+                  </Link>
+                );
+              })}
+              
+              <div className="border-t border-gray-100 my-2 pt-2">
+                <button 
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    handleLogout();
+                  }}
+                  className="flex items-center w-full px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                >
+                  <LogOut className="h-5 w-5 mr-3" />
+                  Sign Out
+                </button>
+              </div>
+            </nav>
+          </div>
+        )}
 
         <main className="flex-1 overflow-y-auto bg-gray-50 p-6">
           <Outlet context={{ theme, gymName }} />

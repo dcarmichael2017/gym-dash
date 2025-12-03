@@ -45,7 +45,6 @@ export const SignUpScreen = () => {
 
     } else {
       setIsLoading(false); // Stop loading on auth failure
-      // --- FIX: Add error handling for existing email ---
       if (authResult.error.includes("auth/email-already-in-use")) {
         setError(
           <span>
@@ -58,7 +57,6 @@ export const SignUpScreen = () => {
       } else {
         setError(authResult.error);
       }
-      // --- END FIX ---
     }
   };
 
