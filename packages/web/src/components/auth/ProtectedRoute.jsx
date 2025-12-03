@@ -60,11 +60,12 @@ export const ProtectedRoute = () => {
             // Get the step number the user is *currently* on
             let currentStepNum = 0;
             if (currentPath.includes('/onboarding/step-')) {
-              // e.g., '/onboarding/step-1' -> 1
+              // User is on a specific step, get the number
               currentStepNum = parseInt(currentPath.split('-')[1], 10);
-            } else if (currentPath === '/') {
-              // User is on dashboard, force them to onboarding
-              currentStepNum = 999; // Set high to trigger redirect
+            } else {
+              // User is on /dashboard, /, /settings, etc.
+              // We treat ANY non-onboarding page as "Step 999" (skipping ahead)
+              currentStepNum = 999; 
             }
 
             // Only redirect if the user is trying to skip *AHEAD*

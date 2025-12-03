@@ -37,14 +37,11 @@ export const SignUpScreen = () => {
       setIsLoading(false); // Move loading stop here
 
       if (profileResult.success) {
-        // Now navigate. ProtectedRoute will find the new doc (with 'step1_gymDetails')
-        // and correctly redirect to /onboarding/step-1
-        navigate('/');
+        navigate('/onboarding/step-1'); 
+        // ---------------------------------------
       } else {
-        // This is a rare error, but we should handle it.
         setError("Account created, but failed to save profile. Please contact support.");
       }
-      // --- END FIX ---
 
     } else {
       setIsLoading(false); // Stop loading on auth failure

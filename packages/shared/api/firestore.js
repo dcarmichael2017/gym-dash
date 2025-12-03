@@ -123,6 +123,18 @@ export const addStaffMember = async (gymId, staffData) => {
   }
 };
 
+// Deletes a staff member
+export const deleteStaffMember = async (gymId, staffId) => {
+  try {
+    const staffDocRef = doc(db, "gyms", gymId, "staff", staffId);
+    await deleteDoc(staffDocRef);
+    return { success: true };
+  } catch (error) {
+    console.error("Error deleting staff member:", error);
+    return { success: false, error: error.message };
+  }
+};
+
 // Fetches all staff members for a given gym
 export const getStaffList = async (gymId) => {
   try {
