@@ -22,3 +22,19 @@ export const uploadLogo = async (gymId, file) => {
     return { success: false, error: error.message };
   }
 };
+
+export const uploadStaffPhoto = async (gymId, file) => {
+  try {
+    // Generate a unique filename using timestamp to avoid caching issues
+    const filename = `staff_${Date.now()}_${file.name}`;
+    const storageRef = ref(storage, `gyms/${gymId}/staff/${filename}`);
+    
+    const snapshot = await uploadBytes(storageRef, file);
+    const downloadURL = await getDownloadURL(snapshot.ref);
+    
+    return { success: true, url: downloadURL };
+  } catch (error) {
+    console.error("Error uploading staff photo:", error);
+    return { success: false, error: error.message };
+  }
+};

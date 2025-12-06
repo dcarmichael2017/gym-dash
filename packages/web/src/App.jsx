@@ -22,8 +22,9 @@ import { Step6_ConnectPaymentsScreen } from './screens/onboarding/Step6_ConnectP
 import { StripeSuccessScreen } from './screens/onboarding/StripeSuccessScreen.jsx';
 
 // Screens - Dashboard
-import DashboardHomeScreen from './screens/dashboard/DashboardHomeScreen.jsx'; // Assuming export default
+import DashboardHomeScreen from './screens/dashboard/DashboardHomeScreen.jsx';
 import DashboardScheduleScreen from './screens/dashboard/DashboardScheduleScreen.jsx';
+import DashboardStaffScreen from './screens/dashboard/DashboardStaffScreen.jsx';
 import DashboardSettingsScreen from './screens/dashboard/DashboardSettingsScreen.jsx';
 
 function App() {
@@ -57,6 +58,7 @@ function App() {
             <Route index element={<DashboardHomeScreen />} />
             <Route path="schedule" element={<DashboardScheduleScreen />} />
             <Route path="members" element={<div className="p-4">Members Placeholder</div>} />
+            <Route path="staff" element={<DashboardStaffScreen />} />
             <Route path="settings" element={<DashboardSettingsScreen />} />
           </Route>
 

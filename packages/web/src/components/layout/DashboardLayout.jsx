@@ -3,7 +3,7 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { 
-  LayoutDashboard, Calendar, Users, Settings, LogOut, Menu, Dumbbell 
+  LayoutDashboard, Calendar, Users, Settings, LogOut, Menu, Dumbbell, Briefcase 
 } from 'lucide-react';
 import { auth, db } from '../../../../shared/api/firebaseConfig';
 
@@ -28,6 +28,7 @@ const DashboardLayout = () => {
     { name: 'Home', path: '/dashboard', icon: LayoutDashboard },
     { name: 'Schedule', path: '/dashboard/schedule', icon: Calendar },
     { name: 'Members', path: '/dashboard/members', icon: Users },
+    { name: 'Staff', path: '/dashboard/staff', icon: Briefcase },
     { name: 'Settings', path: '/dashboard/settings', icon: Settings },
   ];
 

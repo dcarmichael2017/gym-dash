@@ -108,17 +108,42 @@ export const getGymDetails = async (gymId) => {
 };
 
 // Adds a new staff member to a gym's staff sub-collection
+// export const addStaffMember = async (gymId, staffData) => {
+//   try {
+//     const staffCollectionRef = collection(db, "gyms", gymId, "staff");
+//     const staffDocRef = await addDoc(staffCollectionRef, {
+//       ...staffData,
+//       createdAt: new Date(),
+//     });
+//     // Return the full staff object including the new ID
+//     return { success: true, staffMember: { id: staffDocRef.id, ...staffData } };
+//   } catch (error) {
+//     console.error("Error adding staff member:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
 export const addStaffMember = async (gymId, staffData) => {
   try {
     const staffCollectionRef = collection(db, "gyms", gymId, "staff");
-    const staffDocRef = await addDoc(staffCollectionRef, {
-      ...staffData,
-      createdAt: new Date(),
-    });
-    // Return the full staff object including the new ID
-    return { success: true, staffMember: { id: staffDocRef.id, ...staffData } };
+    // Ensure we save a created date
+    const payload = { ...staffData, createdAt: new Date() };
+    const staffDocRef = await addDoc(staffCollectionRef, payload);
+    return { success: true, staffMember: { id: staffDocRef.id, ...payload } };
   } catch (error) {
     console.error("Error adding staff member:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const updateStaffMember = async (gymId, staffId, staffData) => {
+  try {
+    const staffDocRef = doc(db, "gyms", gymId, "staff", staffId);
+    // Use merge to update only fields provided
+    await updateDoc(staffDocRef, staffData);
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating staff member:", error);
     return { success: false, error: error.message };
   }
 };
