@@ -1,6 +1,6 @@
 // /packages/shared/api/firestore.js
 
-import { doc, setDoc, addDoc, collection, updateDoc, getDocs, getDoc, deleteDoc } from "firebase/firestore";
+import { doc, setDoc, addDoc, collection, updateDoc, getDocs, getDoc, deleteDoc, query, where, writeBatch } from "firebase/firestore";
 // Import the already-initialized db service from our new central file
 import { db } from "./firebaseConfig.js";
 
@@ -151,11 +151,42 @@ export const updateStaffMember = async (gymId, staffId, staffData) => {
 // Deletes a staff member
 export const deleteStaffMember = async (gymId, staffId) => {
   try {
-    const staffDocRef = doc(db, "gyms", gymId, "staff", staffId);
-    await deleteDoc(staffDocRef);
+    const batch = writeBatch(db);
+
+    // 1. Find all classes taught by this instructor
+    const classesRef = collection(db, "gyms", gymId, "classes");
+    const q = query(classesRef, where("instructorId", "==", staffId));
+    const snapshot = await getDocs(q);
+
+    // 2. Remove the instructor from those classes (Set to null/empty)
+    snapshot.forEach((doc) => {
+      batch.update(doc.ref, { instructorId: null });
+    });
+
+    // 3. Delete the staff member document
+    const staffRef = doc(db, "gyms", gymId, "staff", staffId);
+    batch.delete(staffRef);
+
+    // 4. Commit all changes atomically
+    await batch.commit();
+
     return { success: true };
   } catch (error) {
     console.error("Error deleting staff member:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const checkStaffDependencies = async (gymId, staffId) => {
+  try {
+    const classesRef = collection(db, "gyms", gymId, "classes");
+    const q = query(classesRef, where("instructorId", "==", staffId));
+    const snapshot = await getDocs(q);
+    
+    // Return the number of classes this person teaches
+    return { success: true, count: snapshot.size, classes: snapshot.docs.map(d => d.id) };
+  } catch (error) {
+    console.error("Error checking staff dependencies:", error);
     return { success: false, error: error.message };
   }
 };
@@ -213,3 +244,13 @@ export const deleteClass = async (gymId, classId) => {
   }
 };
 
+export const updateClass = async (gymId, classId, classData) => {
+  try {
+    const classRef = doc(db, "gyms", gymId, "classes", classId);
+    await updateDoc(classRef, classData);
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating class:", error);
+    return { success: false, error: error.message };
+  }
+};

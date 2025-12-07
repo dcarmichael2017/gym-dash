@@ -1,27 +1,25 @@
-// /packages/web/src/screens/onboarding/Step5_AppPreviewScreen.jsx
+// packages/web/src/screens/onboarding/Step5_AppPreviewScreen.jsx
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { getAuth } from 'firebase/auth'; // --- 1. ADDED IMPORT ---
+import { getAuth } from 'firebase/auth';
 import {
   getGymDetails,
   getClasses,
-  updateUserOnboardingStep // --- 1. ADDED IMPORT ---
-} from '../../../../shared/api/firestore.js'; // --- CORRECTED PATH ---
-import { MobileSchedulePreview } from '../../../../shared/components/MobileSchedulePreview.jsx'; // --- CORRECTED PATH ---
+  updateUserOnboardingStep
+} from '../../../../shared/api/firestore.js';
+import { MobileSchedulePreview } from '../../../../shared/components/MobileSchedulePreview.jsx';
 
 export const Step5_AppPreviewScreen = () => {
   const [gymDetails, setGymDetails] = useState(null);
   const [classList, setClassList] = useState([]);
-  const [isLoading, setIsLoading] = useState(true); // For data fetching
-  const [isNavigating, setIsNavigating] = useState(false); // --- 2. ADDED STATE ---
+  const [isLoading, setIsLoading] = useState(true);
+  const [isNavigating, setIsNavigating] = useState(false);
   const [error, setError] = useState(null);
   const [gymId, setGymId] = useState(null);
 
   const navigate = useNavigate();
   const location = useLocation();
-
-  // --- 3. ADDED AUTH ---
   const auth = getAuth();
   const user = auth.currentUser;
 
@@ -33,8 +31,11 @@ export const Step5_AppPreviewScreen = () => {
       const fetchData = async () => {
         setIsLoading(true);
         try {
-          const gymResult = await getGymDetails(currentGymId);
-          const classesResult = await getClasses(currentGymId);
+          // Parallel fetch for speed
+          const [gymResult, classesResult] = await Promise.all([
+             getGymDetails(currentGymId),
+             getClasses(currentGymId)
+          ]);
 
           if (gymResult.success) {
             setGymDetails(gymResult.gym);
@@ -49,7 +50,6 @@ export const Step5_AppPreviewScreen = () => {
           }
         } catch (err) {
           setError(err.message);
-          S
         } finally {
           setIsLoading(false);
         }
@@ -62,7 +62,6 @@ export const Step5_AppPreviewScreen = () => {
     }
   }, [location.state]);
 
-  // --- 4. UPDATED handleNext ---
   const handleNext = async () => {
     if (!user) {
       setError("User not found. Please refresh and log in.");
@@ -72,11 +71,9 @@ export const Step5_AppPreviewScreen = () => {
     setIsNavigating(true);
     setError(null);
 
-    // Tell the database we are done with step 5
     const stepResult = await updateUserOnboardingStep(user.uid, 'step6_payments');
 
     if (stepResult.success) {
-      // Navigate to Step 6 and pass the gymId in the state
       navigate('/onboarding/step-6', { state: { gymId } });
     } else {
       setError("Failed to save progress. Please try again.");
@@ -105,20 +102,20 @@ export const Step5_AppPreviewScreen = () => {
       <h2 className="text-2xl font-bold text-gray-800 mb-2">Your App Preview</h2>
       <p className="text-gray-600 mb-6">Here’s how your gym's branding and schedule will look to your members.</p>
 
+      {/* --- FIXED: Removed stray 's' and centered container --- */}
       <div className="mb-8 flex justify-center">
-        s     <MobileSchedulePreview
-          gymName={gymDetails?.name}
-          logoUrl={gymDetails?.logoUrl}
-          primaryColor={gymDetails?.theme?.primaryColor}
-          secondaryColor={gymDetails?.theme?.secondaryColor}
-          classList={classList}
-        />
+         <MobileSchedulePreview
+           gymName={gymDetails?.name}
+           logoUrl={gymDetails?.logoUrl}
+           primaryColor={gymDetails?.theme?.primaryColor}
+           secondaryColor={gymDetails?.theme?.secondaryColor}
+           classList={classList}
+         />
       </div>
 
       <div className="flex justify-between items-center mt-8">
         <button type="button" onClick={() => navigate('/onboarding/step-4', { state: { gymId } })} className="text-sm font-medium text-gray-600 hover:underline">Back</button>
 
-        {/* --- 5. UPDATED NEXT BUTTON --- */}
         <button
           type="button"
           onClick={handleNext}

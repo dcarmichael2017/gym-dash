@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { CreditCard } from 'lucide-react';
+import { getAuth } from 'firebase/auth'; // --- NEW IMPORT ---
+import { CreditCard, SkipForward } from 'lucide-react';
+import { updateUserOnboardingStep } from '../../../../shared/api/firestore'; // --- NEW IMPORT ---
 
 export const Step6_ConnectPaymentsScreen = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -39,6 +41,29 @@ export const Step6_ConnectPaymentsScreen = () => {
     }
   };
 
+  // --- NEW: Handle Skip Logic ---
+  const handleDevSkip = async () => {
+    const auth = getAuth();
+    const user = auth.currentUser;
+    
+    if (!user) return;
+
+    setIsLoading(true);
+    // Mark as complete immediately
+    const result = await updateUserOnboardingStep(user.uid, 'complete');
+    
+    if (result.success) {
+        // Redirect to Dashboard
+        navigate('/dashboard'); 
+    } else {
+        setError("Failed to skip step.");
+        setIsLoading(false);
+    }
+  };
+
+  // Check if we are in development mode (Vite feature)
+  const isDevMode = import.meta.env.DEV; 
+
   return (
     <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md text-center border">
       <h2 className="text-3xl font-bold text-gray-800 mb-3">Last Step! Let's Get You Paid</h2>
@@ -68,10 +93,25 @@ export const Step6_ConnectPaymentsScreen = () => {
         {isLoading ? 'Connecting...' : 'Connect with Stripe'}
       </button>
 
+      {/* --- NEW: Dev Skip Button --- */}
+      {/* This only renders if running locally */}
+      {isDevMode && (
+        <div className="mt-4 pt-4 border-t border-dashed border-gray-200">
+            <p className="text-xs text-amber-600 font-bold uppercase mb-2">Development Mode Only</p>
+            <button
+                onClick={handleDevSkip}
+                disabled={isLoading}
+                className="w-full flex items-center justify-center gap-2 bg-amber-100 text-amber-800 font-medium py-2 px-6 rounded-lg hover:bg-amber-200 transition-colors"
+            >
+                <SkipForward size={16} />
+                Skip Payment Setup
+            </button>
+        </div>
+      )}
+
        <div className="mt-6">
         <button type="button" onClick={() => navigate('/onboarding/step-5', { state: { gymId } })} className="text-sm font-medium text-gray-600 hover:underline">Back</button>
       </div>
     </div>
   );
 };
-

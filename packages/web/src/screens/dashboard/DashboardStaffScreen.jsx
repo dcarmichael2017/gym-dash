@@ -14,11 +14,13 @@ import {
 } from 'lucide-react';
 
 import { auth, db } from '../../../../shared/api/firebaseConfig';
+import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { 
   getStaffList, 
   addStaffMember, 
   deleteStaffMember, 
-  updateStaffMember // Import the new function
+  updateStaffMember,
+  checkStaffDependencies
 } from '../../../../shared/api/firestore';
 import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
 import { uploadStaffPhoto } from '../../../../shared/api/storage';
@@ -85,6 +87,14 @@ const DashboardStaffScreen = () => {
     setIsModalOpen(true);
   };
 
+  const [deleteModal, setDeleteModal] = useState({
+    isOpen: false,
+    staffId: null,
+    title: '',
+    message: '',
+    isLoading: false
+  });
+
   const handleFileChange = (e) => {
     if (e.target.files[0]) {
       setPhotoFile(e.target.files[0]);
@@ -133,11 +143,45 @@ const DashboardStaffScreen = () => {
     setIsSaving(false);
   };
 
-  // ... (handleDelete remains the same) ...
-  const handleDelete = async (staffId) => {
-    if(!window.confirm("Remove this staff member?")) return;
-    setStaffList(prev => prev.filter(s => s.id !== staffId));
-    await deleteStaffMember(gymId, staffId);
+  const handleDeleteClick = async (staffId) => {
+    // 1. Check Dependencies (Classes taught by this instructor)
+    // We do this BEFORE showing the modal so we know which message to show
+    const depResult = await checkStaffDependencies(gymId, staffId);
+    
+    let title = "Remove Staff Member";
+    let message = "Are you sure you want to remove this staff member? This action cannot be undone.";
+    
+    if (depResult.success && depResult.count > 0) {
+        title = "Warning: Instructor Assigned";
+        message = `This instructor is currently assigned to ${depResult.count} classes.\n\nDeleting them will remove them from these classes, leaving the classes unassigned.\n\nAre you sure you want to proceed?`;
+    }
+
+    setDeleteModal({
+        isOpen: true,
+        staffId: staffId,
+        title: title,
+        message: message,
+        isLoading: false
+    });
+  };
+
+  const executeDelete = async () => {
+    const { staffId } = deleteModal;
+    if (!staffId) return;
+
+    setDeleteModal(prev => ({ ...prev, isLoading: true }));
+
+    // Perform API Delete
+    const result = await deleteStaffMember(gymId, staffId);
+
+    if (result.success) {
+        // UI Update
+        setStaffList(prev => prev.filter(s => s.id !== staffId));
+        setDeleteModal({ isOpen: false, staffId: null, title: '', message: '', isLoading: false });
+    } else {
+        alert("Failed to delete staff member."); // Fallback for API error
+        setDeleteModal(prev => ({ ...prev, isLoading: false }));
+    }
   };
 
   if (loading) return <FullScreenLoader />;
@@ -196,7 +240,10 @@ const DashboardStaffScreen = () => {
                     <button onClick={() => openEditModal(staff)} className="text-gray-600 hover:text-blue-600 text-sm font-medium flex items-center">
                         <Edit2 className="h-4 w-4 mr-1" /> Edit
                     </button>
-                    <button onClick={() => handleDelete(staff.id)} className="text-gray-400 hover:text-red-600 text-sm font-medium flex items-center">
+                    <button 
+                        onClick={() => handleDeleteClick(staff.id)} // Call new handler
+                        className="text-gray-400 hover:text-red-600 text-sm font-medium flex items-center transition-colors"
+                    >
                         <Trash2 className="h-4 w-4 mr-1" /> Remove
                     </button>
                 </div>
@@ -210,6 +257,17 @@ const DashboardStaffScreen = () => {
             </div>
         )}
       </div>
+
+      <ConfirmationModal 
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ ...deleteModal, isOpen: false })}
+        onConfirm={executeDelete}
+        title={deleteModal.title}
+        message={deleteModal.message}
+        isLoading={deleteModal.isLoading}
+        confirmText="Remove Member"
+        isDestructive={true}
+      />
 
       {/* --- EDIT/ADD MODAL --- */}
       {isModalOpen && (
