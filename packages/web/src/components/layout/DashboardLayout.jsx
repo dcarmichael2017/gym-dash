@@ -3,7 +3,7 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { 
-  LayoutDashboard, Calendar, Users, Settings, LogOut, Menu, Dumbbell, Briefcase 
+  LayoutDashboard, Calendar, Users, Settings, LogOut, Menu, Dumbbell, Briefcase, CreditCard // Added CreditCard
 } from 'lucide-react';
 import { auth, db } from '../../../../shared/api/firebaseConfig';
 
@@ -15,7 +15,7 @@ const DashboardLayout = () => {
   const [theme, setTheme] = useState({ 
     primaryColor: '#2563eb', 
     secondaryColor: '#4f46e5',
-    layout: 'classic' // 'classic' | 'sidebar' | 'header'
+    layout: 'classic' 
   });
   
   const [loading, setLoading] = useState(true);
@@ -27,13 +27,13 @@ const DashboardLayout = () => {
   const navItems = [
     { name: 'Home', path: '/dashboard', icon: LayoutDashboard },
     { name: 'Schedule', path: '/dashboard/schedule', icon: Calendar },
-    { name: 'Memberships', path: '/dashboard/memberships', icon: Users },
+    { name: 'Memberships', path: '/dashboard/memberships', icon: CreditCard }, // Changed Icon
+    { name: 'Members', path: '/dashboard/members', icon: Users },
     { name: 'Staff', path: '/dashboard/staff', icon: Briefcase },
     { name: 'Settings', path: '/dashboard/settings', icon: Settings },
   ];
 
   // --- PREFAB LOGIC ---
-  // This helper calculates colors based on the current layout mode
   const getStyles = () => {
     const isSidebarColored = theme.layout === 'sidebar';
     const isHeaderColored = theme.layout === 'header';
@@ -52,12 +52,10 @@ const DashboardLayout = () => {
       },
       navItem: (isActive) => {
         if (isSidebarColored) {
-          // White text on colored sidebar
           return isActive 
             ? { bg: 'rgba(255,255,255, 0.2)', text: '#ffffff' } 
             : { bg: 'transparent', text: 'rgba(255,255,255, 0.7)' };
         } else {
-          // Standard colored text on white sidebar
           return isActive 
             ? { bg: `${theme.primaryColor}15`, text: theme.primaryColor } 
             : { bg: 'transparent', text: '#4b5563' };
@@ -88,7 +86,7 @@ const DashboardLayout = () => {
                  setTheme({
                     primaryColor: data.theme.primaryColor || '#2563eb',
                     secondaryColor: data.theme.secondaryColor || '#4f46e5',
-                    layout: data.theme.layout || 'classic' // Load layout preference
+                    layout: data.theme.layout || 'classic'
                  });
               }
             }
@@ -102,6 +100,12 @@ const DashboardLayout = () => {
   const handleLogout = async () => {
     await signOut(auth);
     navigate('/login');
+  };
+
+  // Helper to determine active state strictly
+  const checkActive = (itemPath) => {
+    return location.pathname === itemPath || 
+           (itemPath !== '/dashboard' && location.pathname.startsWith(`${itemPath}/`));
   };
 
   return (
@@ -125,7 +129,7 @@ const DashboardLayout = () => {
         
         <nav className="flex-1 px-4 py-6 space-y-1">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.path || (item.path !== '/dashboard' && location.pathname.startsWith(item.path));
+            const isActive = checkActive(item.path); // Use the new helper
             const itemStyle = styles.navItem(isActive);
 
             return (
@@ -177,6 +181,8 @@ const DashboardLayout = () => {
                 location.pathname.includes('schedule') ? 'Schedule' : 
                 location.pathname.includes('settings') ? 'Settings' : 
                 location.pathname.includes('memberships') ? 'Memberships' : 
+                location.pathname.includes('members') ? 'Members' : 
+                location.pathname.includes('staff') ? 'Staff' :
                 gymName
               }
             </h1>
@@ -197,11 +203,10 @@ const DashboardLayout = () => {
           <div className="md:hidden absolute top-16 left-0 w-full bg-white border-b border-gray-200 z-50 shadow-xl">
             <nav className="p-4 space-y-2">
               {navItems.map((item) => {
-                const isActive = location.pathname === item.path || (item.path !== '/dashboard' && location.pathname.startsWith(item.path));
+                const isActive = checkActive(item.path); // Use the new helper here too
                 
-                // Dynamic styles for the mobile menu items
                 const activeStyle = {
-                    backgroundColor: `${theme.primaryColor}15`, // 10% opacity
+                    backgroundColor: `${theme.primaryColor}15`, 
                     color: theme.primaryColor
                 };
 
@@ -209,7 +214,7 @@ const DashboardLayout = () => {
                   <Link
                     key={item.name}
                     to={item.path}
-                    onClick={() => setIsMobileMenuOpen(false)} // Close menu on click
+                    onClick={() => setIsMobileMenuOpen(false)} 
                     style={isActive ? activeStyle : {}}
                     className={`flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors ${
                       isActive 

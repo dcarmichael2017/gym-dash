@@ -7,36 +7,47 @@ import {
   Edit2, 
   CheckCircle2,
   Clock,
-  Users, // Icon for Total Users
-  UserCheck, // Icon for Active
-  Hourglass // Icon for Trialing
+  Users, 
+  UserCheck, 
+  Hourglass,
+  Coins
 } from 'lucide-react';
 
 import { auth, db } from '../../../../shared/api/firebaseConfig';
 import { 
   getMembershipTiers, 
   deleteMembershipTier,
-  getGymMembers // Import the new function
+  getGymMembers
 } from '../../../../shared/api/firestore';
 
 import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { MembershipFormModal } from '../../components/MembershipFormModal';
+import { TierMembersModal } from '../../components/TierMembersModal'; // IMPORT NEW MODAL
 
 const DashboardMembershipsScreen = () => {
   const [loading, setLoading] = useState(true);
   const [gymId, setGymId] = useState(null);
   const [tiers, setTiers] = useState([]);
-  const [memberStats, setMemberStats] = useState({}); // Store counts here
+  
+  // Stats & Data
+  const [memberStats, setMemberStats] = useState({});
+  const [allMembers, setAllMembers] = useState([]); // Store raw list for the modal
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTier, setSelectedTier] = useState(null);
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, tierId: null });
+  
+  // View Members Modal State
+  const [viewMembersModal, setViewMembersModal] = useState({ 
+      isOpen: false, 
+      tierName: '', 
+      members: [] 
+  });
 
   // --- Data Fetching ---
   const refreshData = async (gId) => {
-    // 1. Fetch Tiers and Members in parallel
     const [tiersRes, membersRes] = await Promise.all([
         getMembershipTiers(gId),
         getGymMembers(gId)
@@ -44,18 +55,17 @@ const DashboardMembershipsScreen = () => {
 
     if (tiersRes.success) setTiers(tiersRes.tiers);
 
-    // 2. Calculate Stats
     if (membersRes.success) {
+        setAllMembers(membersRes.members); // Save the raw list
+
         const stats = {};
-        
-        // Initialize stats for each tier (so 0 counts show up)
+        // Init stats
         if (tiersRes.success) {
             tiersRes.tiers.forEach(t => {
                 stats[t.id] = { active: 0, trialing: 0 };
             });
         }
-
-        // Tally up the members
+        // Calculate counts
         membersRes.members.forEach(member => {
             if (member.membershipId && stats[member.membershipId]) {
                 if (member.subscriptionStatus === 'trialing') {
@@ -65,7 +75,6 @@ const DashboardMembershipsScreen = () => {
                 }
             }
         });
-
         setMemberStats(stats);
     }
   };
@@ -90,7 +99,6 @@ const DashboardMembershipsScreen = () => {
   }, []);
 
   // --- Handlers ---
-
   const openAddModal = () => {
     setSelectedTier(null);
     setIsModalOpen(true);
@@ -99,6 +107,16 @@ const DashboardMembershipsScreen = () => {
   const openEditModal = (tier) => {
     setSelectedTier(tier);
     setIsModalOpen(true);
+  };
+
+  const openViewMembers = (tier) => {
+      // Filter the full list based on the clicked tier
+      const tierMembers = allMembers.filter(m => m.membershipId === tier.id);
+      setViewMembersModal({
+          isOpen: true,
+          tierName: tier.name,
+          members: tierMembers
+      });
   };
 
   const handleDelete = async () => {
@@ -124,10 +142,8 @@ const DashboardMembershipsScreen = () => {
         </button>
       </div>
 
-      {/* --- TIERS GRID --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {tiers.map(tier => {
-          // Get stats for this tier, default to 0
           const stats = memberStats[tier.id] || { active: 0, trialing: 0 };
           
           return (
@@ -144,6 +160,14 @@ const DashboardMembershipsScreen = () => {
                      /{tier.interval === 'one_time' ? 'once' : tier.interval}
                    </span>
                  </div>
+
+                 {/* Display Initiation Fee if exists */}
+                 {tier.initiationFee > 0 && (
+                     <div className="flex items-center mt-2 text-xs font-medium text-gray-500">
+                        <Coins className="h-3 w-3 mr-1 text-gray-400" />
+                        + ${tier.initiationFee} Signup Fee
+                     </div>
+                 )}
                  
                  {/* Trial Badge */}
                  {tier.hasTrial && (
@@ -156,7 +180,6 @@ const DashboardMembershipsScreen = () => {
 
               {/* Card Body */}
               <div className="p-6 flex-1 flex flex-col">
-                {/* --- STATS ROW --- */}
                 <div className="grid grid-cols-2 gap-3 mb-6">
                     <div className="bg-green-50 border border-green-100 p-2 rounded-lg flex flex-col items-center justify-center">
                         <span className="text-2xl font-bold text-green-700">{stats.active}</span>
@@ -184,9 +207,8 @@ const DashboardMembershipsScreen = () => {
                     <Edit2 className="h-4 w-4 mr-2" /> Edit
                   </button>
                   
-                  {/* View Members Button (Future Feature) */}
                   <button 
-                    onClick={() => alert("Feature coming: View list of members in this plan")} 
+                    onClick={() => openViewMembers(tier)} 
                     className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent"
                     title="View Member List"
                   >
@@ -222,6 +244,13 @@ const DashboardMembershipsScreen = () => {
         gymId={gymId}
         tierData={selectedTier}
         onSave={() => refreshData(gymId)}
+      />
+
+      <TierMembersModal 
+        isOpen={viewMembersModal.isOpen}
+        onClose={() => setViewMembersModal({...viewMembersModal, isOpen: false})}
+        tierName={viewMembersModal.tierName}
+        members={viewMembersModal.members}
       />
 
       <ConfirmationModal 

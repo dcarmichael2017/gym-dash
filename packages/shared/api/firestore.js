@@ -330,3 +330,48 @@ export const deleteMembershipTier = async (gymId, tierId) => {
     return { success: false, error: error.message };
   }
 };
+
+// Admin manually adds a member (Placeholder profile before they sign up)
+export const addManualMember = async (gymId, memberData) => {
+  try {
+    // We use 'addDoc' so Firestore generates a unique ID. 
+    // Later, when they sign up with Auth, we can link/merge this doc.
+    const userRef = await addDoc(collection(db, "users"), {
+      ...memberData,
+      gymId: gymId,
+      role: 'member',
+      source: 'admin_manual', // To distinguish from app signups
+      createdAt: new Date(),
+      status: 'active', // Default status
+      waiverSigned: false,
+      payerId: null // Default to paying for themselves
+    });
+    return { success: true, member: { id: userRef.id, ...memberData } };
+  } catch (error) {
+    console.error("Error adding manual member:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Update a specific member's profile
+export const updateMemberProfile = async (memberId, data) => {
+  try {
+    const memberRef = doc(db, "users", memberId);
+    await updateDoc(memberRef, data);
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating member:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Delete (or archive) a member
+export const deleteMember = async (memberId) => {
+  try {
+    await deleteDoc(doc(db, "users", memberId));
+    return { success: true };
+  } catch (error) {
+    console.error("Error deleting member:", error);
+    return { success: false, error: error.message };
+  }
+};

@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  X, CreditCard, Calendar, Clock, CheckCircle2, AlertCircle
+  X, Calendar, Clock, CheckCircle2, AlertCircle, Coins 
 } from 'lucide-react';
+// FIX: Removed one "../" because this file is in src/components/
 import { createMembershipTier, updateMembershipTier } from '../../../shared/api/firestore';
 
 export const MembershipFormModal = ({ isOpen, onClose, gymId, tierData, onSave }) => {
   const [formData, setFormData] = useState({
     name: '',
     price: '',
-    interval: 'month', // 'month', 'year', 'one_time'
+    interval: 'month',
+    initiationFee: '',
     description: '',
     hasTrial: false,
     trialDays: 7
@@ -24,6 +26,7 @@ export const MembershipFormModal = ({ isOpen, onClose, gymId, tierData, onSave }
           name: tierData.name || '',
           price: tierData.price || '',
           interval: tierData.interval || 'month',
+          initiationFee: tierData.initiationFee || '',
           description: tierData.description || '',
           hasTrial: tierData.hasTrial || false,
           trialDays: tierData.trialDays || 7
@@ -34,6 +37,7 @@ export const MembershipFormModal = ({ isOpen, onClose, gymId, tierData, onSave }
           name: '',
           price: '',
           interval: 'month',
+          initiationFee: '', 
           description: '',
           hasTrial: false,
           trialDays: 7
@@ -51,7 +55,7 @@ export const MembershipFormModal = ({ isOpen, onClose, gymId, tierData, onSave }
     const cleanData = {
       ...formData,
       price: parseFloat(formData.price),
-      // Ensure trial days is a number, fallback to 7 if empty
+      initiationFee: parseFloat(formData.initiationFee) || 0,
       trialDays: formData.hasTrial ? (parseInt(formData.trialDays) || 7) : null
     };
 
@@ -72,12 +76,10 @@ export const MembershipFormModal = ({ isOpen, onClose, gymId, tierData, onSave }
     }
   };
 
-  // Helper to toggle trial
   const toggleTrial = () => {
     setFormData(prev => ({
       ...prev,
       hasTrial: !prev.hasTrial,
-      // If turning on, ensure interval is not 'one_time' (logic choice)
       interval: (!prev.hasTrial && prev.interval === 'one_time') ? 'month' : prev.interval
     }));
   };
@@ -148,7 +150,31 @@ export const MembershipFormModal = ({ isOpen, onClose, gymId, tierData, onSave }
               </div>
             </div>
 
-            {/* Trial Logic Section */}
+            {/* Initiation Fee */}
+            <div>
+               <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Signup / Initiation Fee (Optional)</label>
+               <div className="relative">
+                  <Coins className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                  <input 
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={formData.initiationFee}
+                    onChange={e => setFormData({...formData, initiationFee: e.target.value})}
+                    className="w-full pl-9 p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+               </div>
+               
+               {/* DYNAMIC HELP TEXT */}
+               <p className={`text-[10px] mt-1 transition-colors ${formData.hasTrial ? 'text-blue-600 font-medium' : 'text-gray-400'}`}>
+                 {formData.hasTrial 
+                    ? `This fee is charged automatically after the ${formData.trialDays || 7}-day trial ends.` 
+                    : "Charged immediately upon signup."}
+               </p>
+            </div>
+
+            {/* Trial Logic */}
             <div className={`p-4 rounded-xl border transition-all ${formData.hasTrial ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-3">
@@ -161,7 +187,6 @@ export const MembershipFormModal = ({ isOpen, onClose, gymId, tierData, onSave }
                    </div>
                 </div>
                 
-                {/* Toggle Switch */}
                 <button 
                   type="button"
                   onClick={toggleTrial}
@@ -172,7 +197,6 @@ export const MembershipFormModal = ({ isOpen, onClose, gymId, tierData, onSave }
                 </button>
               </div>
 
-              {/* Conditional Inputs */}
               {formData.hasTrial && (
                 <div className="mt-4 pt-4 border-t border-blue-100 animate-in fade-in slide-in-from-top-2">
                    <label className="block text-xs font-semibold text-blue-700 mb-1 uppercase">Trial Duration (Days)</label>
