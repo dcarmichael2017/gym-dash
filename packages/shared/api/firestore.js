@@ -244,6 +244,25 @@ export const deleteClass = async (gymId, classId) => {
   }
 };
 
+export const getGymMembers = async (gymId) => {
+  try {
+    const usersRef = collection(db, "users");
+    // Assuming users have a 'gymId' field and 'role' field
+    // We filter for 'member' role to exclude staff/owners if you want
+    const q = query(
+      usersRef, 
+      where("gymId", "==", gymId),
+      where("role", "==", "member") 
+    );
+    const snapshot = await getDocs(q);
+    const members = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    return { success: true, members };
+  } catch (error) {
+    console.error("Error fetching gym members:", error);
+    return { success: false, error: error.message };
+  }
+};
+
 export const updateClass = async (gymId, classId, classData) => {
   try {
     const classRef = doc(db, "gyms", gymId, "classes", classId);
@@ -251,6 +270,63 @@ export const updateClass = async (gymId, classId, classData) => {
     return { success: true };
   } catch (error) {
     console.error("Error updating class:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Create a new membership tier
+export const createMembershipTier = async (gymId, tierData) => {
+  try {
+    const collectionRef = collection(db, "gyms", gymId, "membershipTiers");
+    const payload = { 
+      ...tierData, 
+      stripeProductId: null, // Placeholder for Sprint 7
+      stripePriceId: null,   // Placeholder for Sprint 7
+      active: true,
+      createdAt: new Date() 
+    };
+    const docRef = await addDoc(collectionRef, payload);
+    return { success: true, tier: { id: docRef.id, ...payload } };
+  } catch (error) {
+    console.error("Error creating membership tier:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Get all membership tiers
+export const getMembershipTiers = async (gymId) => {
+  try {
+    const collectionRef = collection(db, "gyms", gymId, "membershipTiers");
+    // Optional: Add query(collectionRef, where("active", "==", true)) if you implement archiving
+    const snapshot = await getDocs(collectionRef);
+    const tiers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    return { success: true, tiers };
+  } catch (error) {
+    console.error("Error fetching membership tiers:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Update a tier
+export const updateMembershipTier = async (gymId, tierId, data) => {
+  try {
+    const docRef = doc(db, "gyms", gymId, "membershipTiers", tierId);
+    await updateDoc(docRef, data);
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating membership tier:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Delete (or Archive) a tier
+export const deleteMembershipTier = async (gymId, tierId) => {
+  try {
+    const docRef = doc(db, "gyms", gymId, "membershipTiers", tierId);
+    await deleteDoc(docRef);
+    return { success: true };
+  } catch (error) {
+    console.error("Error deleting membership tier:", error);
     return { success: false, error: error.message };
   }
 };

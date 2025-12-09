@@ -27,7 +27,7 @@ const DashboardLayout = () => {
   const navItems = [
     { name: 'Home', path: '/dashboard', icon: LayoutDashboard },
     { name: 'Schedule', path: '/dashboard/schedule', icon: Calendar },
-    { name: 'Members', path: '/dashboard/members', icon: Users },
+    { name: 'Memberships', path: '/dashboard/memberships', icon: Users },
     { name: 'Staff', path: '/dashboard/staff', icon: Briefcase },
     { name: 'Settings', path: '/dashboard/settings', icon: Settings },
   ];
@@ -176,7 +176,7 @@ const DashboardLayout = () => {
               {loading ? '...' : 
                 location.pathname.includes('schedule') ? 'Schedule' : 
                 location.pathname.includes('settings') ? 'Settings' : 
-                location.pathname.includes('members') ? 'Members' : 
+                location.pathname.includes('memberships') ? 'Memberships' : 
                 gymName
               }
             </h1>

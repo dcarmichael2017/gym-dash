@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 import { auth, db } from '../../../../shared/api/firebaseConfig';
-import { getClasses, deleteClass, getStaffList } from '../../../../shared/api/firestore';
+import { getClasses, deleteClass, getStaffList, getMembershipTiers } from '../../../../shared/api/firestore';
 import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
 import { ClassFormModal } from '../../components/ClassFormModal';
 import { WeeklyCalendarView } from '../../components/WeeklyCalendarView'; // Import the new view
@@ -23,6 +23,7 @@ const DashboardScheduleScreen = () => {
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedClass, setSelectedClass] = useState(null);
+  const [membershipList, setMembershipList] = useState([]);
 
   useEffect(() => {
     const initData = async () => {
@@ -45,12 +46,17 @@ const DashboardScheduleScreen = () => {
   }, []);
 
   const refreshData = async (gId) => {
-    const [classRes, staffRes] = await Promise.all([
+    const [classRes, staffRes, memberRes] = await Promise.all([
         getClasses(gId),
-        getStaffList(gId)
+        getStaffList(gId),
+        getMembershipTiers(gId)
     ]);
+
     if (classRes.success) setClasses(classRes.classList);
     if (staffRes.success) setStaffList(staffRes.staffList);
+    
+    // Now memberRes is defined, so this won't crash
+    if (memberRes.success) setMembershipList(memberRes.tiers);
   };
 
   const handleOpenCreate = () => {
@@ -196,6 +202,7 @@ const DashboardScheduleScreen = () => {
         gymId={gymId}
         classData={selectedClass}
         staffList={staffList}
+        membershipList={membershipList} // Pass the list here
         onSave={() => refreshData(gymId)}
       />
     </div>

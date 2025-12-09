@@ -5,7 +5,8 @@ import {
   getStaffList,
   getClasses,
   deleteClass,
-  updateUserOnboardingStep
+  updateUserOnboardingStep,
+  getMembershipTiers
 } from '../../../../shared/api/firestore.js'; // Check your relative path here
 import { Trash2, Plus, Calendar as CalendarIcon, Clock, User } from 'lucide-react';
 
@@ -17,6 +18,7 @@ export const Step4_ClassScreen = () => {
   // Data state
   const [staffList, setStaffList] = useState([]);
   const [classList, setClassList] = useState([]);
+  const [membershipList, setMembershipList] = useState([]);
   
   // UI state
   const [error, setError] = useState(null);
@@ -35,18 +37,20 @@ export const Step4_ClassScreen = () => {
 
   // Fetch Data
   const refreshData = async (currentGymId) => {
-    // Only set loading on first load, not every refresh
     if (classList.length === 0) setIsFetching(true);
     
-    const staffResult = await getStaffList(currentGymId);
-    const classesResult = await getClasses(currentGymId);
+    // Fetch all 3 resources
+    const [staffResult, classesResult, memberResult] = await Promise.all([
+       getStaffList(currentGymId),
+       getClasses(currentGymId),
+       getMembershipTiers(currentGymId)
+    ]);
     
     if (staffResult.success) setStaffList(staffResult.staffList);
-    else setError(staffResult.error);
-
     if (classesResult.success) setClassList(classesResult.classList);
-    else setError(classesResult.error);
-
+    if (memberResult.success) setMembershipList(memberResult.tiers); // Set logic
+    // Handle errors if needed, usually just log them
+    
     setIsFetching(false);
   };
 
@@ -218,6 +222,7 @@ export const Step4_ClassScreen = () => {
         gymId={gymId}
         classData={selectedClass}
         staffList={staffList}
+        membershipList={membershipList} // Pass the list
         onSave={() => refreshData(gymId)}
       />
     </div>

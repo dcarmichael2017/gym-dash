@@ -24,6 +24,7 @@ import { StripeSuccessScreen } from './screens/onboarding/StripeSuccessScreen.js
 // Screens - Dashboard
 import DashboardHomeScreen from './screens/dashboard/DashboardHomeScreen.jsx';
 import DashboardScheduleScreen from './screens/dashboard/DashboardScheduleScreen.jsx';
+import DashboardMembershipsScreen from './screens/dashboard/DashboardMembershipsScreen.jsx';
 import DashboardStaffScreen from './screens/dashboard/DashboardStaffScreen.jsx';
 import DashboardSettingsScreen from './screens/dashboard/DashboardSettingsScreen.jsx';
 
@@ -57,7 +58,7 @@ function App() {
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<DashboardHomeScreen />} />
             <Route path="schedule" element={<DashboardScheduleScreen />} />
-            <Route path="members" element={<div className="p-4">Members Placeholder</div>} />
+            <Route path="memberships" element={<DashboardMembershipsScreen />} />
             <Route path="staff" element={<DashboardStaffScreen />} />
             <Route path="settings" element={<DashboardSettingsScreen />} />
           </Route>
