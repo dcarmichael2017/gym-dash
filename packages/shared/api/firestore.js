@@ -1,6 +1,6 @@
 // /packages/shared/api/firestore.js
 
-import { doc, setDoc, addDoc, collection, updateDoc, getDocs, getDoc, deleteDoc, query, where, writeBatch } from "firebase/firestore";
+import { doc, setDoc, addDoc, collection, updateDoc, getDocs, getDoc, deleteDoc, query, where, writeBatch, arrayUnion, arrayRemove } from "firebase/firestore";
 // Import the already-initialized db service from our new central file
 import { db } from "./firebaseConfig.js";
 
@@ -372,6 +372,84 @@ export const deleteMember = async (memberId) => {
     return { success: true };
   } catch (error) {
     console.error("Error deleting member:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// --- FAMILY / LINKED ACCOUNTS ---
+
+// Search for members by name (for linking families)
+export const searchMembers = async (gymId, searchTerm) => {
+  try {
+    const usersRef = collection(db, "users");
+    const term = searchTerm.toLowerCase().trim();
+    
+    // Perform a prefix search on the 'searchName' field
+    // Note: This requires the searchName field we added in 'addManualMember'
+    const q = query(
+      usersRef,
+      where("gymId", "==", gymId),
+      where("searchName", ">=", term),
+      where("searchName", "<=", term + "\uf8ff")
+    );
+
+    const snapshot = await getDocs(q);
+    const results = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    return { success: true, results };
+  } catch (error) {
+    console.error("Error searching members:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Link a dependent to a payer (Head of Household)
+export const linkFamilyMember = async (dependentId, payerId) => {
+  try {
+    const batch = writeBatch(db);
+
+    // 1. Update the Dependent: Set who pays for them
+    const dependentRef = doc(db, "users", dependentId);
+    batch.update(dependentRef, { 
+      payerId: payerId,
+      // Optional: Clear their own dependents if they had any (prevent chains)
+      dependents: [] 
+    });
+
+    // 2. Update the Payer: Add this person to their list of dependents
+    const payerRef = doc(db, "users", payerId);
+    batch.update(payerRef, {
+      dependents: arrayUnion(dependentId)
+    });
+
+    await batch.commit();
+    return { success: true };
+  } catch (error) {
+    console.error("Error linking family member:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Unlink a dependent from their payer
+export const unlinkFamilyMember = async (dependentId, payerId) => {
+  try {
+    const batch = writeBatch(db);
+
+    // 1. Update the Dependent: They are now their own payer
+    const dependentRef = doc(db, "users", dependentId);
+    batch.update(dependentRef, { 
+      payerId: null 
+    });
+
+    // 2. Update the Payer: Remove from dependents list
+    const payerRef = doc(db, "users", payerId);
+    batch.update(payerRef, {
+      dependents: arrayRemove(dependentId)
+    });
+
+    await batch.commit();
+    return { success: true };
+  } catch (error) {
+    console.error("Error unlinking family member:", error);
     return { success: false, error: error.message };
   }
 };
