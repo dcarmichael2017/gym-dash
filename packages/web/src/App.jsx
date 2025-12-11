@@ -1,9 +1,9 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
-// Layouts - Check if these are Default or Named exports in their files
+// Layouts
 import { AuthLayout } from './components/layout/AuthLayout.jsx';
-import DashboardLayout from './components/layout/DashboardLayout.jsx'; // Assuming export default
+import DashboardLayout from './components/layout/DashboardLayout.jsx'; 
 
 // Auth
 import { ProtectedRoute } from './components/auth/ProtectedRoute.jsx';
@@ -28,6 +28,8 @@ import DashboardMembershipsScreen from './screens/dashboard/DashboardMemberships
 import DashboardMembersScreen from './screens/dashboard/DashboardMembersScreen.jsx';
 import DashboardStaffScreen from './screens/dashboard/DashboardStaffScreen.jsx';
 import DashboardSettingsScreen from './screens/dashboard/DashboardSettingsScreen.jsx';
+// --- NEW IMPORT ---
+import DashboardAnalyticsScreen from './screens/dashboard/DashboardAnalyticsScreen.jsx'; 
 
 function App() {
   return (
@@ -55,9 +57,11 @@ function App() {
           <Route path="/onboarding/stripe-success" element={<StripeSuccessScreen />} />
 
           {/* --- ADMIN DASHBOARD --- */}
-          {/* Note: We removed path="" from ProtectedRoute and put /dashboard here explicitly */}
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<DashboardHomeScreen />} />
+            {/* --- NEW ROUTE --- */}
+            <Route path="analytics" element={<DashboardAnalyticsScreen />} /> 
+            
             <Route path="schedule" element={<DashboardScheduleScreen />} />
             <Route path="memberships" element={<DashboardMembershipsScreen />} />
             <Route path="members" element={<DashboardMembersScreen />} />

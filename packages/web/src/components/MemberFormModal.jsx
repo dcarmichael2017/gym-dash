@@ -1,8 +1,6 @@
-// packages/web/src/components/MemberFormModal.jsx
-
 import React, { useState, useEffect } from 'react';
 import {
-    X, User, Mail, Phone, Camera, CreditCard, Tag, AlertCircle, Link as LinkIcon
+    X, User, Mail, Phone, Camera, CreditCard, Tag, AlertCircle, Link as LinkIcon, DollarSign
 } from 'lucide-react';
 import {
     addManualMember,
@@ -19,6 +17,8 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
     const [formData, setFormData] = useState({
         firstName: '', lastName: '', email: '', phone: '', photoUrl: null, membershipId: ''
     });
+    const [customPrice, setCustomPrice] = useState(''); 
+    
     const [tiers, setTiers] = useState([]);
     const [photoFile, setPhotoFile] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -35,7 +35,6 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
         }
     }, [isOpen, gymId]);
 
-    // Reset Tab only on Open
     useEffect(() => {
         if (isOpen) {
             setActiveTab('profile');
@@ -43,7 +42,7 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
         }
     }, [isOpen]);
 
-    // Sync Form Data on Change
+    // Sync Form Data
     useEffect(() => {
         if (isOpen) {
             if (memberData) {
@@ -55,15 +54,31 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
                     photoUrl: memberData.photoUrl || null,
                     membershipId: memberData.membershipId || ''
                 });
+                setCustomPrice(memberData.assignedPrice || ''); 
                 setSkipTrial(false);
             } else {
                 setFormData({ firstName: '', lastName: '', email: '', phone: '', photoUrl: null, membershipId: '' });
+                setCustomPrice('');
                 setSkipTrial(false);
             }
         }
     }, [isOpen, memberData]);
 
     const selectedPlan = tiers.find(t => t.id === formData.membershipId);
+    
+    // --- SMART PRICE LOGIC ---
+    const handlePlanChange = (e) => {
+        const newPlanId = e.target.value;
+        setFormData({ ...formData, membershipId: newPlanId }); 
+        
+        const plan = tiers.find(t => t.id === newPlanId);
+        if (plan) {
+            setCustomPrice(plan.price); // Auto-fill standard price
+        } else {
+            setCustomPrice('');
+        }
+    };
+
     const isSamePlan = memberData && memberData.membershipId === formData.membershipId;
     const showTrialOption = selectedPlan?.hasTrial && !isSamePlan;
 
@@ -82,10 +97,11 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
             if (uploadRes.success) finalPhotoUrl = uploadRes.url;
         }
 
-        // Status Logic
+        // 1. Determine Status
         let subscriptionStatus = null;
         let trialEndDate = null;
-        if (isSamePlan) {
+        
+        if (memberData && isSamePlan) {
             subscriptionStatus = memberData.subscriptionStatus;
             trialEndDate = memberData.trialEndDate || null;
         } else if (formData.membershipId && selectedPlan) {
@@ -104,10 +120,24 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
             photoUrl: finalPhotoUrl,
             searchName: `${formData.firstName} ${formData.lastName}`.toLowerCase(),
             status: subscriptionStatus || 'prospect',
+            
+            membershipId: formData.membershipId, 
             membershipName: selectedPlan ? selectedPlan.name : null,
+            assignedPrice: Number(customPrice),
+
             subscriptionStatus: subscriptionStatus,
             trialEndDate: trialEndDate
         };
+
+        // --- 2. ANALYTICS: Track Conversion Timestamp ---
+        // If they are becoming ACTIVE now, but weren't active before, timestamp it.
+        const isBecomingActive = subscriptionStatus === 'active';
+        const wasNotActive = !memberData || (memberData.status !== 'active');
+
+        if (isBecomingActive && wasNotActive) {
+            payload.convertedAt = new Date();
+        }
+        // -----------------------------------------------
 
         let result;
         if (memberData) {
@@ -223,17 +253,63 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
                                         <input type="tel" value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} className="w-full pl-9 p-2.5 border border-gray-300 rounded-lg" />
                                     </div>
                                 </div>
-                                <div>
+                                
+                                <div className="col-span-1">
                                     <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Assign Membership</label>
                                     <div className="relative">
                                         <CreditCard className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                                        <select value={formData.membershipId} onChange={e => setFormData({ ...formData, membershipId: e.target.value })} className="w-full pl-9 p-2.5 border border-gray-300 rounded-lg bg-white">
+                                        <select 
+                                            value={formData.membershipId} 
+                                            onChange={handlePlanChange} 
+                                            className="w-full pl-9 p-2.5 border border-gray-300 rounded-lg bg-white"
+                                        >
                                             <option value="">-- No Membership --</option>
-                                            {tiers.map(tier => <option key={tier.id} value={tier.id}>{tier.name} (${tier.price})</option>)}
+                                            {tiers.map(tier => <option key={tier.id} value={tier.id}>{tier.name}</option>)}
                                         </select>
                                     </div>
                                 </div>
                             </div>
+
+                            {/* --- BILLING DETAILS --- */}
+                            {formData.membershipId && (
+                                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                    <div className="flex justify-between items-center mb-2">
+                                         <h4 className="text-sm font-bold text-gray-700">Billing Details</h4>
+                                         {selectedPlan && (
+                                            <span className="text-xs text-gray-500 bg-white px-2 py-1 rounded border border-gray-200">
+                                                Standard: ${selectedPlan.price}/{selectedPlan.interval}
+                                            </span>
+                                         )}
+                                    </div>
+                                    
+                                    <div className="flex gap-4">
+                                        <div className="w-1/2">
+                                            <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Custom Rate ($)</label>
+                                            <div className="relative">
+                                                <DollarSign className="absolute left-3 top-2.5 h-4 w-4 text-gray-500" />
+                                                <input 
+                                                    type="number" 
+                                                    value={customPrice} 
+                                                    onChange={e => setCustomPrice(e.target.value)} 
+                                                    className="w-full pl-9 p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-medium text-gray-900"
+                                                    placeholder="0.00"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="w-1/2">
+                                            <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Discount Code</label>
+                                             <div className="relative opacity-60">
+                                                <Tag className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                                                <input 
+                                                    disabled
+                                                    placeholder="SUMMER20"
+                                                    className="w-full pl-9 p-2.5 border border-gray-200 bg-gray-100 rounded-lg cursor-not-allowed"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Trial Logic */}
                             {showTrialOption && (
@@ -260,24 +336,6 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
                                 </div>
                             )}
 
-                            {/* Discount Code */}
-                            {formData.membershipId && (
-                                <div>
-                                    <div className="flex justify-between items-center mb-1">
-                                        <label className="block text-xs font-semibold text-gray-400 uppercase">Discount Code</label>
-                                        <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">Coming Soon</span>
-                                    </div>
-                                    <div className="relative opacity-60">
-                                        <Tag className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                                        <input 
-                                            disabled
-                                            placeholder="SUMMER2025"
-                                            className="w-full pl-9 p-2.5 border border-gray-200 bg-gray-50 rounded-lg outline-none cursor-not-allowed"
-                                        />
-                                    </div>
-                                </div>
-                            )}
-
                             {/* Prospect Alert */}
                             {!formData.membershipId && (
                                 <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-yellow-800 text-xs flex items-start gap-2">
@@ -289,7 +347,7 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
                         </form>
                     )}
 
-                    {/* === FAMILY TAB (Refactored) === */}
+                    {/* === FAMILY TAB === */}
                     {activeTab === 'family' && (
                         <MemberFamilyTab 
                             memberData={memberData}

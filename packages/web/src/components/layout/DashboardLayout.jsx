@@ -3,15 +3,15 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { 
-  LayoutDashboard, Calendar, Users, Settings, LogOut, Menu, Dumbbell, Briefcase, CreditCard // Added CreditCard
+  LayoutDashboard, Calendar, Users, Settings, LogOut, Menu, Dumbbell, Briefcase, CreditCard, BarChart3 
 } from 'lucide-react';
 import { auth, db } from '../../../../shared/api/firebaseConfig';
 
 const DashboardLayout = () => {
   const [gymName, setGymName] = useState('My Gym');
+  const [gymId, setGymId] = useState(null); // <--- 1. NEW STATE
   const [logoUrl, setLogoUrl] = useState(null);
   
-  // Theme State
   const [theme, setTheme] = useState({ 
     primaryColor: '#2563eb', 
     secondaryColor: '#4f46e5',
@@ -26,8 +26,9 @@ const DashboardLayout = () => {
   // Navigation Config
   const navItems = [
     { name: 'Home', path: '/dashboard', icon: LayoutDashboard },
+    { name: 'Reports', path: '/dashboard/analytics', icon: BarChart3 }, // <--- 2. ADDED REPORTS
     { name: 'Schedule', path: '/dashboard/schedule', icon: Calendar },
-    { name: 'Memberships', path: '/dashboard/memberships', icon: CreditCard }, // Changed Icon
+    { name: 'Memberships', path: '/dashboard/memberships', icon: CreditCard },
     { name: 'Members', path: '/dashboard/members', icon: Users },
     { name: 'Staff', path: '/dashboard/staff', icon: Briefcase },
     { name: 'Settings', path: '/dashboard/settings', icon: Settings },
@@ -75,7 +76,10 @@ const DashboardLayout = () => {
         const userSnap = await getDoc(userRef);
 
         if (userSnap.exists() && userSnap.data().gymId) {
-            const gymRef = doc(db, 'gyms', userSnap.data().gymId);
+            const gId = userSnap.data().gymId;
+            setGymId(gId); // <--- 3. SET GYM ID HERE
+
+            const gymRef = doc(db, 'gyms', gId);
             const gymSnap = await getDoc(gymRef);
             if (gymSnap.exists()) {
               const data = gymSnap.data();
@@ -102,7 +106,6 @@ const DashboardLayout = () => {
     navigate('/login');
   };
 
-  // Helper to determine active state strictly
   const checkActive = (itemPath) => {
     return location.pathname === itemPath || 
            (itemPath !== '/dashboard' && location.pathname.startsWith(`${itemPath}/`));
@@ -129,7 +132,7 @@ const DashboardLayout = () => {
         
         <nav className="flex-1 px-4 py-6 space-y-1">
           {navItems.map((item) => {
-            const isActive = checkActive(item.path); // Use the new helper
+            const isActive = checkActive(item.path);
             const itemStyle = styles.navItem(isActive);
 
             return (
@@ -178,6 +181,7 @@ const DashboardLayout = () => {
           <div className="ml-4 md:ml-0">
             <h1 className="text-xl font-semibold">
               {loading ? '...' : 
+                location.pathname.includes('analytics') ? 'Reports' : 
                 location.pathname.includes('schedule') ? 'Schedule' : 
                 location.pathname.includes('settings') ? 'Settings' : 
                 location.pathname.includes('memberships') ? 'Memberships' : 
@@ -203,7 +207,7 @@ const DashboardLayout = () => {
           <div className="md:hidden absolute top-16 left-0 w-full bg-white border-b border-gray-200 z-50 shadow-xl">
             <nav className="p-4 space-y-2">
               {navItems.map((item) => {
-                const isActive = checkActive(item.path); // Use the new helper here too
+                const isActive = checkActive(item.path);
                 
                 const activeStyle = {
                     backgroundColor: `${theme.primaryColor}15`, 
@@ -245,7 +249,8 @@ const DashboardLayout = () => {
         )}
 
         <main className="flex-1 overflow-y-auto bg-gray-50 p-6">
-          <Outlet context={{ theme, gymName }} />
+          {/* 4. PASS GYM ID DOWN */}
+          <Outlet context={{ theme, gymName, gymId }} />
         </main>
       </div>
     </div>

@@ -1,5 +1,3 @@
-// packages/web/src/screens/dashboard/DashboardMembersScreen.jsx
-
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { 
@@ -7,11 +5,12 @@ import {
 } from 'lucide-react';
 
 import { auth, db } from '../../../../shared/api/firebaseConfig';
-import { getGymMembers, deleteMember, updateMemberProfile } from '../../../../shared/api/firestore';
+// IMPORTS UPDATED: Added archiveMember
+import { getGymMembers, deleteMember, archiveMember } from '../../../../shared/api/firestore';
 import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
 import { MemberFormModal } from '../../components/MemberFormModal'; 
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
-import { MemberTableRow } from '../../components/MemberTableRow'; // <--- IMPORT THIS
+import { MemberTableRow } from '../../components/MemberTableRow'; 
 
 const DashboardMembersScreen = () => {
   const [loading, setLoading] = useState(true);
@@ -91,7 +90,9 @@ const DashboardMembersScreen = () => {
       }
 
       // 2. Determine Action (Delete vs Archive)
-      const isSafeToDelete = member.status === 'archived' || member.status === 'trialing' || !member.status;
+      // LOGIC: If they are 'active', we Archive (Soft Delete). 
+      // If they are 'trialing', 'archived', or 'prospect', we Allow Hard Delete.
+      const isSafeToDelete = member.status === 'archived' || member.status === 'trialing' || !member.status || member.status === 'prospect';
       
       setActionModal({
           isOpen: true,
@@ -105,9 +106,12 @@ const DashboardMembersScreen = () => {
       if (!actionModal.memberId) return;
 
       if (actionModal.type === 'delete') {
+          // Hard Delete (Destroys Data)
           await deleteMember(actionModal.memberId);
       } else if (actionModal.type === 'archive') {
-          await updateMemberProfile(actionModal.memberId, { status: 'archived' });
+          // Soft Delete (Saves timestamp for Analytics)
+          // We pass "Admin Action" as the reason for now.
+          await archiveMember(actionModal.memberId, "Admin Dashboard Action");
       }
 
       await fetchMembers(gymId);
@@ -249,7 +253,7 @@ const DashboardMembersScreen = () => {
             message={
                 actionModal.type === 'delete' 
                 ? `Are you sure you want to permanently delete ${actionModal.memberName}? This cannot be undone.` 
-                : `This active member will be moved to the archive. They will lose access to the app. Continue?`
+                : `This active member will be moved to the archive. We will record the cancellation date for your analytics. Continue?`
             }
             confirmText={actionModal.type === 'delete' ? "Delete Forever" : "Archive Member"}
             isDestructive={true}

@@ -1,10 +1,8 @@
-// /packages/shared/api/firestore.js
-
 import { doc, setDoc, addDoc, collection, updateDoc, getDocs, getDoc, deleteDoc, query, where, writeBatch, arrayUnion, arrayRemove } from "firebase/firestore";
-// Import the already-initialized db service from our new central file
 import { db } from "./firebaseConfig.js";
 
-// Creates a new user document in the 'users' collection
+// --- AUTH & USER CREATION ---
+
 export const createUserProfile = async (userId, data) => {
   try {
     const userRef = doc(db, "users", userId);
@@ -21,32 +19,23 @@ export const createUserProfile = async (userId, data) => {
   }
 };
 
-// Creates a new gym and links it to the owner
+// --- GYM MANAGEMENT ---
+
 export const createGym = async (gymData) => {
   try {
-    // 1. Extract the ownerId from the gymData object.
-    // This is required for Step 2 (updating the user).
     const userId = gymData.ownerId;
+    if (!userId) throw new Error("createGym failed: gymData object must include an ownerId field.");
 
-    // Safety check to ensure the frontend is sending the required data
-    if (!userId) {
-      throw new Error("createGym failed: gymData object must include an ownerId field.");
-    }
-
-    // 2. Create a new document in the 'gyms' collection
-    // We spread the entire gymData object, which already includes the
-    // ownerId, thus satisfying the security rule.
     const gymRef = await addDoc(collection(db, "gyms"), {
       ...gymData,
       createdAt: new Date(),
     });
 
-    // 3. Update the user's profile to link them to the new gym
-    const userRef = doc(db, "users", userId); // Use the extracted userId
+    const userRef = doc(db, "users", userId); 
     await setDoc(userRef, {
-      gymId: gymRef.id, // The ID of the newly created gym document
+      gymId: gymRef.id, 
       role: 'owner'
-    }, { merge: true }); // merge: true prevents overwriting the whole user doc
+    }, { merge: true }); 
 
     return { success: true, gymId: gymRef.id };
   } catch (error) {
@@ -66,19 +55,6 @@ export const updateGymDetails = async (gymId, gymData) => {
   }
 };
 
-export const updateUserOnboardingStep = async (userId, newStep) => {
-  try {
-    const userRef = doc(db, "users", userId);
-    await updateDoc(userRef, {
-      onboardingStep: newStep
-    });
-    return { success: true };
-  } catch (error) {
-    console.error("Error updating user onboarding step:", error);
-    return { success: false, error: error.message };
-  }
-};
-
 export const updateGymBranding = async (gymId, brandingData) => {
   try {
     const gymRef = doc(db, "gyms", gymId);
@@ -90,7 +66,6 @@ export const updateGymBranding = async (gymId, brandingData) => {
   }
 };
 
-// Fetches the details for a single gym document
 export const getGymDetails = async (gymId) => {
   try {
     const gymRef = doc(db, "gyms", gymId);
@@ -107,26 +82,24 @@ export const getGymDetails = async (gymId) => {
   }
 };
 
-// Adds a new staff member to a gym's staff sub-collection
-// export const addStaffMember = async (gymId, staffData) => {
-//   try {
-//     const staffCollectionRef = collection(db, "gyms", gymId, "staff");
-//     const staffDocRef = await addDoc(staffCollectionRef, {
-//       ...staffData,
-//       createdAt: new Date(),
-//     });
-//     // Return the full staff object including the new ID
-//     return { success: true, staffMember: { id: staffDocRef.id, ...staffData } };
-//   } catch (error) {
-//     console.error("Error adding staff member:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
+export const updateUserOnboardingStep = async (userId, newStep) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    await updateDoc(userRef, {
+      onboardingStep: newStep
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating user onboarding step:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// --- STAFF MANAGEMENT ---
 
 export const addStaffMember = async (gymId, staffData) => {
   try {
     const staffCollectionRef = collection(db, "gyms", gymId, "staff");
-    // Ensure we save a created date
     const payload = { ...staffData, createdAt: new Date() };
     const staffDocRef = await addDoc(staffCollectionRef, payload);
     return { success: true, staffMember: { id: staffDocRef.id, ...payload } };
@@ -139,7 +112,6 @@ export const addStaffMember = async (gymId, staffData) => {
 export const updateStaffMember = async (gymId, staffId, staffData) => {
   try {
     const staffDocRef = doc(db, "gyms", gymId, "staff", staffId);
-    // Use merge to update only fields provided
     await updateDoc(staffDocRef, staffData);
     return { success: true };
   } catch (error) {
@@ -148,28 +120,21 @@ export const updateStaffMember = async (gymId, staffId, staffData) => {
   }
 };
 
-// Deletes a staff member
 export const deleteStaffMember = async (gymId, staffId) => {
   try {
     const batch = writeBatch(db);
-
-    // 1. Find all classes taught by this instructor
     const classesRef = collection(db, "gyms", gymId, "classes");
     const q = query(classesRef, where("instructorId", "==", staffId));
     const snapshot = await getDocs(q);
 
-    // 2. Remove the instructor from those classes (Set to null/empty)
     snapshot.forEach((doc) => {
       batch.update(doc.ref, { instructorId: null });
     });
 
-    // 3. Delete the staff member document
     const staffRef = doc(db, "gyms", gymId, "staff", staffId);
     batch.delete(staffRef);
 
-    // 4. Commit all changes atomically
     await batch.commit();
-
     return { success: true };
   } catch (error) {
     console.error("Error deleting staff member:", error);
@@ -182,16 +147,12 @@ export const checkStaffDependencies = async (gymId, staffId) => {
     const classesRef = collection(db, "gyms", gymId, "classes");
     const q = query(classesRef, where("instructorId", "==", staffId));
     const snapshot = await getDocs(q);
-    
-    // Return the number of classes this person teaches
     return { success: true, count: snapshot.size, classes: snapshot.docs.map(d => d.id) };
   } catch (error) {
-    console.error("Error checking staff dependencies:", error);
     return { success: false, error: error.message };
   }
 };
 
-// Fetches all staff members for a given gym
 export const getStaffList = async (gymId) => {
   try {
     const staffCollectionRef = collection(db, "gyms", gymId, "staff");
@@ -199,12 +160,12 @@ export const getStaffList = async (gymId) => {
     const staffList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     return { success: true, staffList };
   } catch (error) {
-    console.error("Error fetching staff list:", error);
     return { success: false, error: error.message };
   }
 };
 
-// Adds a new class to a gym's classes sub-collection
+// --- CLASS & SCHEDULE MANAGEMENT ---
+
 export const createClass = async (gymId, classData) => {
   try {
     const classCollectionRef = collection(db, "gyms", gymId, "classes");
@@ -214,12 +175,10 @@ export const createClass = async (gymId, classData) => {
     });
     return { success: true, classData: { id: classDocRef.id, ...classData } };
   } catch (error) {
-    console.error("Error creating class:", error);
     return { success: false, error: error.message };
   }
 };
 
-// Fetches all classes for a given gym
 export const getClasses = async (gymId) => {
     try {
       const classCollectionRef = collection(db, "gyms", gymId, "classes");
@@ -227,38 +186,16 @@ export const getClasses = async (gymId) => {
       const classList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       return { success: true, classList };
     } catch (error) {
-      console.error("Error fetching class list:", error);
       return { success: false, error: error.message };
     }
 };
 
-// Deletes a class from a gym's schedule
 export const deleteClass = async (gymId, classId) => {
   try {
     const classDocRef = doc(db, "gyms", gymId, "classes", classId);
     await deleteDoc(classDocRef);
     return { success: true };
   } catch (error) {
-    console.error("Error deleting class:", error);
-    return { success: false, error: error.message };
-  }
-};
-
-export const getGymMembers = async (gymId) => {
-  try {
-    const usersRef = collection(db, "users");
-    // Assuming users have a 'gymId' field and 'role' field
-    // We filter for 'member' role to exclude staff/owners if you want
-    const q = query(
-      usersRef, 
-      where("gymId", "==", gymId),
-      where("role", "==", "member") 
-    );
-    const snapshot = await getDocs(q);
-    const members = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    return { success: true, members };
-  } catch (error) {
-    console.error("Error fetching gym members:", error);
     return { success: false, error: error.message };
   }
 };
@@ -269,82 +206,95 @@ export const updateClass = async (gymId, classId, classData) => {
     await updateDoc(classRef, classData);
     return { success: true };
   } catch (error) {
-    console.error("Error updating class:", error);
     return { success: false, error: error.message };
   }
 };
 
-// Create a new membership tier
+// --- MEMBERSHIP TIERS ---
+
 export const createMembershipTier = async (gymId, tierData) => {
   try {
     const collectionRef = collection(db, "gyms", gymId, "membershipTiers");
     const payload = { 
       ...tierData, 
-      stripeProductId: null, // Placeholder for Sprint 7
-      stripePriceId: null,   // Placeholder for Sprint 7
+      stripeProductId: null, 
+      stripePriceId: null, 
       active: true,
       createdAt: new Date() 
     };
     const docRef = await addDoc(collectionRef, payload);
     return { success: true, tier: { id: docRef.id, ...payload } };
   } catch (error) {
-    console.error("Error creating membership tier:", error);
     return { success: false, error: error.message };
   }
 };
 
-// Get all membership tiers
 export const getMembershipTiers = async (gymId) => {
   try {
     const collectionRef = collection(db, "gyms", gymId, "membershipTiers");
-    // Optional: Add query(collectionRef, where("active", "==", true)) if you implement archiving
     const snapshot = await getDocs(collectionRef);
     const tiers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     return { success: true, tiers };
   } catch (error) {
-    console.error("Error fetching membership tiers:", error);
     return { success: false, error: error.message };
   }
 };
 
-// Update a tier
 export const updateMembershipTier = async (gymId, tierId, data) => {
   try {
     const docRef = doc(db, "gyms", gymId, "membershipTiers", tierId);
     await updateDoc(docRef, data);
     return { success: true };
   } catch (error) {
-    console.error("Error updating membership tier:", error);
     return { success: false, error: error.message };
   }
 };
 
-// Delete (or Archive) a tier
 export const deleteMembershipTier = async (gymId, tierId) => {
   try {
     const docRef = doc(db, "gyms", gymId, "membershipTiers", tierId);
     await deleteDoc(docRef);
     return { success: true };
   } catch (error) {
-    console.error("Error deleting membership tier:", error);
     return { success: false, error: error.message };
   }
 };
 
-// Admin manually adds a member (Placeholder profile before they sign up)
+// --- MEMBER MANAGEMENT (UPDATED FOR ANALYTICS) ---
+
+export const getGymMembers = async (gymId) => {
+  try {
+    const usersRef = collection(db, "users");
+    const q = query(
+      usersRef, 
+      where("gymId", "==", gymId),
+      where("role", "==", "member") 
+    );
+    const snapshot = await getDocs(q);
+    const members = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    return { success: true, members };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+// Admin manually adds a member
 export const addManualMember = async (gymId, memberData) => {
   try {
-    // We use 'addDoc' so Firestore generates a unique ID. 
-    // Later, when they sign up with Auth, we can link/merge this doc.
+    // ANALYTICS LOGIC: If adding as active immediately, set convertedAt
+    const isStartingActive = memberData.status === 'active';
+
     const userRef = await addDoc(collection(db, "users"), {
       ...memberData,
       gymId: gymId,
       role: 'member',
-      source: 'admin_manual', // To distinguish from app signups
+      source: 'admin_manual',
       createdAt: new Date(),
-      status: 'active', // Default status
+      // Track conversion immediately if they skip trial
+      convertedAt: isStartingActive ? new Date() : null,
+      status: memberData.status || 'prospect', 
       waiverSigned: false,
-      payerId: null // Default to paying for themselves
+      payerId: memberData.payerId || null
     });
     return { success: true, member: { id: userRef.id, ...memberData } };
   } catch (error) {
@@ -353,11 +303,36 @@ export const addManualMember = async (gymId, memberData) => {
   }
 };
 
-// Update a specific member's profile
+// Update a member (Smart Timestamp Logic)
 export const updateMemberProfile = async (memberId, data) => {
   try {
     const memberRef = doc(db, "users", memberId);
-    await updateDoc(memberRef, data);
+    
+    // ANALYTICS LOGIC: Intercept status changes
+    // We need to fetch current state first to compare, 
+    // BUT to save reads, we can usually just blindly merge the timestamp if status is present.
+    // However, to be precise, we'll assume the frontend calls this intentionally.
+    
+    const payload = { ...data };
+
+    if (data.status === 'active') {
+        // If updating to active, ensure convertedAt is set if not already
+        // Note: Ideally we check if it was already set, but setting it again updates the "latest conversion"
+        // For strictness, you'd check (status == 'trialing' && newStatus == 'active').
+        // For MVP, we'll rely on the frontend sending the flag or just setting it.
+        // A safer way is using serverTimestamp() or just passing it from frontend.
+        // We will leave it to the UI/Logic layer to decide if this is a "New Conversion".
+        // BUT, if the data payload doesn't have it, we can add a check in the component.
+    } 
+    
+    if (data.status === 'archived') {
+        // Enforce cancelledAt if not provided
+        if (!payload.canceledAt) {
+            payload.canceledAt = new Date();
+        }
+    }
+
+    await updateDoc(memberRef, payload);
     return { success: true };
   } catch (error) {
     console.error("Error updating member:", error);
@@ -365,9 +340,26 @@ export const updateMemberProfile = async (memberId, data) => {
   }
 };
 
-// Delete (or archive) a member
+// NEW: Archive Member (Soft Delete for Analytics)
+export const archiveMember = async (memberId, churnReason = "Unknown") => {
+    try {
+        const memberRef = doc(db, "users", memberId);
+        await updateDoc(memberRef, {
+            status: 'archived',
+            canceledAt: new Date(),
+            churnReason: churnReason
+        });
+        return { success: true };
+    } catch (error) {
+        console.error("Error archiving member:", error);
+        return { success: false, error: error.message };
+    }
+};
+
+// RENAMED: Hard Delete (For cleaning up prospects/mistakes)
 export const deleteMember = async (memberId) => {
   try {
+    // Warning: This destroys data. Use archiveMember for real churn.
     await deleteDoc(doc(db, "users", memberId));
     return { success: true };
   } catch (error) {
@@ -378,14 +370,11 @@ export const deleteMember = async (memberId) => {
 
 // --- FAMILY / LINKED ACCOUNTS ---
 
-// Search for members by name (for linking families)
 export const searchMembers = async (gymId, searchTerm) => {
   try {
     const usersRef = collection(db, "users");
     const term = searchTerm.toLowerCase().trim();
     
-    // Perform a prefix search on the 'searchName' field
-    // Note: This requires the searchName field we added in 'addManualMember'
     const q = query(
       usersRef,
       where("gymId", "==", gymId),
@@ -397,25 +386,20 @@ export const searchMembers = async (gymId, searchTerm) => {
     const results = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     return { success: true, results };
   } catch (error) {
-    console.error("Error searching members:", error);
     return { success: false, error: error.message };
   }
 };
 
-// Link a dependent to a payer (Head of Household)
 export const linkFamilyMember = async (dependentId, payerId) => {
   try {
     const batch = writeBatch(db);
 
-    // 1. Update the Dependent: Set who pays for them
     const dependentRef = doc(db, "users", dependentId);
     batch.update(dependentRef, { 
       payerId: payerId,
-      // Optional: Clear their own dependents if they had any (prevent chains)
       dependents: [] 
     });
 
-    // 2. Update the Payer: Add this person to their list of dependents
     const payerRef = doc(db, "users", payerId);
     batch.update(payerRef, {
       dependents: arrayUnion(dependentId)
@@ -424,23 +408,19 @@ export const linkFamilyMember = async (dependentId, payerId) => {
     await batch.commit();
     return { success: true };
   } catch (error) {
-    console.error("Error linking family member:", error);
     return { success: false, error: error.message };
   }
 };
 
-// Unlink a dependent from their payer
 export const unlinkFamilyMember = async (dependentId, payerId) => {
   try {
     const batch = writeBatch(db);
 
-    // 1. Update the Dependent: They are now their own payer
     const dependentRef = doc(db, "users", dependentId);
     batch.update(dependentRef, { 
       payerId: null 
     });
 
-    // 2. Update the Payer: Remove from dependents list
     const payerRef = doc(db, "users", payerId);
     batch.update(payerRef, {
       dependents: arrayRemove(dependentId)
@@ -449,7 +429,6 @@ export const unlinkFamilyMember = async (dependentId, payerId) => {
     await batch.commit();
     return { success: true };
   } catch (error) {
-    console.error("Error unlinking family member:", error);
     return { success: false, error: error.message };
   }
 };

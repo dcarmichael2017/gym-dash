@@ -49,12 +49,18 @@ const DashboardHomeScreen = () => {
       </div>
 
       {/* Top Stats Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Widget 1: Next Class */}
-        <NextClassWidget gymId={gymId} />
+      {/* Changed grid-cols-3 to grid-cols-4 or adjusted gap to fit new data density */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         
-        {/* Widget 2: Stats (Staff & Members) */}
+        {/* Widget 1: Next Class (Kept separate) */}
+        <div className="md:col-span-2 lg:col-span-1">
+           <NextClassWidget gymId={gymId} />
+        </div>
+        
+        {/* Widget 2: Stats (Now renders 3 small cards) */}
+        {/* The StatsWidget returns a fragment of 3 divs, so they will sit as siblings here */}
         <StatsWidget gymId={gymId} />
+        
       </div>
 
       {/* Bottom Row: Actions */}
