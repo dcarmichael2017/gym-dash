@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { Building, Palette, CreditCard } from 'lucide-react';
+import { Building, Palette, CreditCard, Scale, Settings, Medal } from 'lucide-react'; // Added Medal
 
 // API Imports
 import { auth, db } from '../../../../shared/api/firebaseConfig';
@@ -11,15 +11,29 @@ import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
 import { GeneralSettingsTab } from './settings/GeneralSettingsTab';
 import { BrandingSettingsTab } from './settings/BrandingSettingsTab';
 import { PaymentsSettingsTab } from './settings/PaymentsSettingsTab';
+import { BookingPoliciesTab } from './settings/BookingPoliciesTab';
+import { LegalSettingsTab } from './settings/LegalSettingsTab';
+import { RankSettingsTab } from './settings/RankSettingsTab';
 
 const DashboardSettingsScreen = () => {
   const [loading, setLoading] = useState(true);
   const [gymId, setGymId] = useState(null);
   const [activeTab, setActiveTab] = useState('general');
   const [message, setMessage] = useState({ type: '', text: '' });
-
-  // Centralized Data State
   const [gymData, setGymData] = useState(null);
+
+  // 1. Extract fetch logic into a reusable function
+  const refreshGymData = async (gId = gymId) => {
+    if (!gId) return;
+    try {
+      const result = await getGymDetails(gId);
+      if (result.success) {
+        setGymData(result.gym);
+      }
+    } catch (error) {
+      console.error("Error refreshing data:", error);
+    }
+  };
 
   useEffect(() => {
     const initData = async () => {
@@ -33,8 +47,8 @@ const DashboardSettingsScreen = () => {
         if (userSnap.exists() && userSnap.data().gymId) {
           const gId = userSnap.data().gymId;
           setGymId(gId);
-          const result = await getGymDetails(gId);
-          if (result.success) setGymData(result.gym);
+          // Call the reusable function
+          await refreshGymData(gId);
         }
       } catch (error) { console.error(error); } 
       finally { setLoading(false); }
@@ -50,6 +64,15 @@ const DashboardSettingsScreen = () => {
   if (loading) return <FullScreenLoader />;
   if (!gymData) return <div>Error loading settings.</div>;
 
+  const tabs = [
+    { id: 'general', label: 'General', icon: Building },
+    { id: 'branding', label: 'Branding', icon: Palette },
+    { id: 'ranks', label: 'Rank Management', icon: Medal },
+    { id: 'booking', label: 'Booking Policies', icon: Settings },
+    { id: 'payments', label: 'Payments', icon: CreditCard },
+    { id: 'legal', label: 'Legal & Waivers', icon: Scale },
+  ];
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-8">
@@ -59,11 +82,7 @@ const DashboardSettingsScreen = () => {
 
       {/* TABS HEADER */}
       <div className="flex border-b border-gray-200 mb-8 overflow-x-auto">
-        {[
-            { id: 'general', label: 'General', icon: Building },
-            { id: 'branding', label: 'Branding', icon: Palette },
-            { id: 'payments', label: 'Payments', icon: CreditCard },
-        ].map(tab => (
+        {tabs.map(tab => (
             <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
@@ -91,11 +110,14 @@ const DashboardSettingsScreen = () => {
       {/* CONTENT AREA */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         
+        {/* 2. Pass refreshGymData as a prop (e.g., onUpdate) to tabs that modify data */}
+        
         {activeTab === 'general' && (
             <GeneralSettingsTab 
                 gymId={gymId} 
                 initialData={{ name: gymData.name, description: gymData.description }}
                 showMessage={showMessage}
+                onUpdate={() => refreshGymData()} // Pass it here
             />
         )}
 
@@ -109,11 +131,39 @@ const DashboardSettingsScreen = () => {
                     logoUrl: gymData.logoUrl
                 }}
                 showMessage={showMessage}
+                onUpdate={() => refreshGymData()}
+            />
+        )}
+
+        {activeTab === 'ranks' && (
+            <RankSettingsTab 
+                gymId={gymId}
+                initialData={gymData.grading}
+                showMessage={showMessage}
+                onUpdate={() => refreshGymData()} // <--- PASS IT HERE
+            />
+        )}
+
+        {activeTab === 'booking' && (
+            <BookingPoliciesTab 
+                gymId={gymId}
+                initialData={gymData.booking}
+                showMessage={showMessage}
+                onUpdate={() => refreshGymData()}
             />
         )}
 
         {activeTab === 'payments' && (
             <PaymentsSettingsTab stripeId={gymData.stripeAccountId} />
+        )}
+
+        {activeTab === 'legal' && (
+            <LegalSettingsTab 
+                gymId={gymId}
+                initialData={gymData.legal}
+                showMessage={showMessage}
+                onUpdate={() => refreshGymData()}
+            />
         )}
 
       </div>

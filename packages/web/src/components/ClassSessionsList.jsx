@@ -1,0 +1,89 @@
+import React from 'react';
+import { Calendar, XCircle, CheckCircle, ArrowRight } from 'lucide-react';
+
+export const ClassSessionsList = ({ classData, onCancelSession }) => {
+  // Generate next 4 weeks of dates based on recurring rules
+  const generateUpcomingSessions = () => {
+    if (!classData || !classData.days || classData.days.length === 0) return [];
+    
+    const sessions = [];
+    const today = new Date();
+    // Look ahead 28 days (4 weeks)
+    for (let i = 0; i < 28; i++) {
+        const date = new Date(today);
+        date.setDate(today.getDate() + i);
+        
+        const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+        
+        if (classData.days.includes(dayName)) {
+            // Check if this specific date is in the 'cancelledDates' array (we need to add this to data model)
+            const dateStr = date.toISOString().split('T')[0];
+            const isCancelled = classData.cancelledDates?.includes(dateStr);
+
+            sessions.push({
+                dateObj: date,
+                dateStr: dateStr,
+                dayName: dayName,
+                isCancelled: isCancelled
+            });
+        }
+    }
+    return sessions;
+  };
+
+  const sessions = generateUpcomingSessions();
+
+  return (
+    <div className="space-y-4 animate-in slide-in-from-right-4 duration-200">
+        <div className="flex justify-between items-center">
+            <h4 className="font-bold text-gray-800">Upcoming Sessions</h4>
+            <span className="text-xs text-gray-500">Next 4 Weeks</span>
+        </div>
+
+        <div className="border border-gray-200 rounded-lg overflow-hidden">
+            {sessions.length === 0 ? (
+                <div className="p-8 text-center text-gray-400">
+                    <Calendar className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+                    <p>No upcoming sessions generated.</p>
+                </div>
+            ) : (
+                <div className="divide-y divide-gray-100">
+                    {sessions.map((session, idx) => (
+                        <div key={idx} className={`flex items-center justify-between p-3 ${session.isCancelled ? 'bg-gray-50 opacity-60' : 'bg-white'}`}>
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${session.isCancelled ? 'bg-gray-200 text-gray-500' : 'bg-blue-50 text-blue-600'}`}>
+                                    <Calendar size={18} />
+                                </div>
+                                <div>
+                                    <p className={`text-sm font-bold ${session.isCancelled ? 'text-gray-500 line-through' : 'text-gray-800'}`}>
+                                        {session.dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                        {classData.time} • {classData.duration} min
+                                    </p>
+                                </div>
+                            </div>
+
+                            {session.isCancelled ? (
+                                <button 
+                                    onClick={() => onCancelSession(session.dateStr, false)} // Restore
+                                    className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1"
+                                >
+                                    <CheckCircle size={12} /> Restore
+                                </button>
+                            ) : (
+                                <button 
+                                    onClick={() => onCancelSession(session.dateStr, true)} // Cancel
+                                    className="text-xs font-bold text-red-600 hover:underline flex items-center gap-1"
+                                >
+                                    <XCircle size={12} /> Cancel
+                                </button>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    </div>
+  );
+};

@@ -432,3 +432,84 @@ export const unlinkFamilyMember = async (dependentId, payerId) => {
     return { success: false, error: error.message };
   }
 };
+
+/**
+ * Checks a member into a class.
+ * 1. Creates an attendance record.
+ * 2. Increments the member's attendance counter for that specific program.
+ */
+export const recordAttendance = async (gymId, data) => {
+  // data = { classId, className, memberId, memberName, programId, date, status }
+  try {
+    await runTransaction(db, async (transaction) => {
+      // 1. Create Reference for new Attendance Record
+      const attendanceRef = doc(collection(db, "gyms", gymId, "attendance"));
+      
+      // 2. Get User Reference to update their counters
+      const userRef = doc(db, "users", data.memberId);
+
+      // 3. Set the Attendance Document
+      transaction.set(attendanceRef, {
+        ...data,
+        createdAt: new Date(),
+        status: data.status || 'attended', // 'booked', 'attended', 'no-show'
+      });
+
+      // 4. If status is 'attended', increment the user's progress
+      if (data.status === 'attended' && data.programId) {
+        // We use a map to track attendance per program: attendanceCounts.bjj_adult = 50
+        transaction.update(userRef, {
+           [`attendanceCounts.${data.programId}`]: increment(1),
+           lastAttended: new Date()
+        });
+      }
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error recording attendance:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Fetch history for a specific member (for the Profile Modal)
+ */
+export const getMemberAttendance = async (gymId, memberId) => {
+  try {
+    const attRef = collection(db, "gyms", gymId, "attendance");
+    const q = query(
+      attRef, 
+      where("memberId", "==", memberId),
+      orderBy("createdAt", "desc"),
+      limit(20) // Only fetch last 20 for the modal
+    );
+    
+    const snapshot = await getDocs(q);
+    const history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    return { success: true, history };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Fetch roster for a specific class instance (for the Admin Calendar view)
+ */
+export const getClassRoster = async (gymId, classId, dateString) => {
+    // dateString should be "2023-10-27" (YYYY-MM-DD) to group by specific day
+    try {
+        const attRef = collection(db, "gyms", gymId, "attendance");
+        const q = query(
+            attRef,
+            where("classId", "==", classId),
+            where("dateString", "==", dateString) 
+        );
+        
+        const snapshot = await getDocs(q);
+        const roster = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        return { success: true, roster };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+};
