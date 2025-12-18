@@ -5,10 +5,14 @@ import {
 } from 'lucide-react';
 
 import { auth, db } from '../../../../shared/api/firebaseConfig';
-// IMPORTS UPDATED: Added archiveMember
 import { getGymMembers, deleteMember, archiveMember } from '../../../../shared/api/firestore';
 import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
+
+// --- UPDATE THIS IMPORT ---
+// Since you created a folder named MemberFormModal with an index.jsx inside, 
+// this path works automatically.
 import { MemberFormModal } from '../../components/MemberFormModal'; 
+
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { MemberTableRow } from '../../components/MemberTableRow'; 
 
@@ -90,8 +94,6 @@ const DashboardMembersScreen = () => {
       }
 
       // 2. Determine Action (Delete vs Archive)
-      // LOGIC: If they are 'active', we Archive (Soft Delete). 
-      // If they are 'trialing', 'archived', or 'prospect', we Allow Hard Delete.
       const isSafeToDelete = member.status === 'archived' || member.status === 'trialing' || !member.status || member.status === 'prospect';
       
       setActionModal({
@@ -106,11 +108,8 @@ const DashboardMembersScreen = () => {
       if (!actionModal.memberId) return;
 
       if (actionModal.type === 'delete') {
-          // Hard Delete (Destroys Data)
           await deleteMember(actionModal.memberId);
       } else if (actionModal.type === 'archive') {
-          // Soft Delete (Saves timestamp for Analytics)
-          // We pass "Admin Action" as the reason for now.
           await archiveMember(actionModal.memberId, "Admin Dashboard Action");
       }
 

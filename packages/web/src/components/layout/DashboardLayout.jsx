@@ -3,13 +3,14 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { 
-  LayoutDashboard, Calendar, Users, Settings, LogOut, Menu, Dumbbell, Briefcase, CreditCard, BarChart3 
+  LayoutDashboard, Calendar, Users, Settings, LogOut, Menu, 
+  Dumbbell, Briefcase, CreditCard, BarChart3, BookOpen // <--- 1. Added BookOpen icon
 } from 'lucide-react';
 import { auth, db } from '../../../../shared/api/firebaseConfig';
 
 const DashboardLayout = () => {
   const [gymName, setGymName] = useState('My Gym');
-  const [gymId, setGymId] = useState(null); // <--- 1. NEW STATE
+  const [gymId, setGymId] = useState(null);
   const [logoUrl, setLogoUrl] = useState(null);
   
   const [theme, setTheme] = useState({ 
@@ -23,11 +24,15 @@ const DashboardLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Navigation Config
+  // --- 2. UPDATED NAVIGATION ITEMS ---
   const navItems = [
     { name: 'Home', path: '/dashboard', icon: LayoutDashboard },
-    { name: 'Reports', path: '/dashboard/analytics', icon: BarChart3 }, // <--- 2. ADDED REPORTS
-    { name: 'Schedule', path: '/dashboard/schedule', icon: Calendar },
+    { name: 'Reports', path: '/dashboard/analytics', icon: BarChart3 },
+    
+    // Split Schedule into two:
+    { name: 'Calendar', path: '/dashboard/calendar', icon: Calendar }, 
+    { name: 'Classes', path: '/dashboard/classes', icon: BookOpen },
+    
     { name: 'Memberships', path: '/dashboard/memberships', icon: CreditCard },
     { name: 'Members', path: '/dashboard/members', icon: Users },
     { name: 'Staff', path: '/dashboard/staff', icon: Briefcase },
@@ -77,7 +82,7 @@ const DashboardLayout = () => {
 
         if (userSnap.exists() && userSnap.data().gymId) {
             const gId = userSnap.data().gymId;
-            setGymId(gId); // <--- 3. SET GYM ID HERE
+            setGymId(gId);
 
             const gymRef = doc(db, 'gyms', gId);
             const gymSnap = await getDoc(gymRef);
@@ -182,7 +187,8 @@ const DashboardLayout = () => {
             <h1 className="text-xl font-semibold">
               {loading ? '...' : 
                 location.pathname.includes('analytics') ? 'Reports' : 
-                location.pathname.includes('schedule') ? 'Schedule' : 
+                location.pathname.includes('calendar') ? 'Calendar' : 
+                location.pathname.includes('classes') ? 'Classes' : 
                 location.pathname.includes('settings') ? 'Settings' : 
                 location.pathname.includes('memberships') ? 'Memberships' : 
                 location.pathname.includes('members') ? 'Members' : 
@@ -249,7 +255,6 @@ const DashboardLayout = () => {
         )}
 
         <main className="flex-1 overflow-y-auto bg-gray-50 p-6">
-          {/* 4. PASS GYM ID DOWN */}
           <Outlet context={{ theme, gymName, gymId }} />
         </main>
       </div>

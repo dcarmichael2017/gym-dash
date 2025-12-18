@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 // Layouts
 import { AuthLayout } from './components/layout/AuthLayout.jsx';
-import DashboardLayout from './components/layout/DashboardLayout.jsx'; 
+import DashboardLayout from './components/layout/DashboardLayout.jsx';
 
 // Auth
 import { ProtectedRoute } from './components/auth/ProtectedRoute.jsx';
@@ -23,13 +23,13 @@ import { StripeSuccessScreen } from './screens/onboarding/StripeSuccessScreen.js
 
 // Screens - Dashboard
 import DashboardHomeScreen from './screens/dashboard/DashboardHomeScreen.jsx';
-import DashboardScheduleScreen from './screens/dashboard/DashboardScheduleScreen.jsx';
 import DashboardMembershipsScreen from './screens/dashboard/DashboardMembershipsScreen.jsx';
 import DashboardMembersScreen from './screens/dashboard/DashboardMembersScreen.jsx';
 import DashboardStaffScreen from './screens/dashboard/DashboardStaffScreen.jsx';
 import DashboardSettingsScreen from './screens/dashboard/DashboardSettingsScreen.jsx';
-// --- NEW IMPORT ---
-import DashboardAnalyticsScreen from './screens/dashboard/DashboardAnalyticsScreen.jsx'; 
+import DashboardAnalyticsScreen from './screens/dashboard/DashboardAnalyticsScreen.jsx';
+import DashboardCalendarScreen from './screens/dashboard/DashboardCalendarScreen.jsx';
+import DashboardClassesScreen from './screens/dashboard/DashboardClassesScreen.jsx';
 
 function App() {
   return (
@@ -43,7 +43,7 @@ function App() {
 
         {/* --- PRIVATE APP ROUTES --- */}
         <Route element={<ProtectedRoute />}>
-          
+
           {/* Onboarding Routes */}
           <Route element={<AuthLayout />}>
             <Route path="/onboarding/step-1" element={<Step1_GymDetailsScreen />} />
@@ -59,10 +59,12 @@ function App() {
           {/* --- ADMIN DASHBOARD --- */}
           <Route path="/dashboard" element={<DashboardLayout />}>
             <Route index element={<DashboardHomeScreen />} />
-            {/* --- NEW ROUTE --- */}
-            <Route path="analytics" element={<DashboardAnalyticsScreen />} /> 
-            
-            <Route path="schedule" element={<DashboardScheduleScreen />} />
+            <Route path="analytics" element={<DashboardAnalyticsScreen />} />
+
+            {/* REPLACES THE OLD SCHEDULE ROUTE */}
+            <Route path="calendar" element={<DashboardCalendarScreen />} />
+            <Route path="classes" element={<DashboardClassesScreen />} />
+
             <Route path="memberships" element={<DashboardMembershipsScreen />} />
             <Route path="members" element={<DashboardMembersScreen />} />
             <Route path="staff" element={<DashboardStaffScreen />} />

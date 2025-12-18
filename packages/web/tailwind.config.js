@@ -1,6 +1,10 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  // The 'content' array is intentionally removed.
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",        // Scans your web/src folder
+    "../../packages/shared/**/*.{js,ts,jsx,tsx}" // Scans your shared folder (adjust path logic if needed)
+  ],
   theme: {
     extend: {
       borderRadius: {
@@ -8,5 +12,5 @@ export default {
       }
     },
   },
-  plugins: [],
+  plugins: [require("tailwindcss-animate")],
 }

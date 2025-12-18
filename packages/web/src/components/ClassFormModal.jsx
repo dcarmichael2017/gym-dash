@@ -15,6 +15,8 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
     const [rankSystems, setRankSystems] = useState([]);
     const [loading, setLoading] = useState(false);
 
+    const isExistingClass = classData && classData.id;
+
     // --- FORM STATE ---
     const [formData, setFormData] = useState({
         name: '',
@@ -232,7 +234,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                 <div className="border-b border-gray-100 bg-gray-50 shrink-0">
                     <div className="px-6 py-4 flex justify-between items-center">
                         <h3 className="font-bold text-lg text-gray-800">
-                            {classData ? 'Edit Class' : 'Add New Class'}
+                            {isExistingClass ? 'Edit Class' : 'Add New Class'}
                         </h3>
                         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
                             <X className="h-5 w-5" />
@@ -252,7 +254,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                         </button>
 
                         {/* Only show Sessions for existing classes */}
-                        {classData && (
+                        {isExistingClass && (
                             <button onClick={() => setActiveTab('sessions')} className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'sessions' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                                 <CalendarRange size={16} /> Sessions
                             </button>

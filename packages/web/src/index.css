@@ -12,3 +12,44 @@
 
 /* Scan files in the sibling 'shared' package */
 @source "../../../packages/shared/components/**/*.{js,ts,jsx,tsx}";
+
+/* =========================================
+   PREMIUM SLIDE ANIMATIONS
+   Includes: Motion Blur + Micro-Scaling + Cubic Bezier
+   ========================================= */
+
+@keyframes slideInRight {
+  0% {
+    opacity: 0;
+    transform: translateX(50px) scale(0.98); /* Start slightly smaller and to right */
+    filter: blur(5px); /* Motion blur effect */
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes slideInLeft {
+  0% {
+    opacity: 0;
+    transform: translateX(-50px) scale(0.98); /* Start slightly smaller and to left */
+    filter: blur(5px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.animate-slide-right {
+  /* cubic-bezier(0.2, 0.8, 0.2, 1) is a classic "Power" ease. 
+     It starts fast and lands very softly. */
+  animation: slideInRight 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.animate-slide-left {
+  animation: slideInLeft 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
