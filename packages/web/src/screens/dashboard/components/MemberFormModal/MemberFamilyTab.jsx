@@ -5,7 +5,7 @@ import {
     searchMembers, 
     linkFamilyMember, 
     unlinkFamilyMember 
-} from '../../../../shared/api/firestore';
+} from '../../../../../../shared/api/firestore';
 
 export const MemberFamilyTab = ({ memberData, gymId, onSave, onSelectMember, allMembers = [] }) => {
     const [searchTerm, setSearchTerm] = useState('');

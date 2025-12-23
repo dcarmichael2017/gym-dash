@@ -1,7 +1,7 @@
 // src/features/members/components/MemberFormModal/MemberHistoryTab.jsx
 import React, { useState, useEffect } from 'react';
 import { History, Calendar, Clock, CheckCircle, User } from 'lucide-react'; // Added User icon
-import { getMemberAttendance } from '../../../../shared/api/firestore';
+import { getMemberAttendance } from '../../../../../../shared/api/firestore';
 
 export const MemberHistoryTab = ({ gymId, memberId }) => {
     const [history, setHistory] = useState([]);

@@ -5,8 +5,8 @@ import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-reac
 import { auth, db } from '../../../../shared/api/firebaseConfig';
 import { getClasses, getStaffList, getGymDetails, getWeeklyAttendanceCounts, updateClass } from '../../../../shared/api/firestore';
 import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
-import { WeeklyCalendarView } from '../../components/WeeklyCalendarView';
-import { SessionDetailsModal } from '../../components/SessionDetailsModal';
+import { WeeklyCalendarView } from './components/WeeklyCalendarView';
+import { SessionDetailsModal } from './components/SessionFormModal';
 
 const DashboardCalendarScreen = () => {
   const [loading, setLoading] = useState(true);

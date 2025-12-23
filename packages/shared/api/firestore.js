@@ -1,5 +1,6 @@
-import { doc, setDoc, addDoc, collection, updateDoc, getDocs, getDoc, deleteDoc, query, where, writeBatch, arrayUnion, arrayRemove, orderBy, limit, increment } from "firebase/firestore";
+import { doc, setDoc, addDoc, collection, updateDoc, getDocs, getDoc, deleteDoc, query, where, writeBatch, arrayUnion, arrayRemove, orderBy, limit, increment, runTransaction } from "firebase/firestore";
 import { db } from "./firebaseConfig.js";
+import { BOOKING_STATUS, MEMBER_STATUS } from '../constants/strings.js';
 
 // --- AUTH & USER CREATION ---
 
@@ -551,73 +552,126 @@ export const searchMembersForBooking = async (gymId, searchTerm) => {
 };
 
 /**
- * 2. BOOK: Add a member to the roster
- * UPDATED: Handles re-booking a previously cancelled member.
+ * 2. BOOK: Add a member to the roster (Gatekeeper + Capacity + Waitlist)
  */
-export const bookMember = async (gymId, classData, member) => {
+export const bookMember = async (gymId, classInfo, member, options = {}) => {
   try {
-    const attendanceRef = collection(db, "gyms", gymId, "attendance");
+    // We use runTransaction to ensure we don't overbook capacity due to race conditions
+    return await runTransaction(db, async (transaction) => {
+      
+      const attendanceRef = collection(db, "gyms", gymId, "attendance");
+      
+      // A. Fetch the Latest Class Data (Don't trust the UI payload for capacity)
+      const classDocRef = doc(db, "gyms", gymId, "classes", classInfo.id);
+      const classSnap = await transaction.get(classDocRef);
+      
+      if (!classSnap.exists()) throw "Class does not exist.";
+      const classData = classSnap.data();
 
-    const [year, month, day] = classData.dateString.split('-').map(Number);
-    const [hours, minutes] = classData.time.split(':').map(Number);
-    const classDateObj = new Date(year, month - 1, day, hours, minutes);
-
-    // A. Check if record exists (Booked, Attended, OR Cancelled)
-    const q = query(
-      attendanceRef,
-      where("classId", "==", classData.id),
-      where("dateString", "==", classData.dateString),
-      where("memberId", "==", member.id)
-    );
-
-    const existingSnapshot = await getDocs(q);
-
-    // B. Handle Existing Record
-    if (!existingSnapshot.empty) {
-      const docSnap = existingSnapshot.docs[0];
-      const existingData = docSnap.data();
-
-      // SCENARIO 1: They are cancelled -> Resurrect them
-      if (existingData.status === 'cancelled') {
-        await updateDoc(docSnap.ref, {
-          status: 'booked',
-          cancelledAt: null, // Clear the timestamp
-          updatedAt: new Date()
-        });
-        // Return the updated object so UI can use it
-        return { success: true, booking: { id: docSnap.id, ...existingData, status: 'booked' } };
+      // B. Run The Gatekeeper Logic
+      const gatekeeper = canUserBook(classData, member);
+      if (!gatekeeper.allowed) {
+        throw gatekeeper.reason; // Stops transaction
       }
 
-      // SCENARIO 2: They are already booked/attended
-      return { success: false, error: "Member is already in this class." };
-    }
+      // C. Check Existing Booking (Prevent Duplicates)
+      const q = query(
+        attendanceRef,
+        where("classId", "==", classInfo.id),
+        where("dateString", "==", classInfo.dateString),
+        where("memberId", "==", member.id)
+      );
+      const existingSnapshot = await getDocs(q); // Note: inside transaction, query reads are tricky, usually better to read by ID. 
+      // For MVP simplicity without composite keys, we accept a small race condition here or use a composite ID (classId_date_memberId).
+      // Let's stick to your pattern but check results.
+      
+      let existingDoc = null;
+      if (!existingSnapshot.empty) {
+        existingDoc = existingSnapshot.docs[0];
+        const existingData = existingDoc.data();
+        if (existingData.status !== BOOKING_STATUS.CANCELLED) {
+           throw "Member is already booked in this class.";
+        }
+      }
 
-    // C. Create New Record (Standard Path)
+      // D. CAPACITY & LINE INTEGRITY CHECK
+      // 1. Count Active Bookings
+      const rosterQuery = query(
+        attendanceRef, 
+        where("classId", "==", classInfo.id),
+        where("dateString", "==", classInfo.dateString),
+        where("status", "in", [BOOKING_STATUS.BOOKED, BOOKING_STATUS.ATTENDED])
+      );
+      const rosterSnap = await getDocs(rosterQuery);
+      const currentCount = rosterSnap.size;
+      const maxCapacity = parseInt(classData.maxCapacity) || 999;
 
-    const newBooking = {
-      classId: classData.id,
-      className: classData.name,
-      instructorName: classData.instructorName || null,
-      dateString: classData.dateString,
-      classTime: classData.time,
-      classTimestamp: classDateObj, // Ensure this Date object is valid
+      // 2. Count Waitlist (Is there a line?)
+      const waitlistQuery = query(
+        attendanceRef, 
+        where("classId", "==", classInfo.id),
+        where("dateString", "==", classInfo.dateString),
+        where("status", "==", BOOKING_STATUS.WAITLISTED)
+      );
+      const waitlistSnap = await getDocs(waitlistQuery);
+      const waitlistCount = waitlistSnap.size;
 
-      memberId: member.id,
-      // CRITICAL: Ensure this is reading the 'name' property we fixed in the Modal
-      memberName: member.name || "Unknown Member",
-      memberPhoto: member.photoUrl || null,
+      let finalStatus = BOOKING_STATUS.BOOKED;
+      
+      // LOGIC: Class is full OR (Class has space BUT there is a line)
+      if (!options.force) {
+          if (currentCount >= maxCapacity || waitlistCount > 0) {
+            finalStatus = BOOKING_STATUS.WAITLISTED;
+          }
+      }
 
-      status: 'booked',
-      createdAt: new Date()
-    };
+      // E. WRITE TO DB
+      const timestamp = new Date();
+      
+      // Prepare Booking Object
+      // (Ensure we use the timestamp from the specific session date/time)
+      const [year, month, day] = classInfo.dateString.split('-').map(Number);
+      const [hours, minutes] = classInfo.time.split(':').map(Number);
+      const sessionDateObj = new Date(year, month - 1, day, hours, minutes);
 
-    const docRef = await addDoc(attendanceRef, newBooking);
-    // Return the FULL object so the UI updates instantly with the name
-    return { success: true, booking: { id: docRef.id, ...newBooking } };
+      const bookingPayload = {
+        classId: classInfo.id,
+        className: classInfo.name,
+        instructorName: classData.instructorName || classInfo.instructorName || null, // Prefer DB data
+        dateString: classInfo.dateString,
+        classTime: classInfo.time,
+        classTimestamp: sessionDateObj,
+        memberId: member.id,
+        memberName: member.name || "Unknown Member",
+        memberPhoto: member.photoUrl || null,
+        status: finalStatus,
+        bookedAt: timestamp,
+        bookingType: gatekeeper.type // 'membership' or 'drop-in'
+      };
+
+      if (existingDoc) {
+        // Resurrect cancelled booking
+        transaction.update(existingDoc.ref, {
+          ...bookingPayload,
+          cancelledAt: null 
+        });
+        return { success: true, status: finalStatus, recovered: true };
+      } else {
+        // New Booking
+        const newRef = doc(attendanceRef); // Generate ID
+        transaction.set(newRef, {
+          ...bookingPayload,
+          createdAt: timestamp
+        });
+        return { success: true, status: finalStatus, id: newRef.id };
+      }
+    });
 
   } catch (error) {
-    console.error("Booking error:", error);
-    return { success: false, error: error.message };
+    console.error("Booking transaction failed:", error);
+    // Return friendly error string if we threw it, otherwise generic
+    const msg = typeof error === 'string' ? error : error.message;
+    return { success: false, error: msg };
   }
 };
 
@@ -632,7 +686,7 @@ export const checkInMember = async (gymId, attendanceId, memberId, programId) =>
 
     // 1. Mark Attendance Record as Attended
     await updateDoc(attRef, {
-      status: 'attended',
+      status: BOOKING_STATUS.ATTENDED,
       checkedInAt: new Date()
     });
 
@@ -700,16 +754,58 @@ export const checkInMember = async (gymId, attendanceId, memberId, programId) =>
 };
 
 /**
- * 4. CANCEL BOOKING: Mark a booking as cancelled
- * We update the status instead of deleting to keep a record.
+ * 4. CANCEL BOOKING (Smart Cancel)
+ * Marks a booking as cancelled AND automatically promotes the next waitlisted user.
  */
 export const cancelBooking = async (gymId, attendanceId) => {
   try {
-    const attRef = doc(db, "gyms", gymId, "attendance", attendanceId);
-    await updateDoc(attRef, {
-      status: 'cancelled',
-      cancelledAt: new Date()
+    await runTransaction(db, async (transaction) => {
+      // 1. Get the booking to be cancelled
+      const attRef = doc(db, "gyms", gymId, "attendance", attendanceId);
+      const attSnap = await transaction.get(attRef);
+
+      if (!attSnap.exists()) throw "Booking not found.";
+      const data = attSnap.data();
+
+      // Only promote someone if the person being cancelled was actually taking up a spot
+      const wasTakingSpot = data.status === BOOKING_STATUS.BOOKED || data.status === BOOKING_STATUS.ATTENDED;
+
+      // 2. Mark target as cancelled
+      transaction.update(attRef, {
+        status: BOOKING_STATUS.CANCELLED,
+        cancelledAt: new Date(),
+        updatedAt: new Date()
+      });
+
+      // 3. If they were taking a spot, find the next waitlister
+      if (wasTakingSpot) {
+        const attendanceCollection = collection(db, "gyms", gymId, "attendance");
+        const q = query(
+          attendanceCollection,
+          where("classId", "==", data.classId),
+          where("dateString", "==", data.dateString),
+          where("status", "==", BOOKING_STATUS.WAITLISTED),
+          orderBy("bookedAt", "asc"),
+          limit(1)
+        );
+
+        // Note: We have to perform the query outside the transaction lock scope in client SDKs usually, 
+        // but for this logic, we just need to find the person. 
+        // We await getDocs here.
+        const waitlistSnap = await getDocs(q);
+
+        if (!waitlistSnap.empty) {
+          const nextInLine = waitlistSnap.docs[0];
+          // 4. Promote them
+          transaction.update(nextInLine.ref, {
+            status: BOOKING_STATUS.BOOKED,
+            promotedAt: new Date(),
+            updatedAt: new Date()
+          });
+        }
+      }
     });
+
     return { success: true };
   } catch (error) {
     console.error("Error cancelling booking:", error);
@@ -748,6 +844,126 @@ export const getWeeklyAttendanceCounts = async (gymId, startDateStr, endDateStr)
     return { success: true, counts };
   } catch (error) {
     console.error("Error fetching counts:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Determines if a user is allowed to book a specific class.
+ * Returns { allowed: boolean, reason: string, type: 'membership' | 'drop-in' }
+ */
+export const canUserBook = (classData, userData) => {
+  // 1. Check if Class is open to everyone (Drop-in)
+  // If drop-in is enabled, we allow booking, but the UI might prompt for payment later.
+  // We prioritize Membership access first to avoid charging members.
+  
+  const allowedPlans = classData.allowedMembershipIds || [];
+  const userPlanId = userData.membershipId; // Assuming user has a single membershipId field
+  const userStatus = userData.status;
+
+  // 2. Check Membership Validity
+  // User must be Active or Trialing to use membership benefits
+  const hasValidStatus = [MEMBER_STATUS.ACTIVE, MEMBER_STATUS.TRIALING].includes(userStatus);
+  
+  if (hasValidStatus && userPlanId && allowedPlans.includes(userPlanId)) {
+    return { allowed: true, reason: "Membership Access", type: 'membership' };
+  }
+
+  // 3. Fallback to Drop-in
+  if (classData.dropInEnabled) {
+    return { allowed: true, reason: "Drop-in Available", type: 'drop-in' };
+  }
+
+  // 4. Rejection
+  return { 
+    allowed: false, 
+    reason: hasValidStatus 
+      ? "Your membership plan does not include this class." 
+      : "You must have an active membership to book this class.",
+    type: 'denied'
+  };
+};
+
+/**
+ * 5. PROCESS WAITLIST (Batch Promotion)
+ * Checks if there is capacity and promotes waitlisted users FIFO.
+ * Returns the number of users promoted.
+ */
+export const processWaitlist = async (gymId, classId, dateString) => {
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const attendanceRef = collection(db, "gyms", gymId, "attendance");
+      
+      // 1. Get Class Data for Capacity
+      const classDocRef = doc(db, "gyms", gymId, "classes", classId);
+      const classSnap = await transaction.get(classDocRef);
+      if (!classSnap.exists()) throw "Class not found";
+      const maxCapacity = parseInt(classSnap.data().maxCapacity) || 999;
+
+      // 2. Get Current Roster Counts (Need to query via reads)
+      // Note: In transactions, queries must be simple. We'll fetch all non-cancelled for this session.
+      const q = query(
+        attendanceRef,
+        where("classId", "==", classId),
+        where("dateString", "==", dateString)
+      );
+      const snapshot = await getDocs(q); // We await this inside to ensure consistency
+      
+      let currentActive = 0;
+      let waitlist = [];
+
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.status === BOOKING_STATUS.BOOKED || data.status === BOOKING_STATUS.ATTENDED) {
+          currentActive++;
+        } else if (data.status === BOOKING_STATUS.WAITLISTED) {
+          waitlist.push({ ref: doc.ref, data: data });
+        }
+      });
+
+      // 3. Sort Waitlist (FIFO) manually since we fetched all
+      waitlist.sort((a, b) => {
+         const dateA = a.data.bookedAt?.seconds || 0;
+         const dateB = b.data.bookedAt?.seconds || 0;
+         return dateA - dateB;
+      });
+
+      // 4. Determine how many spots to fill
+      let spotsAvailable = maxCapacity - currentActive;
+      let promotedCount = 0;
+
+      // 5. Promote Loop
+      for (const waiter of waitlist) {
+        if (spotsAvailable > 0) {
+          transaction.update(waiter.ref, {
+            status: BOOKING_STATUS.BOOKED,
+            promotedAt: new Date(),
+            updatedAt: new Date()
+          });
+          spotsAvailable--;
+          promotedCount++;
+        } else {
+          break; // Class full again
+        }
+      }
+
+      return { success: true, promoted: promotedCount };
+    });
+  } catch (error) {
+    console.error("Process waitlist error:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const getClassDetails = async (gymId, classId) => {
+  try {
+    const docRef = doc(db, "gyms", gymId, "classes", classId);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return { success: true, data: docSnap.data() };
+    }
+    return { success: false, error: "Class not found" };
+  } catch (error) {
     return { success: false, error: error.message };
   }
 };

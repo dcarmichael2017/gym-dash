@@ -11,10 +11,10 @@ import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
 // --- UPDATE THIS IMPORT ---
 // Since you created a folder named MemberFormModal with an index.jsx inside, 
 // this path works automatically.
-import { MemberFormModal } from '../../components/MemberFormModal'; 
+import { MemberFormModal } from './components/MemberFormModal'; 
 
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
-import { MemberTableRow } from '../../components/MemberTableRow'; 
+import { MemberTableRow } from './components/MemberTableRow'; 
 
 const DashboardMembersScreen = () => {
   const [loading, setLoading] = useState(true);

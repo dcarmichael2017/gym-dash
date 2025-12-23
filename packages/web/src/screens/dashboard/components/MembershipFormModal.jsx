@@ -3,7 +3,7 @@ import {
   X, Calendar, Clock, CheckCircle2, AlertCircle, Coins 
 } from 'lucide-react';
 // FIX: Removed one "../" because this file is in src/components/
-import { createMembershipTier, updateMembershipTier } from '../../../shared/api/firestore';
+import { createMembershipTier, updateMembershipTier } from '../../../../../shared/api/firestore';
 
 export const MembershipFormModal = ({ isOpen, onClose, gymId, tierData, onSave }) => {
   const [formData, setFormData] = useState({

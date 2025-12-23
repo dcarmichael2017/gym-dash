@@ -153,7 +153,14 @@ export const WeeklyCalendarView = ({
 
                 {/* Render Classes (The Floating Cards) */}
                 {classes
-                  .filter(c => c.days.includes(day))
+                  .filter(c => {
+                      // 1. Handle One-Off Events
+                      if (c.frequency === 'Single Event') {
+                          return c.startDate === currentDayDateStr;
+                      }
+                      // 2. Handle Recurring Classes
+                      return c.days.includes(day);
+                    })
                   .map(cls => {
                     const isCancelled = cls.cancelledDates?.includes(currentDayDateStr);
                     const lookupKey = `${cls.id}_${currentDayDateStr}`;

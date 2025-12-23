@@ -10,7 +10,7 @@ import {
     searchMembers,
     linkFamilyMember,
     unlinkFamilyMember
-} from '../../../shared/api/firestore';
+} from '../../../../../../shared/api/firestore';
 
 export const MemberFamilyTab = ({ memberData, gymId, allMembers, onSave, onSelectMember }) => {
     // Modes: 'view', 'add_choice', 'search', 'create_dependent'

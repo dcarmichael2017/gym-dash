@@ -12,7 +12,7 @@ import { Trash2, Plus, Calendar as CalendarIcon, Clock, User } from 'lucide-reac
 
 // Import the reusable component
 // Adjust path if necessary based on your folder structure
-import { ClassFormModal } from '../../components/ClassFormModal';
+import { ClassFormModal } from '../dashboard/components/ClassFormModal';
 
 export const Step4_ClassScreen = () => {
   // Data state

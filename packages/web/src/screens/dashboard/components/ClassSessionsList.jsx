@@ -4,6 +4,23 @@ import { Calendar, XCircle, CheckCircle, ArrowRight } from 'lucide-react';
 export const ClassSessionsList = ({ classData, onCancelSession }) => {
     
     const generateUpcomingSessions = () => {
+        if (classData.frequency === 'Single Event') {
+            if (!classData.startDate) return [];
+            
+            const [y, m, d] = classData.startDate.split('-').map(Number);
+            const [h, min] = classData.time.split(':').map(Number);
+            const evtDate = new Date(y, m - 1, d, h, min);
+            
+            // Check if it's in the past (Optional: maybe show it anyway for context?)
+            // If you want to show it regardless of date:
+            return [{
+                dateObj: evtDate,
+                dateStr: classData.startDate,
+                dayName: evtDate.toLocaleDateString('en-US', { weekday: 'long' }),
+                isCancelled: classData.cancelledDates?.includes(classData.startDate)
+            }];
+        }
+        
         if (!classData || !classData.days || classData.days.length === 0) return [];
         
         const sessions = [];

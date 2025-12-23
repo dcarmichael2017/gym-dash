@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 // Layouts
 import { AuthLayout } from './components/layout/AuthLayout.jsx';
 import DashboardLayout from './components/layout/DashboardLayout.jsx';
+import { ConfirmationProvider } from './context/ConfirmationContext.jsx';
 
 // Auth
 import { ProtectedRoute } from './components/auth/ProtectedRoute.jsx';
@@ -33,6 +34,7 @@ import DashboardClassesScreen from './screens/dashboard/DashboardClassesScreen.j
 
 function App() {
   return (
+    <ConfirmationProvider>
     <BrowserRouter>
       <Routes>
         {/* --- PUBLIC AUTH ROUTES --- */}
@@ -77,6 +79,7 @@ function App() {
 
       </Routes>
     </BrowserRouter>
+    </ConfirmationProvider>
   );
 }
 

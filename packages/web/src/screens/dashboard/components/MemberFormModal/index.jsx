@@ -16,8 +16,8 @@ import {
   updateMemberProfile,
   getMembershipTiers,
   getGymDetails
-} from '../../../../shared/api/firestore';
-import { uploadStaffPhoto } from '../../../../shared/api/storage';
+} from '../../../../../../shared/api/firestore';
+import { uploadStaffPhoto } from '../../../../../../shared/api/storage';
 
 // --- SIDEBAR BUTTON COMPONENT ---
 const NavItem = ({ id, label, icon: Icon, active, onClick }) => (
