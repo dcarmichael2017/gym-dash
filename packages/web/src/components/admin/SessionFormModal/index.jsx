@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Edit2, Ban, CheckCircle } from 'lucide-react';
-import { useConfirm } from '../../../../context/ConfirmationContext'; 
-import { getClassRoster, bookMember, checkInMember, getGymMembers, cancelBooking, processWaitlist, getClassDetails } from '../../../../../../shared/api/firestore';
-import { BOOKING_STATUS } from '../../../../../../shared/constants/strings';
+import { useConfirm } from '../../../context/ConfirmationContext.jsx'; 
+import { getClassRoster, bookMember, checkInMember, getGymMembers, cancelBooking, processWaitlist, getClassDetails } from '../../../../../shared/api/firestore';
+import { BOOKING_STATUS } from '../../../../../shared/constants/strings';
 
 import { SessionHeader } from './SessionHeader';
 import { SessionStats } from './SessionStats';

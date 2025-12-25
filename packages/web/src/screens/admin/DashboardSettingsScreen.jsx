@@ -5,7 +5,7 @@ import { Building, Palette, CreditCard, Scale, Settings, Medal } from 'lucide-re
 // API Imports
 import { auth, db } from '../../../../shared/api/firebaseConfig';
 import { getGymDetails } from '../../../../shared/api/firestore';
-import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
+import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 
 // Component Imports
 import { GeneralSettingsTab } from './settings/GeneralSettingsTab';

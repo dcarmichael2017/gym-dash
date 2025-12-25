@@ -6,7 +6,7 @@ import {
 import { useOutletContext } from 'react-router-dom';
 import { TrendingUp, DollarSign } from 'lucide-react';
 import { useGymStats } from '../../../../shared/hooks/useGymStats';
-import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
+import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
 

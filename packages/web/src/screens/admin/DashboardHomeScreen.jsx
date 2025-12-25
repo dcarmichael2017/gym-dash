@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../../../shared/api/firebaseConfig';
-import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
+import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 
 // Import Widgets
-import { NextClassWidget } from './widgets/NextClassWidget';
-import { StatsWidget } from './widgets/StatsWidget';
-import { QuickActionsWidget } from './widgets/QuickActionsWidget';
+import { NextClassWidget } from '../../components/admin/widgets/NextClassWidget';
+import { StatsWidget } from '../../components/admin/widgets/StatsWidget';
+import { QuickActionsWidget } from '../../components/admin/widgets/QuickActionsWidget';
 
 const DashboardHomeScreen = () => {
   const [loading, setLoading] = useState(true);

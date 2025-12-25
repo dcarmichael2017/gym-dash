@@ -6,15 +6,15 @@ import {
 
 import { auth, db } from '../../../../shared/api/firebaseConfig';
 import { getGymMembers, deleteMember, archiveMember } from '../../../../shared/api/firestore';
-import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
+import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 
 // --- UPDATE THIS IMPORT ---
 // Since you created a folder named MemberFormModal with an index.jsx inside, 
 // this path works automatically.
-import { MemberFormModal } from './components/MemberFormModal'; 
+import { MemberFormModal } from '../../components/admin/MemberFormModal'; 
 
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
-import { MemberTableRow } from './components/MemberTableRow'; 
+import { MemberTableRow } from '../../components/admin/MemberTableRow'; 
 
 const DashboardMembersScreen = () => {
   const [loading, setLoading] = useState(true);

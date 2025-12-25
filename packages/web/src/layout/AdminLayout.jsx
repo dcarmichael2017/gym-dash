@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Calendar, Users, Settings, LogOut, Menu, 
   Dumbbell, Briefcase, CreditCard, BarChart3, BookOpen // <--- 1. Added BookOpen icon
 } from 'lucide-react';
-import { auth, db } from '../../../../shared/api/firebaseConfig';
+import { auth, db } from '../../../shared/api/firebaseConfig';
 
 const DashboardLayout = () => {
   const [gymName, setGymName] = useState('My Gym');

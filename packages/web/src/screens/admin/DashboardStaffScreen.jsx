@@ -22,7 +22,7 @@ import {
   updateStaffMember,
   checkStaffDependencies
 } from '../../../../shared/api/firestore';
-import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
+import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 import { uploadStaffPhoto } from '../../../../shared/api/storage';
 
 const DashboardStaffScreen = () => {

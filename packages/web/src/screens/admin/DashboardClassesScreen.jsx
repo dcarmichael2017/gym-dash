@@ -4,8 +4,8 @@ import { Plus, Trash2, Clock, Calendar as CalendarIcon, User, CalendarDays, Laye
 
 import { auth, db } from '../../../../shared/api/firebaseConfig';
 import { getClasses, deleteClass, getStaffList, getMembershipTiers, getGymDetails } from '../../../../shared/api/firestore';
-import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
-import { ClassFormModal } from './components/ClassFormModal';
+import { FullScreenLoader } from '../../components/common/FullScreenLoader';
+import { ClassFormModal } from '../../components/admin/ClassFormModal';
 
 const DashboardClassesScreen = () => {
   const [loading, setLoading] = useState(true);

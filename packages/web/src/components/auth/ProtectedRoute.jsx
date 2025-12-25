@@ -7,7 +7,7 @@ import { getDoc, doc } from 'firebase/firestore';
 // Using relative path to match your project structure
 import { auth, db } from '../../../../shared/api/firebaseConfig.js';
 // --- END UPDATE ---
-import { FullScreenLoader } from '../layout/FullScreenLoader.jsx';
+import { FullScreenLoader } from '../common/FullScreenLoader.jsx';
 
 export const ProtectedRoute = () => {
   const [isLoading, setIsLoading] = useState(true);

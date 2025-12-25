@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { User, Check, Trash2, CheckCircle, List, Plus, Search } from 'lucide-react';
-import { BOOKING_STATUS } from '../../../../../../shared/constants/strings';
+import { BOOKING_STATUS } from '../../../../../shared/constants/strings';
 
 export const SessionRoster = ({ 
     roster, 
@@ -31,7 +31,7 @@ export const SessionRoster = ({
             return dateA - dateB;
         });
 
-        return { activeMembers, waitlistedMembers: waitlist };
+        return { activeMembers: active, waitlistedMembers: waitlist };
     }, [roster]);
 
     const renderRow = (record, isWaitlist = false, rank = null) => {

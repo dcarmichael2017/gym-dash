@@ -2,8 +2,8 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 // Layouts
-import { AuthLayout } from './components/layout/AuthLayout.jsx';
-import DashboardLayout from './components/layout/DashboardLayout.jsx';
+import { AuthLayout } from './layout/AuthLayout.jsx';
+import DashboardLayout from './layout/AdminLayout.jsx';
 import { ConfirmationProvider } from './context/ConfirmationContext.jsx';
 
 // Auth
@@ -23,14 +23,14 @@ import { Step6_ConnectPaymentsScreen } from './screens/onboarding/Step6_ConnectP
 import { StripeSuccessScreen } from './screens/onboarding/StripeSuccessScreen.jsx';
 
 // Screens - Dashboard
-import DashboardHomeScreen from './screens/dashboard/DashboardHomeScreen.jsx';
-import DashboardMembershipsScreen from './screens/dashboard/DashboardMembershipsScreen.jsx';
-import DashboardMembersScreen from './screens/dashboard/DashboardMembersScreen.jsx';
-import DashboardStaffScreen from './screens/dashboard/DashboardStaffScreen.jsx';
-import DashboardSettingsScreen from './screens/dashboard/DashboardSettingsScreen.jsx';
-import DashboardAnalyticsScreen from './screens/dashboard/DashboardAnalyticsScreen.jsx';
-import DashboardCalendarScreen from './screens/dashboard/DashboardCalendarScreen.jsx';
-import DashboardClassesScreen from './screens/dashboard/DashboardClassesScreen.jsx';
+import DashboardHomeScreen from './screens/admin/DashboardHomeScreen.jsx';
+import DashboardMembershipsScreen from './screens/admin/DashboardMembershipsScreen.jsx';
+import DashboardMembersScreen from './screens/admin/DashboardMembersScreen.jsx';
+import DashboardStaffScreen from './screens/admin/DashboardStaffScreen.jsx';
+import DashboardSettingsScreen from './screens/admin/DashboardSettingsScreen.jsx';
+import DashboardAnalyticsScreen from './screens/admin/DashboardAnalyticsScreen.jsx';
+import DashboardCalendarScreen from './screens/admin/DashboardCalendarScreen.jsx';
+import DashboardClassesScreen from './screens/admin/DashboardClassesScreen.jsx';
 
 function App() {
   return (

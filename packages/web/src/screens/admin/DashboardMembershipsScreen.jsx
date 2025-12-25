@@ -20,10 +20,10 @@ import {
   getGymMembers
 } from '../../../../shared/api/firestore';
 
-import { FullScreenLoader } from '../../components/layout/FullScreenLoader';
+import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 import { ConfirmationModal } from '../../components/common/ConfirmationModal';
-import { MembershipFormModal } from './components/MembershipFormModal';
-import { TierMembersModal } from './components/TierMembersModal'; // IMPORT NEW MODAL
+import { MembershipFormModal } from '../../components/admin/MembershipFormModal';
+import { TierMembersModal } from '../../components/admin/TierMembersModal'; // IMPORT NEW MODAL
 
 const DashboardMembershipsScreen = () => {
   const [loading, setLoading] = useState(true);

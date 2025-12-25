@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CalendarDays, CreditCard, Sliders, CalendarRange } from 'lucide-react';
-import { createClass, updateClass, getGymDetails } from '../../../../../../shared/api/firestore';
-import { ClassSessionsList } from '../../components/ClassSessionsList'; // Adjust path if needed!
+import { createClass, updateClass, getGymDetails } from '../../../../../shared/api/firestore';
+import { ClassSessionsList } from '../ClassSessionsList'; // Adjust path if needed!
 
 import { TabSchedule } from './TabSchedule';
 import { TabAccess } from './TabAccess';
