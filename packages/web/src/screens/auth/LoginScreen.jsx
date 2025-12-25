@@ -1,11 +1,8 @@
 // /packages/web/src/screens/auth/LoginScreen.jsx
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-// --- UPDATED IMPORT ---
-// Switched to a path alias for better monorepo compatibility.
-import { signInWithEmail } from '@shared/api/auth.js';
-// --- END UPDATE ---
-import { Building, LogIn } from 'lucide-react';
+import { signInWithEmail } from '@shared/api/auth.js'; // Ensure path alias works or use relative
+import { Building, LogIn, Lock, Mail } from 'lucide-react';
 
 export const LoginScreen = () => {
   const [email, setEmail] = useState('');
@@ -16,91 +13,102 @@ export const LoginScreen = () => {
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    console.log("[LoginScreen] Button clicked");
     setError(null);
     setIsLoading(true);
 
     const result = await signInWithEmail(email, password);
-    setIsLoading(false);
+    console.log("[LoginScreen] Auth Result:", result);
 
     if (result.success) {
-      console.log('Login successful! User ID:', result.user.uid);
-      // Navigate to the root, the ProtectedRoute will handle redirection
-      navigate('/'); 
+      console.log("[LoginScreen] Success. Waiting for App.jsx to handle redirect...");
+      // DO NOT NAVIGATE MANUALLY
     } else {
-      console.error("Login Error:", result.error);
+      console.log("[LoginScreen] Failure:", result.error);
+      setIsLoading(false);
       if (result.error.includes('auth/invalid-credential')) {
-        setError('Invalid email or password. Please try again.');
+        setError('Invalid email or password.');
       } else {
-        setError('An error occurred during login. Please try again.');
+        setError('Login failed. Please try again.');
       }
     }
   };
 
   return (
-    <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md border">
-      
-      <div className="flex flex-col items-center mb-6">
-        <div className="bg-slate-800 p-3 rounded-full mb-3">
-          <Building className="text-white h-8 w-8" />
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="bg-white p-6 sm:p-10 rounded-2xl shadow-xl w-full max-w-md border border-gray-100">
+        
+        <div className="flex flex-col items-center mb-8">
+          <div className="bg-blue-600 p-4 rounded-2xl shadow-lg shadow-blue-200 mb-4">
+            <Building className="text-white h-8 w-8" />
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900">Welcome Back</h1>
+          <p className="text-gray-500 mt-2">Sign in to continue</p>
         </div>
-        <h1 className="text-3xl font-bold text-gray-800">Welcome Back!</h1>
-        <p className="text-gray-500 mt-1">Log in to manage your gym.</p>
-      </div>
-      
-      <form onSubmit={handleLogin}>
-        <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-semibold mb-2 text-left" htmlFor="email">
-            Email Address
-          </label>
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 block w-full rounded-md shadow-sm py-2 px-3"
-            required
-            placeholder="you@example.com"
-          />
-        </div>
-        <div className="mb-6">
-          <label className="block text-gray-700 text-sm font-semibold mb-2 text-left" htmlFor="password">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 block w-full rounded-md shadow-sm py-2 px-3"
-            required
-            placeholder="••••••••••"
-          />
-        </div>
+        
+        <form onSubmit={handleLogin} className="space-y-5">
+          <div>
+            <label className="block text-gray-700 text-sm font-bold mb-2 ml-1" htmlFor="email">
+              Email Address
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Mail className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="pl-10 w-full h-12 rounded-xl border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-base"
+                required
+                placeholder="you@example.com"
+              />
+            </div>
+          </div>
 
-        {error && <p className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md p-3 mb-4">{error}</p>}
+          <div>
+            <label className="block text-gray-700 text-sm font-bold mb-2 ml-1" htmlFor="password">
+              Password
+            </label>
+            <div className="relative">
+               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Lock className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="pl-10 w-full h-12 rounded-xl border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-base"
+                required
+                placeholder="••••••••••"
+              />
+            </div>
+          </div>
 
-        <div>
+          {error && (
+            <div className="bg-red-50 border border-red-100 text-red-600 text-sm rounded-xl p-3 font-medium">
+              {error}
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-slate-800 hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-700 disabled:bg-slate-400 transition-colors"
+            className="w-full h-14 flex items-center justify-center rounded-xl shadow-lg shadow-blue-200 text-base font-bold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-500/50 disabled:bg-blue-300 transition-all active:scale-[0.98]"
           >
-            {isLoading ? 'Logging In...' : (
-              <>
-                <LogIn className="h-5 w-5 mr-2" /> Log In
-              </>
-            )}
+            {isLoading ? 'Logging In...' : 'Log In'}
           </button>
-        </div>
-      </form>
-      
-      <p className="text-sm text-center text-gray-600 mt-6">
-        Don't have an account?{' '}
-        <Link to="/signup" className="font-medium text-blue-600 hover:text-blue-500">
-          Sign Up
-        </Link>
-      </p>
+        </form>
+        
+        <p className="text-center text-gray-600 mt-8">
+          Don't have an account?{' '}
+          <Link to="/signup" className="font-bold text-blue-600 hover:text-blue-500">
+            Sign Up
+          </Link>
+        </p>
+      </div>
     </div>
   );
 };
-

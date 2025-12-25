@@ -985,3 +985,163 @@ export const getClassDetails = async (gymId, classId) => {
     return { success: false, error: error.message };
   }
 };
+
+/**
+ * Fetches list of gyms for the "Find a Gym" screen.
+ * For MVP, limits to 20. Later we will add geo-location filtering.
+ */
+export const searchGyms = async (searchTerm = '') => {
+  try {
+    const gymsRef = collection(db, "gyms");
+    let q;
+
+    if (searchTerm) {
+      // Simple name search
+      q = query(
+        gymsRef, 
+        where("name", ">=", searchTerm), 
+        where("name", "<=", searchTerm + "\uf8ff"),
+        limit(20)
+      );
+    } else {
+      q = query(gymsRef, limit(20));
+    }
+
+    const snapshot = await getDocs(q);
+    const gyms = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    return { success: true, gyms };
+  } catch (error) {
+    console.error("Error searching gyms:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Adds a user to a gym's membership list (Guest/Prospect status).
+ */
+export const joinGym = async (userId, gymId, gymName) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    
+    // Create the membership object
+    const newMembership = {
+        gymId: gymId,
+        gymName: gymName, // Cached for UI
+        role: 'member',
+        status: 'prospect', // Default to prospect until they pay/sign
+        joinedAt: new Date()
+    };
+
+    // Atomically add to array and set as active if it's their first
+    await updateDoc(userRef, {
+        memberships: arrayUnion(newMembership),
+        lastActiveGymId: gymId, // Switch them to this gym immediately
+        // If they don't have a home gym yet, set it
+        // (Note: Firestore can't conditionally set field based on current val in updateDoc easily without transaction, 
+        // but for MVP updating 'gymId' here is safe)
+        gymId: gymId 
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error joining gym:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * GET NEXT UPCOMING CLASS (Compatible with Simple Data Model)
+ * Works with: { days: ['Monday', 'Wednesday'], time: '18:00' }
+ */
+export const getNextUpcomingClass = async (gymId) => {
+  try {
+    const classesRef = collection(db, "gyms", gymId, "classes");
+    const snapshot = await getDocs(classesRef);
+    const classes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    if (classes.length === 0) return { success: true, nextClass: null };
+
+    const now = new Date();
+    const currentDayIndex = now.getDay(); // 0=Sun, 1=Mon...
+    const currentTimeValue = now.getHours() * 60 + now.getMinutes();
+    
+    const DAYS_MAP = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    let upcomingInstances = [];
+
+    classes.forEach(cls => {
+        // --- 1. HANDLE SIMPLE MODEL (days array + single time) ---
+        if (cls.days && Array.isArray(cls.days) && cls.time) {
+            
+            const [h, m] = cls.time.split(':').map(Number);
+            const classTimeValue = h * 60 + m;
+
+            cls.days.forEach(dayName => {
+                const dayIndex = DAYS_MAP.indexOf(dayName.toLowerCase().trim());
+                if (dayIndex === -1) return;
+
+                let daysUntil = dayIndex - currentDayIndex;
+
+                if (daysUntil < 0) {
+                    daysUntil += 7; // Next week
+                } else if (daysUntil === 0) {
+                    // It's today! Has the time passed?
+                    if (classTimeValue < currentTimeValue) {
+                        daysUntil = 7; // Move to next week
+                    }
+                }
+
+                // Create the instance date
+                const targetDate = new Date(now);
+                targetDate.setDate(now.getDate() + daysUntil);
+                targetDate.setHours(h, m, 0, 0);
+
+                upcomingInstances.push({
+                    ...cls,
+                    instanceDate: targetDate,
+                    startTime: cls.time,
+                    duration: cls.duration || 60
+                });
+            });
+        }
+        
+        // --- 2. HANDLE COMPLEX MODEL (schedule array - Legacy/Future support) ---
+        else if (cls.schedule && Array.isArray(cls.schedule)) {
+             // ... (Keep existing logic if you plan to support complex schedules later)
+             cls.schedule.forEach(slot => {
+                 if (!slot.active) return;
+                 const dayIndex = DAYS_MAP.indexOf((slot.day || "").toLowerCase());
+                 if (dayIndex === -1 || !slot.startTime) return;
+
+                 const [h, m] = slot.startTime.split(':').map(Number);
+                 const slotTime = h * 60 + m;
+                 
+                 let daysUntil = dayIndex - currentDayIndex;
+                 if (daysUntil < 0) daysUntil += 7;
+                 else if (daysUntil === 0 && slotTime < currentTimeValue) daysUntil = 7;
+
+                 const targetDate = new Date(now);
+                 targetDate.setDate(now.getDate() + daysUntil);
+                 targetDate.setHours(h, m, 0, 0);
+
+                 upcomingInstances.push({
+                     ...cls,
+                     instanceDate: targetDate,
+                     startTime: slot.startTime,
+                     duration: slot.duration || 60
+                 });
+             });
+        }
+    });
+
+    // Sort by Date (Soonest first)
+    upcomingInstances.sort((a, b) => a.instanceDate - b.instanceDate);
+
+    // console.log("Next Class Winner:", upcomingInstances[0]);
+
+    return { success: true, nextClass: upcomingInstances[0] || null };
+
+  } catch (error) {
+    console.error("Error fetching next class:", error);
+    return { success: false, error: error.message };
+  }
+};

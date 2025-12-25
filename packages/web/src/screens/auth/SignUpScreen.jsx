@@ -1,18 +1,14 @@
 // /packages/web/src/screens/auth/SignUpScreen.jsx
-
 import React, { useState } from 'react';
-// --- FIX: Import Link ---
 import { useNavigate, Link } from 'react-router-dom';
-
-// --- FIX: Correct import path and add createUserProfile ---
-// From /packages/web/src/screens/auth/ -> ../../../../ -> /packages/
-import { signUpWithEmail } from '../../../../shared/api/auth.js';
-import { createUserProfile } from '../../../../shared/api/firestore.js';
-// --- END FIX ---
-
-import { Building } from 'lucide-react'; // A nice icon for branding
+import { signUpWithEmail } from '../../../../shared/api/auth.js'; // Adjust path as needed
+import { createUserProfile } from '../../../../shared/api/firestore.js'; // Adjust path as needed
+import { Building, User, ChevronLeft, Briefcase } from 'lucide-react';
 
 export const SignUpScreen = () => {
+  // Step 1: Role Selection, Step 2: Auth Form
+  const [selectedRole, setSelectedRole] = useState(null); 
+  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
@@ -24,34 +20,38 @@ export const SignUpScreen = () => {
     setError(null);
     setIsLoading(true);
 
+    // 1. Create Auth User
     const authResult = await signUpWithEmail(email, password);
 
     if (authResult.success) {
-      console.log('Sign up successful! User ID:', authResult.user.uid);
+      // 2. Create Profile with the SELECTED ROLE
+      const profileData = { 
+          email: authResult.user.email,
+          role: selectedRole, // 'owner' or 'member'
+          status: 'active' // Default status
+      };
 
-      // --- FIX: Create the user profile in Firestore AFTER auth ---
-      // This is the missing step. We must create the Firestore doc.
-      const profileData = { email: authResult.user.email };
       const profileResult = await createUserProfile(authResult.user.uid, profileData);
       
-      setIsLoading(false); // Move loading stop here
+      setIsLoading(false);
 
       if (profileResult.success) {
-        navigate('/onboarding/step-1'); 
-        // ---------------------------------------
+        // 3. Forked Redirect Logic
+        if (selectedRole === 'owner') {
+            navigate('/onboarding/step-1'); 
+        } else {
+            navigate('/members/home'); 
+        }
       } else {
-        setError("Account created, but failed to save profile. Please contact support.");
+        setError("Account created, but profile failed. Please contact support.");
       }
 
     } else {
-      setIsLoading(false); // Stop loading on auth failure
+      setIsLoading(false);
       if (authResult.error.includes("auth/email-already-in-use")) {
         setError(
           <span>
-            This email is already registered.{" "}
-            <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
-              Try logging in?
-            </Link>
+            Email already in use. <Link to="/login" className="underline">Log in?</Link>
           </span>
         );
       } else {
@@ -60,74 +60,118 @@ export const SignUpScreen = () => {
     }
   };
 
+  // --- VIEW 1: ROLE SELECTION ---
+  if (!selectedRole) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+            <div className="max-w-md w-full">
+                <div className="text-center mb-8">
+                    <h1 className="text-3xl font-bold text-gray-900">Join GymDash</h1>
+                    <p className="text-gray-500 mt-2">How will you use the platform?</p>
+                </div>
+
+                <div className="space-y-4">
+                    {/* BUTTON: I AM AN OWNER */}
+                    <button 
+                        onClick={() => setSelectedRole('owner')}
+                        className="w-full bg-white p-6 rounded-2xl border-2 border-transparent hover:border-blue-500 shadow-sm hover:shadow-xl transition-all group text-left flex items-center gap-4"
+                    >
+                        <div className="bg-blue-100 p-3 rounded-full group-hover:bg-blue-600 transition-colors">
+                            <Briefcase className="h-6 w-6 text-blue-600 group-hover:text-white" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-gray-900 text-lg">I own a Gym</h3>
+                            <p className="text-sm text-gray-500">I want to manage classes, members, and billing.</p>
+                        </div>
+                    </button>
+
+                    {/* BUTTON: I AM A MEMBER */}
+                    <button 
+                        onClick={() => setSelectedRole('member')}
+                        className="w-full bg-white p-6 rounded-2xl border-2 border-transparent hover:border-green-500 shadow-sm hover:shadow-xl transition-all group text-left flex items-center gap-4"
+                    >
+                        <div className="bg-green-100 p-3 rounded-full group-hover:bg-green-600 transition-colors">
+                            <User className="h-6 w-6 text-green-600 group-hover:text-white" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-gray-900 text-lg">I am a Member</h3>
+                            <p className="text-sm text-gray-500">I want to book classes and view my progress.</p>
+                        </div>
+                    </button>
+                </div>
+
+                <div className="mt-8 text-center">
+                    <p className="text-gray-600">
+                        Already have an account? <Link to="/login" className="font-bold text-blue-600">Log In</Link>
+                    </p>
+                </div>
+            </div>
+        </div>
+      );
+  }
+
+  // --- VIEW 2: SIGN UP FORM ---
   return (
-    <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md border">
-      
-      <div className="flex flex-col items-center mb-6">
-        <div className="bg-slate-800 p-3 rounded-full mb-3">
-          <Building className="text-white h-8 w-8" />
-        </div>
-        <h1 className="text-3xl font-bold text-gray-800">Welcome to GymDash</h1>
-        <p className="text-gray-500 mt-1">Create an account to manage your gym.</p>
-      </div>
-      
-      <form onSubmit={handleSignUp}>
-        <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-semibold mb-2 text-left" htmlFor="email">
-            Email Address
-          </label>
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 block w-full rounded-md shadow-sm py-2 px-3"
-            required
-            placeholder="you@example.com"
-          />
-        </div>
-        <div className="mb-6">
-          <label className="block text-gray-700 text-sm font-semibold mb-2 text-left" htmlFor="password">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="border-gray-300 focus:border-blue-500 focus:ring-blue-500 block w-full rounded-md shadow-sm py-2 px-3"
-            required
-            placeholder="••••••••••"
-          />
-        </div>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="bg-white p-6 sm:p-10 rounded-2xl shadow-xl w-full max-w-md border border-gray-100">
+        
+        {/* Back Button */}
+        <button onClick={() => setSelectedRole(null)} className="mb-6 flex items-center text-sm text-gray-400 hover:text-gray-600">
+            <ChevronLeft size={16} /> Back
+        </button>
 
-        {/* --- FIX: Display React node error --- */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md p-3 mb-4">
-            {error}
+        <div className="flex flex-col items-center mb-6">
+          <div className={`p-4 rounded-2xl shadow-lg mb-4 ${selectedRole === 'owner' ? 'bg-blue-600 shadow-blue-200' : 'bg-green-600 shadow-green-200'}`}>
+            {selectedRole === 'owner' ? <Building className="text-white h-8 w-8" /> : <User className="text-white h-8 w-8" />}
           </div>
-        )}
+          <h1 className="text-2xl font-bold text-gray-900">
+              {selectedRole === 'owner' ? 'Create Business Account' : 'Create Student Account'}
+          </h1>
+        </div>
+        
+        <form onSubmit={handleSignUp} className="space-y-5">
+          <div>
+            <label className="block text-gray-700 text-sm font-bold mb-2 ml-1">Email Address</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full h-12 px-4 rounded-xl border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              required
+              placeholder="you@example.com"
+            />
+          </div>
+          <div>
+            <label className="block text-gray-700 text-sm font-bold mb-2 ml-1">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full h-12 px-4 rounded-xl border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              required
+              placeholder="••••••••••"
+            />
+          </div>
 
-        <div>
+          {error && (
+            <div className="bg-red-50 border border-red-100 text-red-600 text-sm rounded-xl p-3">
+              {error}
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-slate-800 hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-700 disabled:bg-slate-400 transition-colors"
+            className={`w-full h-14 rounded-xl shadow-lg text-base font-bold text-white transition-all active:scale-[0.98] ${
+                selectedRole === 'owner' 
+                ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-200' 
+                : 'bg-green-600 hover:bg-green-700 shadow-green-200'
+            }`}
           >
-            {isLoading ? 'Creating Account...' : 'Sign Up'}
+            {isLoading ? 'Creating...' : 'Create Account'}
           </button>
-        </div>
-      </form>
-
-      {/* --- FIX: Add the "Log In" link --- */}
-      <p className="text-sm text-center text-gray-600 mt-6">
-        Already have an account?{' '}
-        <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
-          Log In
-        </Link>
-      </p>
-      {/* --- END FIX --- */}
-
+        </form>
+      </div>
     </div>
   );
 };

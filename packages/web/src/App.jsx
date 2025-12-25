@@ -11,8 +11,8 @@ import { FullScreenLoader } from './components/common/FullScreenLoader';
 
 // --- LAYOUTS ---
 import { AuthLayout } from './layout/AuthLayout';
-import AdminLayout from './layout/AdminLayout'; // Renamed from DashboardLayout
-import MemberLayout from './layout/MemberLayout'; // New!
+import AdminLayout from './layout/AdminLayout';
+import MemberLayout from './layout/MemberLayout';
 
 // --- AUTH SCREENS ---
 import { SignUpScreen } from './screens/auth/SignUpScreen';
@@ -37,41 +37,71 @@ import DashboardAnalyticsScreen from './screens/admin/DashboardAnalyticsScreen';
 import DashboardCalendarScreen from './screens/admin/DashboardCalendarScreen';
 import DashboardClassesScreen from './screens/admin/DashboardClassesScreen';
 
-// --- MEMBER SCREENS (New!) ---
-import MemberHomeScreen from './screens/members/MemberHomeScreen';
+// --- MEMBER SCREENS ---
+import MemberHomeScreen from './screens/members/dashboard/MemberHomeScreen';
 import MemberScheduleScreen from './screens/members/MemberScheduleScreen';
 import MemberProfileScreen from './screens/members/MemberProfileScreen';
 
 function App() {
   const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null); // 'owner', 'member', 'staff'
+  const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // 1. GLOBAL AUTH LISTENER
   useEffect(() => {
+    console.log("[App] Effect mounted, listening for auth...");
+    
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      console.log("[App] Auth State Changed. User:", currentUser ? currentUser.uid : "null");
+
       if (currentUser) {
+        // 1. Set user immediately so router knows we are authenticated
+        setUser(currentUser);
+        
         try {
-          // Fetch Role from Firestore
+          console.log("[App] Fetching role for:", currentUser.uid);
           const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+          
           if (userDoc.exists()) {
-            const userData = userDoc.data();
-            // If no role is defined, default to member to be safe
-            setRole(userData.role || 'member');
+            const userRole = userDoc.data().role || 'member';
+            console.log("[App] Role found:", userRole);
+            setRole(userRole);
+          } else {
+            console.log("[App] No profile found, defaulting to member");
+            setRole('member');
           }
         } catch (error) {
-          console.error("Error fetching user role:", error);
+          console.error("[App] Error fetching role:", error);
+          setRole('member');
         }
       } else {
+        console.log("[App] User logged out. Clearing state.");
+        setUser(null);
         setRole(null);
       }
-      setUser(currentUser);
+      
+      // 2. Only stop loading AFTER role is determined
+      console.log("[App] Loading complete. Rendering Router.");
       setLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  if (loading) return <FullScreenLoader />;
+  if (loading) {
+    console.log("[App] Render: Still Loading...");
+    return <FullScreenLoader />;
+  }
+
+  console.log("[App] Render: Router. User:", user?.uid, "Role:", role);
+
+  // Helper to protect login routes
+  const PublicOnlyRoute = ({ children }) => {
+    if (user) {
+        console.log("[App] PublicRoute Redirecting to / because user exists");
+        return <Navigate to="/" replace />;
+    }
+    return children;
+  };
 
   return (
     <ConfirmationProvider>
@@ -81,12 +111,11 @@ function App() {
 
             {/* --- PUBLIC AUTH --- */}
             <Route element={<AuthLayout />}>
-              <Route path="/signup" element={<SignUpScreen />} />
-              <Route path="/login" element={<LoginScreen />} />
+              <Route path="/signup" element={<PublicOnlyRoute><SignUpScreen /></PublicOnlyRoute>} />
+              <Route path="/login" element={<PublicOnlyRoute><LoginScreen /></PublicOnlyRoute>} />
             </Route>
 
-            {/* --- ONBOARDING (Owner Only) --- */}
-            {/* We protect this manually to allow flow continuity */}
+            {/* --- ONBOARDING --- */}
             <Route element={<AuthLayout />}>
               <Route path="/onboarding/step-1" element={<Step1_GymDetailsScreen />} />
               <Route path="/onboarding/step-2" element={<Step2_BrandScreen />} />
@@ -97,8 +126,7 @@ function App() {
             </Route>
             <Route path="/onboarding/stripe-success" element={<StripeSuccessScreen />} />
 
-            {/* --- ADMIN LAND (Owners/Staff) --- */}
-            {/* RENAMED from /dashboard to /admin for clarity */}
+            {/* --- ADMIN ROUTES --- */}
             <Route path="/admin" element={user && (role === 'owner' || role === 'staff') ? <AdminLayout /> : <Navigate to="/login" />}>
               <Route index element={<DashboardHomeScreen />} />
               <Route path="analytics" element={<DashboardAnalyticsScreen />} />
@@ -110,25 +138,21 @@ function App() {
               <Route path="settings" element={<DashboardSettingsScreen />} />
             </Route>
 
-            {/* --- MEMBER LAND (Students) --- */}
-            {/* NEW Route Section */}
+            {/* --- MEMBER ROUTES --- */}
             <Route path="/members" element={user && role === 'member' ? <MemberLayout /> : <Navigate to="/login" />}>
               <Route path="home" element={<MemberHomeScreen />} />
               <Route path="schedule" element={<MemberScheduleScreen />} />
               <Route path="profile" element={<MemberProfileScreen />} />
-              {/* Default Redirect within Member Land */}
               <Route index element={<Navigate to="home" replace />} />
             </Route>
 
-            {/* --- SMART ROOT REDIRECT --- */}
-            {/* Decides where to send you based on who you are */}
+            {/* --- ROOT REDIRECT --- */}
             <Route path="/" element={
               !user ? <Navigate to="/login" /> :
-                (role === 'owner' || role === 'staff') ? <Navigate to="/admin" /> :
-                  <Navigate to="/members/home" />
+              (role === 'owner' || role === 'staff') ? <Navigate to="/admin" /> :
+              <Navigate to="/members/home" />
             } />
 
-            {/* --- CATCH ALL --- */}
             <Route path="*" element={<Navigate to="/" replace />} />
 
           </Routes>
