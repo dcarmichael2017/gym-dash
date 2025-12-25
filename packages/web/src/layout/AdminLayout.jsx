@@ -26,17 +26,17 @@ const DashboardLayout = () => {
 
   // --- 2. UPDATED NAVIGATION ITEMS ---
   const navItems = [
-    { name: 'Home', path: '/dashboard', icon: LayoutDashboard },
-    { name: 'Reports', path: '/dashboard/analytics', icon: BarChart3 },
+    { name: 'Home', path: '/admin', icon: LayoutDashboard },
+    { name: 'Reports', path: '/admin/analytics', icon: BarChart3 },
     
     // Split Schedule into two:
-    { name: 'Calendar', path: '/dashboard/calendar', icon: Calendar }, 
-    { name: 'Classes', path: '/dashboard/classes', icon: BookOpen },
+    { name: 'Calendar', path: '/admin/calendar', icon: Calendar }, 
+    { name: 'Classes', path: '/admin/classes', icon: BookOpen },
     
-    { name: 'Memberships', path: '/dashboard/memberships', icon: CreditCard },
-    { name: 'Members', path: '/dashboard/members', icon: Users },
-    { name: 'Staff', path: '/dashboard/staff', icon: Briefcase },
-    { name: 'Settings', path: '/dashboard/settings', icon: Settings },
+    { name: 'Memberships', path: '/admin/memberships', icon: CreditCard },
+    { name: 'Members', path: '/admin/members', icon: Users },
+    { name: 'Staff', path: '/admin/staff', icon: Briefcase },
+    { name: 'Settings', path: '/admin/settings', icon: Settings },
   ];
 
   // --- PREFAB LOGIC ---
@@ -113,7 +113,7 @@ const DashboardLayout = () => {
 
   const checkActive = (itemPath) => {
     return location.pathname === itemPath || 
-           (itemPath !== '/dashboard' && location.pathname.startsWith(`${itemPath}/`));
+           (itemPath !== '/admin' && location.pathname.startsWith(`${itemPath}/`));
   };
 
   return (

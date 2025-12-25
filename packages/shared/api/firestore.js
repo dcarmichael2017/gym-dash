@@ -282,21 +282,32 @@ export const getGymMembers = async (gymId) => {
 // Admin manually adds a member
 export const addManualMember = async (gymId, memberData) => {
   try {
-    // ANALYTICS LOGIC: If adding as active immediately, set convertedAt
     const isStartingActive = memberData.status === 'active';
+
+    // NEW: Create the membership object
+    const newMembership = {
+      gymId: gymId,
+      role: 'member',
+      status: memberData.status || 'prospect',
+      membershipId: memberData.membershipId || null, // The specific plan for this gym
+      joinedAt: new Date()
+    };
 
     const userRef = await addDoc(collection(db, "users"), {
       ...memberData,
-      gymId: gymId,
+      gymId: gymId, // Keep as "Home Gym" for backward compatibility
       role: 'member',
       source: 'admin_manual',
       createdAt: new Date(),
-      // Track conversion immediately if they skip trial
       convertedAt: isStartingActive ? new Date() : null,
       status: memberData.status || 'prospect',
       waiverSigned: false,
-      payerId: memberData.payerId || null
+      payerId: memberData.payerId || null,
+
+      // --- NEW MULTI-GYM SUPPORT ---
+      memberships: [newMembership]
     });
+
     return { success: true, member: { id: userRef.id, ...memberData } };
   } catch (error) {
     console.error("Error adding manual member:", error);
@@ -558,18 +569,18 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
   try {
     // We use runTransaction to ensure we don't overbook capacity due to race conditions
     return await runTransaction(db, async (transaction) => {
-      
+
       const attendanceRef = collection(db, "gyms", gymId, "attendance");
-      
+
       // A. Fetch the Latest Class Data (Don't trust the UI payload for capacity)
       const classDocRef = doc(db, "gyms", gymId, "classes", classInfo.id);
       const classSnap = await transaction.get(classDocRef);
-      
+
       if (!classSnap.exists()) throw "Class does not exist.";
       const classData = classSnap.data();
 
       // B. Run The Gatekeeper Logic
-      const gatekeeper = canUserBook(classData, member);
+      const gatekeeper = canUserBook(classData, member, gymId);
       if (!gatekeeper.allowed) {
         throw gatekeeper.reason; // Stops transaction
       }
@@ -584,20 +595,20 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
       const existingSnapshot = await getDocs(q); // Note: inside transaction, query reads are tricky, usually better to read by ID. 
       // For MVP simplicity without composite keys, we accept a small race condition here or use a composite ID (classId_date_memberId).
       // Let's stick to your pattern but check results.
-      
+
       let existingDoc = null;
       if (!existingSnapshot.empty) {
         existingDoc = existingSnapshot.docs[0];
         const existingData = existingDoc.data();
         if (existingData.status !== BOOKING_STATUS.CANCELLED) {
-           throw "Member is already booked in this class.";
+          throw "Member is already booked in this class.";
         }
       }
 
       // D. CAPACITY & LINE INTEGRITY CHECK
       // 1. Count Active Bookings
       const rosterQuery = query(
-        attendanceRef, 
+        attendanceRef,
         where("classId", "==", classInfo.id),
         where("dateString", "==", classInfo.dateString),
         where("status", "in", [BOOKING_STATUS.BOOKED, BOOKING_STATUS.ATTENDED])
@@ -608,7 +619,7 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
 
       // 2. Count Waitlist (Is there a line?)
       const waitlistQuery = query(
-        attendanceRef, 
+        attendanceRef,
         where("classId", "==", classInfo.id),
         where("dateString", "==", classInfo.dateString),
         where("status", "==", BOOKING_STATUS.WAITLISTED)
@@ -617,17 +628,17 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
       const waitlistCount = waitlistSnap.size;
 
       let finalStatus = BOOKING_STATUS.BOOKED;
-      
+
       // LOGIC: Class is full OR (Class has space BUT there is a line)
       if (!options.force) {
-          if (currentCount >= maxCapacity || waitlistCount > 0) {
-            finalStatus = BOOKING_STATUS.WAITLISTED;
-          }
+        if (currentCount >= maxCapacity || waitlistCount > 0) {
+          finalStatus = BOOKING_STATUS.WAITLISTED;
+        }
       }
 
       // E. WRITE TO DB
       const timestamp = new Date();
-      
+
       // Prepare Booking Object
       // (Ensure we use the timestamp from the specific session date/time)
       const [year, month, day] = classInfo.dateString.split('-').map(Number);
@@ -653,7 +664,7 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
         // Resurrect cancelled booking
         transaction.update(existingDoc.ref, {
           ...bookingPayload,
-          cancelledAt: null 
+          cancelledAt: null
         });
         return { success: true, status: finalStatus, recovered: true };
       } else {
@@ -706,39 +717,39 @@ export const checkInMember = async (gymId, attendanceId, memberId, programId) =>
 
         // SCENARIO A: User is ALREADY in this program
         if (userRanks[programId]) {
-           // Increment credits specifically for this program path
-           // Firestore Notation for nested map update: "ranks.programId.credits"
-           userUpdates[`ranks.${programId}.credits`] = increment(1);
+          // Increment credits specifically for this program path
+          // Firestore Notation for nested map update: "ranks.programId.credits"
+          userUpdates[`ranks.${programId}.credits`] = increment(1);
         }
-        
+
         // SCENARIO B: User is NEW to this program (Assign White Belt)
         else {
-           const gymDoc = await getDoc(doc(db, "gyms", gymId));
-           if (gymDoc.exists()) {
-             const gymData = gymDoc.data();
-             const programs = gymData.grading?.programs || [];
-             const targetProgram = programs.find(p => p.id === programId);
+          const gymDoc = await getDoc(doc(db, "gyms", gymId));
+          if (gymDoc.exists()) {
+            const gymData = gymDoc.data();
+            const programs = gymData.grading?.programs || [];
+            const targetProgram = programs.find(p => p.id === programId);
 
-             if (targetProgram && targetProgram.ranks?.length > 0) {
-                const firstRank = targetProgram.ranks[0];
+            if (targetProgram && targetProgram.ranks?.length > 0) {
+              const firstRank = targetProgram.ranks[0];
 
-                console.log(`Auto-assigning to ${targetProgram.name}`);
+              console.log(`Auto-assigning to ${targetProgram.name}`);
 
-                // Initialize the map entry for this program
-                // We use dot notation to update just this key in the map without overwriting others
-                userUpdates[`ranks.${programId}`] = {
-                    rankId: firstRank.id,
-                    stripes: 0,
-                    credits: 1 // First class counts!
-                };
+              // Initialize the map entry for this program
+              // We use dot notation to update just this key in the map without overwriting others
+              userUpdates[`ranks.${programId}`] = {
+                rankId: firstRank.id,
+                stripes: 0,
+                credits: 1 // First class counts!
+              };
 
-                // Auto-convert prospect -> active
-                if (userData.status === 'prospect') {
-                    userUpdates.status = 'active';
-                    userUpdates.convertedAt = new Date();
-                }
-             }
-           }
+              // Auto-convert prospect -> active
+              if (userData.status === 'prospect') {
+                userUpdates.status = 'active';
+                userUpdates.convertedAt = new Date();
+              }
+            }
+          }
         }
       }
     }
@@ -851,18 +862,25 @@ export const getWeeklyAttendanceCounts = async (gymId, startDateStr, endDateStr)
 /**
  * Determines if a user is allowed to book a specific class.
  * Returns { allowed: boolean, reason: string, type: 'membership' | 'drop-in' }
+ * * UPDATED (Sprint 7): Now checks specific gym context via 'gymId'
  */
-export const canUserBook = (classData, userData) => {
-  // 1. Check if Class is open to everyone (Drop-in)
-  // If drop-in is enabled, we allow booking, but the UI might prompt for payment later.
-  // We prioritize Membership access first to avoid charging members.
-  
+export const canUserBook = (classData, userData, targetGymId) => {
+  // 1. Determine the relevant plan/status for THIS gym
+  let userPlanId = userData.membershipId; // Fallback to root
+  let userStatus = userData.status;       // Fallback to root
+
+  // If new structure exists, find the specific membership
+  if (userData.memberships && Array.isArray(userData.memberships) && targetGymId) {
+      const relevantMembership = userData.memberships.find(m => m.gymId === targetGymId);
+      if (relevantMembership) {
+          userPlanId = relevantMembership.membershipId;
+          userStatus = relevantMembership.status;
+      }
+  }
+
   const allowedPlans = classData.allowedMembershipIds || [];
-  const userPlanId = userData.membershipId; // Assuming user has a single membershipId field
-  const userStatus = userData.status;
 
   // 2. Check Membership Validity
-  // User must be Active or Trialing to use membership benefits
   const hasValidStatus = [MEMBER_STATUS.ACTIVE, MEMBER_STATUS.TRIALING].includes(userStatus);
   
   if (hasValidStatus && userPlanId && allowedPlans.includes(userPlanId)) {
@@ -893,7 +911,7 @@ export const processWaitlist = async (gymId, classId, dateString) => {
   try {
     return await runTransaction(db, async (transaction) => {
       const attendanceRef = collection(db, "gyms", gymId, "attendance");
-      
+
       // 1. Get Class Data for Capacity
       const classDocRef = doc(db, "gyms", gymId, "classes", classId);
       const classSnap = await transaction.get(classDocRef);
@@ -908,7 +926,7 @@ export const processWaitlist = async (gymId, classId, dateString) => {
         where("dateString", "==", dateString)
       );
       const snapshot = await getDocs(q); // We await this inside to ensure consistency
-      
+
       let currentActive = 0;
       let waitlist = [];
 
@@ -923,9 +941,9 @@ export const processWaitlist = async (gymId, classId, dateString) => {
 
       // 3. Sort Waitlist (FIFO) manually since we fetched all
       waitlist.sort((a, b) => {
-         const dateA = a.data.bookedAt?.seconds || 0;
-         const dateB = b.data.bookedAt?.seconds || 0;
-         return dateA - dateB;
+        const dateA = a.data.bookedAt?.seconds || 0;
+        const dateB = b.data.bookedAt?.seconds || 0;
+        return dateA - dateB;
       });
 
       // 4. Determine how many spots to fill
