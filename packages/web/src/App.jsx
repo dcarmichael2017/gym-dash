@@ -39,7 +39,7 @@ import DashboardClassesScreen from './screens/admin/DashboardClassesScreen';
 
 // --- MEMBER SCREENS ---
 import MemberHomeScreen from './screens/members/dashboard/MemberHomeScreen';
-import MemberScheduleScreen from './screens/members/MemberScheduleScreen';
+import MemberScheduleScreen from './screens/members/schedule/MemberScheduleScreen';
 import MemberProfileScreen from './screens/members/MemberProfileScreen';
 
 function App() {

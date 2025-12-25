@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { X, CalendarDays, CreditCard, Sliders, CalendarRange } from 'lucide-react';
 import { createClass, updateClass, getGymDetails } from '../../../../../shared/api/firestore';
-import { ClassSessionsList } from '../ClassSessionsList'; // Adjust path if needed!
-
+import { ClassSessionsList } from '../ClassSessionsList';
+import { useConfirm } from '../../../context/ConfirmationContext';
 import { TabSchedule } from './TabSchedule';
 import { TabAccess } from './TabAccess';
 import { TabSettings } from './TabSettings';
 
 export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, membershipList = [], globalSettings, onSave, initialViewMode }) => {
+    const { showConfirm } = useConfirm();
     const [activeTab, setActiveTab] = useState('schedule');
     const [rankSystems, setRankSystems] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -136,18 +137,41 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
     // --- HANDLERS ---
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!formData.name || formData.days.length === 0) {
-            alert("Please enter a name and select at least one day.");
+
+        // 1. Validate Name (Required for all)
+        if (!formData.name) {
+            await showConfirm({
+                title: "Missing Name",
+                message: "Please enter a name for this class.",
+                confirmText: "OK",
+                cancelText: null // Hides the cancel button to act like an Alert
+            });
             return;
         }
 
-        if (formData.frequency === 'Single Event' && !formData.startDate) {
-            alert("Please select a date for this event.");
-            return;
-        }
-        if (formData.frequency !== 'Single Event' && (!formData.name || formData.days.length === 0)) {
-            alert("Please enter a name and select at least one day.");
-            return;
+        // 2. Validate Schedule based on Frequency
+        if (formData.frequency === 'Single Event') {
+            // Logic for One-Off: Must have a Date
+            if (!formData.startDate) {
+                await showConfirm({
+                    title: "Missing Date",
+                    message: "Please select a specific date for this single event.",
+                    confirmText: "OK",
+                    cancelText: null
+                });
+                return;
+            }
+        } else {
+            // Logic for Recurring: Must have Days of Week
+            if (formData.days.length === 0) {
+                await showConfirm({
+                    title: "Missing Days",
+                    message: "Please select at least one day of the week for this recurring class.",
+                    confirmText: "OK",
+                    cancelText: null
+                });
+                return;
+            }
         }
 
         setLoading(true);
@@ -180,7 +204,12 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
             onSave();
             onClose();
         } else {
-            alert("Failed to save class: " + result.error);
+            await showConfirm({
+                title: "Error",
+                message: "Failed to save class: " + result.error,
+                confirmText: "OK",
+                cancelText: null
+            });
         }
     };
 

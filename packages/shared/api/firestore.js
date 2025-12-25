@@ -1145,3 +1145,38 @@ export const getNextUpcomingClass = async (gymId) => {
     return { success: false, error: error.message };
   }
 };
+
+/**
+ * Fetch a member's schedule for a specific date range.
+ * Returns a map for easy lookup: { "classId_dateString": { status: 'booked', id: 'attID' } }
+ */
+export const getMemberSchedule = async (gymId, memberId, startDate, endDate) => {
+  try {
+    const attRef = collection(db, "gyms", gymId, "attendance");
+    const q = query(
+      attRef,
+      where("memberId", "==", memberId),
+      where("dateString", ">=", startDate),
+      where("dateString", "<=", endDate),
+      where("status", "in", ["booked", "waitlisted", "attended"]) // Ignore cancelled
+    );
+
+    const snapshot = await getDocs(q);
+    const scheduleMap = {};
+    
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      // Key format matches what we generate in the UI
+      const key = `${data.classId}_${data.dateString}`;
+      scheduleMap[key] = { 
+        status: data.status, 
+        id: doc.id 
+      };
+    });
+
+    return { success: true, schedule: scheduleMap };
+  } catch (error) {
+    console.error("Error fetching member schedule:", error);
+    return { success: false, error: error.message };
+  }
+};
