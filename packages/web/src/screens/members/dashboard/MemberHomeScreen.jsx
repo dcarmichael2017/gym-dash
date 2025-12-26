@@ -1,42 +1,68 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Search, MapPin, ArrowRight, Loader2, ChevronLeft } from 'lucide-react'; 
+import { LogOut, Search, MapPin, ArrowRight, Loader2, ChevronLeft, ChevronDown } from 'lucide-react'; 
 import { auth } from '../../../../../../packages/shared/api/firebaseConfig';
 import { useGym } from '../../../context/GymContext';
-import { searchGyms, joinGym, signWaiver, disconnectGym, getGymWaiver } from '../../../../../../packages/shared/api/firestore';
+import { signWaiver, disconnectGym, getGymWaiver } from '../../../../../../packages/shared/api/firestore';
 
 // --- SUB-COMPONENTS ---
 import MembershipOffers from './MembershipOffers';
 import NextClassCard from './NextClassCard';
 import WaiverModal from './WaiverModal';
+import GymSwitcherSheet from './GymSwitcherSheet';
+import GymSearch from './GymSearch'; 
 
 const MemberHomeScreen = () => {
   const { currentGym, memberships } = useGym();
   const theme = currentGym?.theme || { primaryColor: '#2563eb', secondaryColor: '#4f46e5' };
 
-  // Local State
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [gymsList, setGymsList] = useState([]);
-  const [joiningGymId, setJoiningGymId] = useState(null);
-  
-  // Waiver Enforcement State
+  // --- LOCAL STATE ---
+  const [showGymSwitcher, setShowGymSwitcher] = useState(false);
+  const [isAddingGym, setIsAddingGym] = useState(false); 
+
+  // --- WAIVER STATE ---
   const [waiverEnforced, setWaiverEnforced] = useState(false);
   const [currentWaiverVersion, setCurrentWaiverVersion] = useState(1);
   const [checkingWaiver, setCheckingWaiver] = useState(true);
-  
-  // NEW: Track temporary dismissal of the modal
   const [isDismissed, setIsDismissed] = useState(false);
 
   // --- DERIVED STATE ---
   const currentMembership = memberships?.find(m => m.gymId === currentGym?.id);
-  const isProspect = !currentMembership || currentMembership.status === 'prospect' || currentMembership.status === 'guest';
-  const isActiveMember = currentMembership?.status === 'active' || currentMembership?.status === 'trialing';
+  
+  // Consolidating Guest/Prospect logic
+  const isFreeMember = !currentMembership || 
+                       currentMembership.status === 'prospect' || 
+                       currentMembership.status === 'guest';
+                       
+  const isActiveMember = currentMembership?.status === 'active' || 
+                         currentMembership?.status === 'trialing';
 
-  // --- EFFECT: CHECK WAIVER SETTINGS & VERSION ---
+  // --- HELPERS FOR STATUS UI ---
+  const getDisplayName = (status) => {
+    const s = status?.toLowerCase();
+    if (!s || s === 'prospect' || s === 'guest') return 'FREE MEMBER';
+    if (s === 'active') return 'ACTIVE MEMBER';
+    if (s === 'trialing') return 'TRIAL PERIOD';
+    if (s === 'past_due') return 'PAYMENT FAILED';
+    if (s === 'expired' || s === 'cancelled') return 'FORMER MEMBER';
+    return status.toUpperCase();
+  };
+
+  const getBadgeStyles = (status) => {
+    const s = status?.toLowerCase();
+    if (s === 'active') return 'bg-green-100 text-green-700';
+    if (s === 'past_due') return 'bg-red-100 text-red-700';
+    if (s === 'trialing') return 'bg-blue-100 text-blue-700';
+    if (s === 'expired' || s === 'cancelled') return 'bg-orange-100 text-orange-700';
+    // Default for Free Member (using theme primary with low opacity)
+    return `text-[${theme.primaryColor}]`; 
+  };
+
+  // --- EFFECT: CHECK WAIVER ---
   useEffect(() => {
     const checkSettings = async () => {
         if (currentGym?.id) {
             setCheckingWaiver(true);
+            setIsDismissed(false); 
             const res = await getGymWaiver(currentGym.id);
             setWaiverEnforced(res.success ? res.enforceWaiver : true);
             setCurrentWaiverVersion(res.version || 1);
@@ -52,8 +78,6 @@ const MemberHomeScreen = () => {
   const userSignedVersion = currentMembership?.waiverSignedVersion || 0;
   const isOutdated = currentMembership?.waiverSigned && userSignedVersion < currentWaiverVersion;
   const isNotSigned = currentMembership && !currentMembership.waiverSigned;
-
-  // Show Modal logic: Now includes check for !isDismissed
   const showWaiverModal = !isDismissed && !checkingWaiver && waiverEnforced && (isNotSigned || isOutdated);
 
   // --- HANDLERS ---
@@ -65,166 +89,83 @@ const MemberHomeScreen = () => {
   };
 
   const handleWaiverDecline = async () => {
+      if (isOutdated) { setIsDismissed(true); return; }
       const user = auth.currentUser;
-      
-      // CASE 1: Waiver is just OUTDATED (User has signed before)
-      // Logic: Allow them to dismiss the update notification for this session.
-      if (isOutdated) {
-          setIsDismissed(true); // <--- THIS FIXES THE INFINITE SPIN
-          return;
-      }
-
-      // CASE 2: Waiver was NEVER signed
-      // Logic: Disconnect them because they refused the mandatory entry terms.
       if (user && currentGym) {
           await disconnectGym(user.uid, currentGym.id);
-          // Context listener will automatically handle the UI update (set currentGym null)
       }
   };
 
-  const handleLeaveGuestView = () => {
-      window.location.href = '/'; 
+  const handleAddGymClick = () => {
+      setShowGymSwitcher(false);
+      setIsAddingGym(true);
   };
 
-  // --- 1. ZERO STATE: FIND A GYM ---
-  if (!currentGym) {
-    
-    useEffect(() => {
-        const fetchGyms = async () => {
-            setIsSearching(true);
-            const result = await searchGyms(searchTerm);
-            if (result.success) setGymsList(result.gyms);
-            setIsSearching(false);
-        };
-        fetchGyms();
-    }, [searchTerm]);
+  // --- RENDER LOGIC ---
 
-    const handleJoin = async (gym) => {
-        setJoiningGymId(gym.id);
-        const user = auth.currentUser;
-        if (!user) return;
-
-        const result = await joinGym(user.uid, gym.id, gym.name);
-        if (result.success) {
-            // Wait for context update
-        }
-        setJoiningGymId(null);
-    };
-
-    return (
-        <div className="min-h-screen bg-gray-50 p-6 safe-top">
-             <div className="mb-8 mt-4">
-                <h1 className="text-3xl font-bold text-gray-900">Find your Gym</h1>
-                <p className="text-gray-500 mt-2">Search for your gym to get started.</p>
-             </div>
-
-             <div className="relative mb-6">
-                <Search className="absolute left-4 top-3.5 text-gray-400 h-5 w-5" />
-                <input 
-                    type="text" 
-                    placeholder="Search by gym name..." 
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-12 pr-4 h-12 rounded-xl border-gray-200 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-             </div>
-
-             <div className="space-y-4 pb-20">
-                {isSearching ? (
-                    <div className="flex justify-center py-8"><Loader2 className="animate-spin text-gray-400" /></div>
-                ) : gymsList.length > 0 ? (
-                    gymsList.map(gym => {
-                        const gymThemeColor = gym.theme?.primaryColor || '#2563eb';
-                        return (
-                            <div key={gym.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col gap-3 transition-all hover:shadow-md">
-                                <div className="flex justify-between items-start">
-                                    <div className="flex gap-4">
-                                        <div className="h-12 w-12 bg-gray-50 rounded-lg flex items-center justify-center overflow-hidden border border-gray-100">
-                                            {gym.logoUrl ? (
-                                                <img src={gym.logoUrl} className="h-full w-full object-contain p-1" alt={gym.name} />
-                                            ) : (
-                                                <span className="text-xl font-bold text-gray-300">{gym.name[0]}</span>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <h3 className="font-bold text-gray-900">{gym.name}</h3>
-                                            <p className="text-xs text-gray-500 flex items-center gap-1 mt-1">
-                                                <MapPin size={12} /> {gym.city || "Location N/A"}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                                <p className="text-sm text-gray-600 line-clamp-2">
-                                    {gym.description || "No description available."}
-                                </p>
-                                <button 
-                                    onClick={() => handleJoin(gym)}
-                                    disabled={joiningGymId === gym.id}
-                                    style={{ backgroundColor: gymThemeColor }}
-                                    className="mt-2 w-full text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-sm hover:opacity-90"
-                                >
-                                    {joiningGymId === gym.id ? <Loader2 className="animate-spin" size={16}/> : <>Connect <ArrowRight size={16} /></>}
-                                </button>
-                            </div>
-                        );
-                    })
-                ) : (
-                    <div className="text-center text-gray-400 py-10">No gyms found.</div>
-                )}
-             </div>
-        </div>
-    );
+  if (!currentGym || isAddingGym) {
+      return (
+          <GymSearch 
+            onCancel={currentGym ? () => setIsAddingGym(false) : null} 
+            onJoinSuccess={() => setIsAddingGym(false)}
+          />
+      );
   }
 
-  // --- 2. DASHBOARD STATE ---
   return (
     <div className="p-6 space-y-6 pb-24 relative">
       
-      {/* WAIVER MODAL GATEKEEPER */}
       {showWaiverModal && (
           <WaiverModal 
-             gymId={currentGym.id} 
-             gymName={currentGym.name} 
-             theme={theme}
-             onAccept={handleWaiverSign}
-             onDecline={handleWaiverDecline}
-             targetVersion={currentWaiverVersion}
-             isUpdate={isOutdated}
-             lastSignedVersion={userSignedVersion}
+              gymId={currentGym.id} 
+              gymName={currentGym.name} 
+              theme={theme}
+              onAccept={handleWaiverSign}
+              onDecline={handleWaiverDecline}
+              targetVersion={currentWaiverVersion}
+              isUpdate={isOutdated}
+              lastSignedVersion={userSignedVersion}
           />
       )}
+
+      <GymSwitcherSheet 
+          isOpen={showGymSwitcher} 
+          onClose={() => setShowGymSwitcher(false)} 
+          onAddGym={handleAddGymClick}
+      />
 
       {/* HEADER */}
       <div className="flex justify-between items-center">
         <div>
-           <div className="flex items-center gap-2">
-               {isProspect && memberships.length === 0 && (
-                   <button onClick={handleLeaveGuestView} className="p-1 -ml-2 text-gray-400 hover:text-gray-600">
-                       <ChevronLeft size={24} />
-                   </button>
-               )}
-               <h1 className="text-2xl font-bold text-gray-900">
-                 {isActiveMember ? "Welcome Back" : "Hello Guest"}
+           <button 
+              onClick={() => setShowGymSwitcher(true)}
+              className="group flex items-center gap-2 hover:bg-gray-100 -ml-2 px-2 py-1 rounded-lg transition-colors"
+           >
+               <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2 text-left">
+                 {currentGym.name} 
+                 <ChevronDown size={20} className="text-gray-400 group-hover:text-gray-600 transition-colors shrink-0" />
                </h1>
-           </div>
+           </button>
            
-           <p className="text-gray-500 text-sm flex items-center gap-1 mt-1">
-                <MapPin size={12}/> {currentGym?.name || "My Gym"}
-                {isProspect && (
-                    <span 
-                        className="text-[10px] font-bold px-2 py-0.5 rounded ml-2"
-                        style={{ backgroundColor: `${theme.primaryColor}15`, color: theme.primaryColor }}
-                    >
-                        GUEST
-                    </span>
-                )}
-           </p>
+           <div className="flex items-center gap-1 mt-1 px-1">
+                <p className="text-gray-500 text-sm flex items-center gap-1">
+                    <MapPin size={12}/> {currentGym?.city || "My Location"}
+                </p>
+                
+                {/* DYNAMIC STATUS BADGE */}
+                <span 
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded ml-2 whitespace-nowrap ${getBadgeStyles(currentMembership?.status)}`}
+                    style={isFreeMember ? { backgroundColor: `${theme.primaryColor}15`, color: theme.primaryColor } : {}}
+                >
+                    {getDisplayName(currentMembership?.status)}
+                </span>
+           </div>
         </div>
       </div>
 
       <NextClassCard hasActiveMembership={isActiveMember} />
 
-      {isProspect && (
+      {isFreeMember && (
           <MembershipOffers />
       )}
 

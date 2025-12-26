@@ -17,10 +17,14 @@ export const GymProvider = ({ children }) => {
   const switchGym = async (gymId) => {
     try {
       console.log("[GymContext] Switching to gym:", gymId);
+      
+      // 1. Fetch Gym Data
       const gymDoc = await getDoc(doc(db, 'gyms', gymId));
+      
       if (gymDoc.exists()) {
         setCurrentGym({ id: gymDoc.id, ...gymDoc.data() });
-        // Save preference
+        
+        // 2. Persist "Last Active" preference (Sticky Session)
         if (auth.currentUser) {
            updateDoc(doc(db, 'users', auth.currentUser.uid), { lastActiveGymId: gymId })
              .catch(e => console.error("Pref save failed", e));
@@ -37,7 +41,7 @@ export const GymProvider = ({ children }) => {
     const authUnsubscribe = onAuthStateChanged(auth, (user) => {
       console.log("[GymContext] Auth Changed. User:", user ? user.uid : "null");
       
-      // 1. CRITICAL: WIPE STATE ON USER CHANGE
+      // CRITICAL: WIPE STATE ON USER CHANGE
       setCurrentGym(null);
       setMemberships([]);
       
@@ -49,39 +53,44 @@ export const GymProvider = ({ children }) => {
       if (user) {
         setLoading(true);
         
-        // 2. USE REAL-TIME LISTENER (onSnapshot)
+        // USE REAL-TIME LISTENER (onSnapshot)
         profileUnsubscribe = onSnapshot(doc(db, 'users', user.uid), async (docSnap) => {
-           if (docSnap.exists()) {
+            if (docSnap.exists()) {
               const userData = docSnap.data();
               let userMemberships = userData.memberships || [];
               
-              // Backwards compatibility
+              // Backwards compatibility for legacy users
               if (userMemberships.length === 0 && userData.gymId) {
                  userMemberships = [{ gymId: userData.gymId, gymName: "My Gym", role: userData.role || 'member' }];
               }
               setMemberships(userMemberships);
 
-              // --- LOGIC FIX START ---
-              // Only respect the preference if it exists in their valid memberships list
-              const preferredId = userData.lastActiveGymId;
-              const isPreferenceValid = userMemberships.some(m => m.gymId === preferredId);
-              
-              // If preference is invalid (e.g. disconnected), fallback to the first available gym
-              const targetGymId = isPreferenceValid ? preferredId : userMemberships[0]?.gymId;
-              // --- LOGIC FIX END ---
+              // --- SIMPLIFIED PRIORITY LOGIC ---
+              const lastActiveId = userData.lastActiveGymId;
+              const isLastActiveValid = userMemberships.some(m => m.gymId === lastActiveId && !m.isHidden);
 
+              let targetGymId = null;
+
+              if (isLastActiveValid) {
+                  // Prioritize the last opened gym
+                  targetGymId = lastActiveId;
+              } else if (userMemberships.length > 0) {
+                  // Fallback: First non-hidden gym if no last active or last active was removed
+                  const firstValid = userMemberships.find(m => !m.isHidden);
+                  targetGymId = firstValid ? firstValid.gymId : null;
+              }
+
+              // --- EXECUTE SWITCH ---
               if (targetGymId) {
-                  // Only fetch if we are actually changing gyms to avoid flicker
-                  // (Optional optimization: check if currentGym.id !== targetGymId)
                   await switchGym(targetGymId); 
               } else {
-                  console.log("[GymContext] No valid gym connection found. Reverting to Zero State.");
+                  console.log("[GymContext] No valid gym connection found.");
                   setCurrentGym(null);
               }
-           } else {
+            } else {
                console.log("[GymContext] Profile doc does not exist yet...");
-           }
-           setLoading(false);
+            }
+            setLoading(false);
         });
       } else {
         setLoading(false);
