@@ -1,18 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, X, Calendar, Clock, AlertCircle, CheckCircle, Trash2, Hourglass, CheckSquare, User } from 'lucide-react';
-import { doc, getDoc } from 'firebase/firestore'; // For fetching instructor if needed
-import { db } from '../../../../../../packages/shared/api/firebaseConfig';
-import { useGym } from '../../../context/GymContext'; // To get gymId for lookup
+import { Loader2, X, Calendar, Clock, AlertCircle, CheckCircle, Trash2, Hourglass, CheckSquare, User, ScrollText, Scale } from 'lucide-react';
+import { doc, getDoc } from 'firebase/firestore'; 
+import { db, auth } from '../../../../../../packages/shared/api/firebaseConfig';
+import { useGym } from '../../../context/GymContext'; 
+import { getGymWaiver, signWaiver } from '../../../../../../packages/shared/api/firestore'; // Import waiver API
 
 const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) => {
-  const { currentGym } = useGym();
+  const { currentGym, memberships } = useGym();
   const [status, setStatus] = useState('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [instructorName, setInstructorName] = useState(classInstance.resolvedInstructorName || classInstance.instructorName || null);
 
+  // --- WAIVER STATE ---
+  const [showWaiver, setShowWaiver] = useState(false);
+  const [waiverData, setWaiverData] = useState(null);
+
   // --- FETCH INSTRUCTOR IF MISSING ---
-  // Only runs if we don't have a name but we have an ID
   useEffect(() => {
     if (!instructorName && classInstance.instructorId && currentGym?.id) {
         const fetchInstructor = async () => {
@@ -23,7 +27,7 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                     setInstructorName(snap.data().name);
                 }
             } catch (err) {
-                console.error("Failed to fetch instructor for modal", err);
+                console.error("Failed to fetch instructor", err);
             }
         };
         fetchInstructor();
@@ -42,7 +46,8 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
       return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   };
 
-  const handleConfirm = async () => {
+  // --- CORE BOOKING LOGIC (Executed after checks) ---
+  const executeBooking = async () => {
     setStatus('loading');
     setErrorMessage('');
     try {
@@ -59,6 +64,73 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
       setStatus('error');
       setErrorMessage(err.message || "An unexpected error occurred.");
     }
+  };
+
+  // --- 1. INTERCEPT: CHECK WAIVER BEFORE BOOKING ---
+  const handlePreBookingCheck = async () => {
+      // If already booked or waitlisted, this is a Cancel action, so skip waiver check
+      if (isBooked || isWaitlisted) {
+          handleCancel();
+          return;
+      }
+
+      setStatus('loading');
+      
+      try {
+          // A. Fetch the Gym's Current Waiver Requirement
+          const res = await getGymWaiver(currentGym.id);
+          
+          if (res.success && res.enforceWaiver) {
+             // B. Get User's Current Status from Context
+             const myMembership = memberships?.find(m => m.gymId === currentGym.id);
+             const hasSigned = myMembership?.waiverSigned;
+             const userVersion = myMembership?.waiverSignedVersion || 0;
+             const requiredVersion = res.version || 1;
+
+             // C. If OUTDATED or NOT SIGNED -> Show Waiver
+             if (!hasSigned || userVersion < requiredVersion) {
+                 setWaiverData({
+                     text: res.waiverText,
+                     version: requiredVersion
+                 });
+                 setShowWaiver(true);
+                 setStatus('idle'); // Stop loading spinner, show waiver UI
+                 return; // STOP HERE
+             }
+          }
+      } catch (e) {
+          console.error("Waiver check failed", e);
+          // If check fails, we generally fail safe and try to book (or alert user)
+          // For now, let's proceed to book and let the backend handle strict enforcement if needed
+      }
+
+      // D. If All Good -> Execute
+      executeBooking();
+  };
+
+  // --- 2. HANDLE SIGN & CONTINUE ---
+  const handleSignAndBook = async () => {
+      setStatus('loading'); // Show loading on the "Agree" button
+      const user = auth.currentUser;
+      
+      try {
+          // A. Sign Waiver
+          if (user && currentGym && waiverData) {
+              await signWaiver(user.uid, currentGym.id, waiverData.version);
+          }
+          
+          // B. Close Waiver View (internal state)
+          setShowWaiver(false);
+          
+          // C. Proceed immediately to Booking
+          await executeBooking();
+
+      } catch (err) {
+          console.error("Signing failed", err);
+          setStatus('error');
+          setErrorMessage("Failed to sign waiver. Please try again.");
+          setShowWaiver(false); 
+      }
   };
 
   const handleCancel = async () => {
@@ -84,6 +156,47 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
      weekday: 'long', month: 'long', day: 'numeric'
   });
 
+  // --- RENDER: WAIVER VIEW ---
+  if (showWaiver && waiverData) {
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[80vh] animate-in fade-in zoom-in duration-200">
+                <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                    <div className="flex items-center gap-2 text-gray-900 font-bold">
+                        <Scale size={20} className="text-blue-600" />
+                        <h3>Waiver Required</h3>
+                    </div>
+                    <button onClick={() => { setShowWaiver(false); setStatus('idle'); }} className="p-1 rounded-full hover:bg-gray-200 text-gray-500">
+                        <X size={20} />
+                    </button>
+                </div>
+                
+                <div className="p-4 bg-blue-50 text-blue-800 text-xs font-medium border-b border-blue-100">
+                    To book this class, you must accept the updated liability waiver.
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 bg-white">
+                     <div className="prose prose-sm text-gray-600 whitespace-pre-wrap text-xs">
+                        {waiverData.text}
+                     </div>
+                </div>
+
+                <div className="p-4 border-t border-gray-100 bg-gray-50">
+                    <button 
+                        onClick={handleSignAndBook}
+                        disabled={status === 'loading'}
+                        className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-md"
+                        style={{ backgroundColor: theme.primaryColor }}
+                    >
+                        {status === 'loading' ? <Loader2 className="animate-spin" /> : "Agree & Book Class"}
+                    </button>
+                </div>
+            </div>
+        </div>
+      );
+  }
+
+  // --- RENDER: STANDARD BOOKING MODAL ---
   let title = "Confirm Booking";
   if (isAttended) title = "Class Completed";
   else if (isBooked) title = "Manage Booking";
@@ -191,7 +304,8 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                            </button>
                        ) : (
                            <button
-                             onClick={handleConfirm}
+                             // CHANGED: Call pre-check instead of confirm directly
+                             onClick={handlePreBookingCheck} 
                              disabled={status === 'loading'}
                              className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 active:scale-95 transition-transform"
                              style={{ backgroundColor: isFull ? '#ea580c' : theme.primaryColor }}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Clock, CheckCircle, AlertCircle, Hourglass, CheckSquare } from 'lucide-react'; // Added CheckSquare for attended
+import { Clock, CheckCircle, AlertCircle, Hourglass, CheckSquare } from 'lucide-react'; 
 
 // --- CONFIGURATION ---
 const START_HOUR = 6;  // 6 AM
@@ -24,17 +24,25 @@ const MemberCalendarView = ({
     return () => clearInterval(interval);
   }, []);
 
-  // --- 1. DYNAMIC DAY GENERATION ---
+  // --- 1. DYNAMIC DAY GENERATION (FIXED TIMEZONE ISSUE) ---
   const calendarDays = useMemo(() => {
     return Array.from({ length: 7 }).map((_, i) => {
+      // Create a clean date object starting from the provided weekStart
       const date = new Date(weekStart);
       date.setDate(weekStart.getDate() + i);
       
+      // FIX: Manually construct YYYY-MM-DD string using LOCAL time values
+      // This prevents "2023-12-26" becoming "2023-12-25" due to UTC conversion
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const localDateString = `${year}-${month}-${day}`;
+
       return {
         dateObj: date,
         dayNum: date.getDate(),
         dayName: date.toLocaleDateString('en-US', { weekday: 'long' }), 
-        dateString: date.toISOString().split('T')[0] 
+        dateString: localDateString // Use this manual string for reliable matching
       };
     });
   }, [weekStart]);
@@ -143,9 +151,17 @@ const MemberCalendarView = ({
              
              // Filter classes
              const daysClasses = classes.filter(c => {
+                // For recurring: Name of day (e.g. 'Monday') must match
                 const isScheduledDay = c.days && c.days.some(d => d.toLowerCase() === day.dayName.toLowerCase());
+                
+                // For cancellation: This specific date string must NOT be in the blacklist
                 const isNotCancelled = !c.cancelledDates || !c.cancelledDates.includes(day.dateString);
+                
+                // For Single Events: The startDate string must match exactly the column date string
                 const isOneOffMatch = c.frequency === 'Single Event' && c.startDate === day.dateString;
+                
+                // Combine: (Recurring AND Not Cancelled) OR (Single Event Match)
+                // Note: Single Events should ignore 'isNotCancelled' logic or have it built-in, usually they just match or don't.
                 return (isScheduledDay && isNotCancelled && c.frequency !== 'Single Event') || isOneOffMatch;
              });
 

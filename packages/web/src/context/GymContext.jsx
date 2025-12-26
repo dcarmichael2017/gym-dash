@@ -42,19 +42,16 @@ export const GymProvider = ({ children }) => {
       setMemberships([]);
       
       if (profileUnsubscribe) {
-        console.log("[GymContext] Unsubscribing from old profile");
         profileUnsubscribe();
         profileUnsubscribe = null;
       }
 
       if (user) {
         setLoading(true);
-        console.log("[GymContext] Subscribing to new profile...");
         
         // 2. USE REAL-TIME LISTENER (onSnapshot)
         profileUnsubscribe = onSnapshot(doc(db, 'users', user.uid), async (docSnap) => {
            if (docSnap.exists()) {
-              console.log("[GymContext] Profile Update Received");
               const userData = docSnap.data();
               let userMemberships = userData.memberships || [];
               
@@ -64,13 +61,21 @@ export const GymProvider = ({ children }) => {
               }
               setMemberships(userMemberships);
 
-              const targetGymId = userData.lastActiveGymId || userMemberships[0]?.gymId;
+              // --- LOGIC FIX START ---
+              // Only respect the preference if it exists in their valid memberships list
+              const preferredId = userData.lastActiveGymId;
+              const isPreferenceValid = userMemberships.some(m => m.gymId === preferredId);
+              
+              // If preference is invalid (e.g. disconnected), fallback to the first available gym
+              const targetGymId = isPreferenceValid ? preferredId : userMemberships[0]?.gymId;
+              // --- LOGIC FIX END ---
 
               if (targetGymId) {
-                  // Only fetch gym details if we have a target
+                  // Only fetch if we are actually changing gyms to avoid flicker
+                  // (Optional optimization: check if currentGym.id !== targetGymId)
                   await switchGym(targetGymId); 
               } else {
-                  console.log("[GymContext] No target gym found. Staying at Zero State.");
+                  console.log("[GymContext] No valid gym connection found. Reverting to Zero State.");
                   setCurrentGym(null);
               }
            } else {

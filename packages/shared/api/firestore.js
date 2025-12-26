@@ -1049,6 +1049,31 @@ export const joinGym = async (userId, gymId, gymName) => {
   }
 };
 
+export const disconnectGym = async (userId, gymId) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userRef);
+    
+    if (!userSnap.exists()) throw new Error("User not found");
+    
+    const userData = userSnap.data();
+    // Filter OUT the specific gym membership
+    const updatedMemberships = (userData.memberships || []).filter(m => m.gymId !== gymId);
+    
+    // If they were currently viewing this gym, we should probably clear the lastActiveGymId
+    // or let the frontend handle the redirect.
+    await updateDoc(userRef, { 
+        memberships: updatedMemberships,
+        gymId: updatedMemberships.length > 0 ? updatedMemberships[0].gymId : null
+    });
+    
+    return { success: true };
+  } catch (error) {
+    console.error("Error disconnecting gym:", error);
+    return { success: false, error: error.message };
+  }
+};
+
 /**
  * GET NEXT UPCOMING CLASS (Compatible with Simple Data Model)
  * Works with: { days: ['Monday', 'Wednesday'], time: '18:00' }
@@ -1177,6 +1202,135 @@ export const getMemberSchedule = async (gymId, memberId, startDate, endDate) => 
     return { success: true, schedule: scheduleMap };
   } catch (error) {
     console.error("Error fetching member schedule:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// --- WAIVER & COMPLIANCE ---
+export const getGymWaiver = async (gymId) => {
+  try {
+    const docRef = doc(db, "gyms", gymId, "settings", "legal");
+    const snap = await getDoc(docRef);
+    
+    if (snap.exists()) {
+      const data = snap.data();
+      return { 
+          success: true, 
+          waiverText: data.waiverText || "No waiver text configured.",
+          tosText: data.tosText || "No terms of service configured.",
+          enforceWaiver: data.enforceWaiverSignature !== false,
+          version: data.version || 1,        
+          updatedAt: data.updatedAt || null 
+      };
+    }
+    
+    return { 
+        success: true, 
+        waiverText: "Standard Liability Waiver...", 
+        tosText: "Standard Terms...",
+        enforceWaiver: true,
+        version: 1 
+    }; 
+  } catch (error) {
+    console.error("Error fetching waiver:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const signWaiver = async (userId, gymId, version = 1) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    // We have to read-modify-write the array because Firestore can't update a specific object in an array easily
+    const userSnap = await getDoc(userRef);
+    
+    if (!userSnap.exists()) throw new Error("User not found");
+    
+    const userData = userSnap.data();
+    const memberships = userData.memberships || [];
+    
+    // Find and update the specific membership
+    const updatedMemberships = memberships.map(m => {
+      if (m.gymId === gymId) {
+        return { 
+            ...m, 
+            waiverSigned: true, 
+            waiverSignedAt: new Date(), 
+            waiverSignedVersion: version
+        };
+      }
+      return m;
+    });
+    
+    await updateDoc(userRef, { memberships: updatedMemberships });
+    return { success: true };
+  } catch (error) {
+    console.error("Error signing waiver:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const updateLegalSettings = async (gymId, data) => {
+  try {
+    const legalRef = doc(db, "gyms", gymId, "settings", "legal");
+    
+    // 1. Determine Version
+    const snap = await getDoc(legalRef);
+    let nextVersion = 1;
+    if (snap.exists()) {
+        nextVersion = (snap.data().version || 0) + 1;
+    }
+
+    const timestamp = new Date();
+    const payload = {
+      ...data,
+      version: nextVersion,
+      updatedAt: timestamp
+    };
+
+    // 2. Update Main Document
+    await setDoc(legalRef, payload, { merge: true });
+
+    // 3. Save Snapshot to History Subcollection
+    // Path: gyms/{gymId}/settings/legal/history/{version}
+    const historyRef = doc(db, "gyms", gymId, "settings", "legal", "history", `v${nextVersion}`);
+    await setDoc(historyRef, payload);
+
+    return { success: true, version: nextVersion };
+  } catch (error) {
+    console.error("Error updating legal settings:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// --- LEGAL SETTINGS READER (ADMIN) ---
+export const getLegalSettings = async (gymId) => {
+  try {
+    const docRef = doc(db, "gyms", gymId, "settings", "legal");
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return { success: true, data: snap.data() };
+    }
+    return { success: true, data: {} }; // Return empty obj if not set yet
+  } catch (error) {
+    console.error("Error fetching legal settings:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const getLegalHistory = async (gymId) => {
+  try {
+    const historyRef = collection(db, "gyms", gymId, "settings", "legal", "history");
+    const q = query(historyRef, orderBy("version", "desc")); // Newest first
+    const querySnapshot = await getDocs(q);
+    
+    const history = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+    }));
+
+    return { success: true, history };
+  } catch (error) {
+    console.error("Error fetching legal history:", error);
     return { success: false, error: error.message };
   }
 };

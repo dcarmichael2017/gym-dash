@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
-// ADDED FileText to the imports below
-import { Save, AlertCircle, CheckSquare, Square, Scale, AlertTriangle, FileText } from 'lucide-react';
-import { updateGymDetails } from '../../../../../shared/api/firestore';
+import React, { useState, useEffect } from 'react';
+import { Save, AlertTriangle, CheckSquare, Square, Scale, FileText, Loader2, History, Clock } from 'lucide-react';
+import { updateLegalSettings, getLegalSettings } from '../../../../../../packages/shared/api/firestore';
+import LegalHistoryModal from '../../../components/admin/LegalHistoryModal';
 
-// Placeholder text acts as a visual guide but is NOT saved data
+
 const PLACEHOLDERS = {
   waiver: `[EXAMPLE STRUCTURE - CONSULT YOUR LAWYER]
 
@@ -28,48 +28,135 @@ Cancellations must be requested 30 days in advance via the member portal...
 Harassment of members or staff will result in immediate termination...`
 };
 
-export const LegalSettingsTab = ({ gymId, initialData, showMessage }) => {
+export const LegalSettingsTab = ({ gymId, showMessage }) => {
+  const [showHistory, setShowHistory] = useState(false); // New state
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(true);
   
+  // State for metadata & original data for comparison
+  const [meta, setMeta] = useState({ version: 0, updatedAt: null });
+  const [originalData, setOriginalData] = useState(null);
+
   const [formData, setFormData] = useState({
-    waiverText: initialData?.waiverText || '',
-    tosText: initialData?.tosText || '',
-    requireWaiver: initialData?.requireWaiver ?? true, 
+    waiverText: '',
+    tosText: '',
+    requireWaiver: true, 
   });
 
+  // --- 1. FETCH DATA ON MOUNT ---
+  useEffect(() => {
+    const loadSettings = async () => {
+        if (!gymId) return;
+        setFetching(true);
+        const res = await getLegalSettings(gymId);
+        
+        if (res.success && res.data) {
+            const loadedData = {
+                waiverText: res.data.waiverText || '',
+                tosText: res.data.tosText || '',
+                requireWaiver: res.data.enforceWaiverSignature !== false 
+            };
+            
+            setFormData(loadedData);
+            setOriginalData(loadedData); // Store snapshot for comparison
+            
+            setMeta({
+                version: res.data.version || 1,
+                updatedAt: res.data.updatedAt ? res.data.updatedAt.toDate() : null
+            });
+        }
+        setFetching(false);
+    };
+    loadSettings();
+  }, [gymId]);
+
+  // --- 2. COMPARE CHANGES ---
+  const hasChanges = originalData && (
+      formData.waiverText !== originalData.waiverText ||
+      formData.tosText !== originalData.tosText ||
+      formData.requireWaiver !== originalData.requireWaiver
+  );
+
   const handleSave = async () => {
-    // Validation check
+    if (!hasChanges) {
+        showMessage('info', 'No changes to save.');
+        return;
+    }
+
     if (formData.requireWaiver && !formData.waiverText.trim()) {
         showMessage('error', 'You cannot require a waiver without waiver text.');
         return;
     }
 
     setLoading(true);
-    const result = await updateGymDetails(gymId, {
-      legal: {
+
+    const result = await updateLegalSettings(gymId, {
         waiverText: formData.waiverText,
         tosText: formData.tosText,
-        requireWaiver: formData.requireWaiver
-      }
+        enforceWaiverSignature: formData.requireWaiver
     });
 
     setLoading(false);
     if (result.success) {
-      showMessage('success', 'Legal documents updated successfully.');
+      showMessage('success', `Saved! Now on Version ${result.version}.`);
+      setMeta(prev => ({ 
+          version: result.version, 
+          updatedAt: new Date() 
+      }));
+      // Update the "Original" reference so button disables again until next change
+      setOriginalData({ ...formData });
     } else {
       showMessage('error', 'Failed to save settings.');
     }
   };
 
+  const handleViewHistory = () => {
+      setShowHistory(true);
+  };
+
+  if (fetching) {
+      return <div className="flex justify-center py-10"><Loader2 className="animate-spin text-gray-400" /></div>;
+  }
+
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="space-y-6 animate-in fade-in duration-500">
+
+    {/* ADD MODAL CONDITION */}
+      {showHistory && (
+          <LegalHistoryModal 
+              gymId={gymId} 
+              onClose={() => setShowHistory(false)} 
+          />
+      )}
       
-      {/* Platform Legal Disclaimer */}
+      {/* --- VERSION & STATUS HEADER --- */}
+      <div className="flex items-center justify-between bg-white border border-gray-200 p-4 rounded-lg shadow-sm">
+          <div className="flex items-center gap-3">
+              <div className="bg-blue-50 p-2 rounded-full text-blue-600">
+                  <History size={20} />
+              </div>
+              <div>
+                  <h3 className="text-sm font-bold text-gray-900">Current Version: v{meta.version}</h3>
+                  <p className="text-xs text-gray-500">
+                      Last Updated: {meta.updatedAt ? meta.updatedAt.toLocaleString() : 'Never'}
+                  </p>
+              </div>
+          </div>
+          
+          <button 
+            onClick={handleViewHistory}
+            className="text-xs font-bold text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-md transition-colors flex items-center gap-1"
+          >
+              <Clock size={14} /> View History
+          </button>
+      </div>
+
+      {/* Disclaimer */}
       <div className="bg-amber-50 p-4 rounded-lg border border-amber-200 flex gap-3">
         <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
         <div className="text-sm text-amber-900">
           <p className="font-bold">Disclaimer</p>
-          <p>GymDash provides the tools to collect digital signatures, but we do not provide legal advice. Please consult a legal professional to draft waivers compliant with your local laws.</p>
+          <p>GymDash provides the tools to collect digital signatures, but we do not provide legal advice.</p>
         </div>
       </div>
 
@@ -77,7 +164,7 @@ export const LegalSettingsTab = ({ gymId, initialData, showMessage }) => {
       <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
         <div>
             <h4 className="font-bold text-gray-800 text-sm">Enforce Waiver Signature?</h4>
-            <p className="text-xs text-gray-500">If enabled, new members cannot create an account without accepting.</p>
+            <p className="text-xs text-gray-500">If enabled, members must sign before accessing the dashboard.</p>
         </div>
         <button 
             onClick={() => setFormData(p => ({...p, requireWaiver: !p.requireWaiver}))}
@@ -88,48 +175,50 @@ export const LegalSettingsTab = ({ gymId, initialData, showMessage }) => {
         </button>
       </div>
 
-      {/* Liability Waiver */}
-      <div>
-        <div className="flex justify-between items-end mb-2">
-            <div className="flex items-center gap-2">
-                <Scale className="h-4 w-4 text-gray-500" />
-                <label className="block text-sm font-bold text-gray-700">Liability Waiver</label>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Liability Waiver */}
+          <div>
+            <div className="flex justify-between items-end mb-2">
+                <div className="flex items-center gap-2">
+                    <Scale className="h-4 w-4 text-gray-500" />
+                    <label className="block text-sm font-bold text-gray-700">Liability Waiver</label>
+                </div>
+                <span className="text-xs text-gray-400">Required</span>
             </div>
-            <span className="text-xs text-gray-400">Required for account creation</span>
-        </div>
-        <textarea
-          rows={12}
-          value={formData.waiverText}
-          onChange={(e) => setFormData({ ...formData, waiverText: e.target.value })}
-          placeholder={PLACEHOLDERS.waiver}
-          className="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-mono leading-relaxed placeholder:text-gray-300"
-        />
-      </div>
+            <textarea
+              rows={15}
+              value={formData.waiverText}
+              onChange={(e) => setFormData({ ...formData, waiverText: e.target.value })}
+              placeholder={PLACEHOLDERS.waiver}
+              className="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-mono leading-relaxed placeholder:text-gray-300"
+            />
+          </div>
 
-      {/* Terms of Service */}
-      <div>
-        <div className="flex justify-between items-end mb-2">
-            <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-gray-500" />
-                <label className="block text-sm font-bold text-gray-700">Gym Terms of Service</label>
+          {/* Terms of Service */}
+          <div>
+            <div className="flex justify-between items-end mb-2">
+                <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-gray-500" />
+                    <label className="block text-sm font-bold text-gray-700">Terms of Service</label>
+                </div>
+                <span className="text-xs text-gray-400">General Policies</span>
             </div>
-            <span className="text-xs text-gray-400">General rules & policies</span>
-        </div>
-        <textarea
-          rows={12}
-          value={formData.tosText}
-          onChange={(e) => setFormData({ ...formData, tosText: e.target.value })}
-          placeholder={PLACEHOLDERS.tos}
-          className="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-mono leading-relaxed placeholder:text-gray-300"
-        />
+            <textarea
+              rows={15}
+              value={formData.tosText}
+              onChange={(e) => setFormData({ ...formData, tosText: e.target.value })}
+              placeholder={PLACEHOLDERS.tos}
+              className="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-mono leading-relaxed placeholder:text-gray-300"
+            />
+          </div>
       </div>
 
       {/* Save Button */}
       <div className="pt-4 border-t border-gray-100 flex justify-end">
         <button
           onClick={handleSave}
-          disabled={loading}
-          className="flex items-center px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+          disabled={loading || !hasChanges} // Disable if no changes
+          className="flex items-center px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Save className="h-4 w-4 mr-2" />
           {loading ? 'Saving...' : 'Save Legal Docs'}

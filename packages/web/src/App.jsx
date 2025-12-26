@@ -40,7 +40,7 @@ import DashboardClassesScreen from './screens/admin/DashboardClassesScreen';
 // --- MEMBER SCREENS ---
 import MemberHomeScreen from './screens/members/dashboard/MemberHomeScreen';
 import MemberScheduleScreen from './screens/members/schedule/MemberScheduleScreen';
-import MemberProfileScreen from './screens/members/MemberProfileScreen';
+import MemberProfileScreen from './screens/members/profile/MemberProfileScreen';
 
 function App() {
   const [user, setUser] = useState(null);

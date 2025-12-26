@@ -1,33 +1,93 @@
 import React, { useState, useEffect } from 'react';
-import { LogOut, Search, MapPin, ArrowRight, Loader2 } from 'lucide-react';
+import { LogOut, Search, MapPin, ArrowRight, Loader2, ChevronLeft } from 'lucide-react'; 
 import { auth } from '../../../../../../packages/shared/api/firebaseConfig';
 import { useGym } from '../../../context/GymContext';
-import { searchGyms, joinGym } from '../../../../../../packages/shared/api/firestore';
+import { searchGyms, joinGym, signWaiver, disconnectGym, getGymWaiver } from '../../../../../../packages/shared/api/firestore';
 
 // --- SUB-COMPONENTS ---
 import MembershipOffers from './MembershipOffers';
 import NextClassCard from './NextClassCard';
+import WaiverModal from './WaiverModal';
 
 const MemberHomeScreen = () => {
   const { currentGym, memberships } = useGym();
-  
-  // --- THEME ---
-  // Default to standard blue if not set
   const theme = currentGym?.theme || { primaryColor: '#2563eb', secondaryColor: '#4f46e5' };
 
-  // Local State for Search (Gym Finder)
+  // Local State
   const [isSearching, setIsSearching] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [gymsList, setGymsList] = useState([]);
   const [joiningGymId, setJoiningGymId] = useState(null);
+  
+  // Waiver Enforcement State
+  const [waiverEnforced, setWaiverEnforced] = useState(false);
+  const [currentWaiverVersion, setCurrentWaiverVersion] = useState(1);
+  const [checkingWaiver, setCheckingWaiver] = useState(true);
+  
+  // NEW: Track temporary dismissal of the modal
+  const [isDismissed, setIsDismissed] = useState(false);
 
-  // --- DERIVED STATE: USER STATUS ---
+  // --- DERIVED STATE ---
   const currentMembership = memberships?.find(m => m.gymId === currentGym?.id);
   const isProspect = !currentMembership || currentMembership.status === 'prospect' || currentMembership.status === 'guest';
   const isActiveMember = currentMembership?.status === 'active' || currentMembership?.status === 'trialing';
 
+  // --- EFFECT: CHECK WAIVER SETTINGS & VERSION ---
+  useEffect(() => {
+    const checkSettings = async () => {
+        if (currentGym?.id) {
+            setCheckingWaiver(true);
+            const res = await getGymWaiver(currentGym.id);
+            setWaiverEnforced(res.success ? res.enforceWaiver : true);
+            setCurrentWaiverVersion(res.version || 1);
+            setCheckingWaiver(false);
+        } else {
+            setCheckingWaiver(false);
+        }
+    };
+    checkSettings();
+  }, [currentGym?.id]);
+
+  // --- GATEKEEPER LOGIC ---
+  const userSignedVersion = currentMembership?.waiverSignedVersion || 0;
+  const isOutdated = currentMembership?.waiverSigned && userSignedVersion < currentWaiverVersion;
+  const isNotSigned = currentMembership && !currentMembership.waiverSigned;
+
+  // Show Modal logic: Now includes check for !isDismissed
+  const showWaiverModal = !isDismissed && !checkingWaiver && waiverEnforced && (isNotSigned || isOutdated);
+
+  // --- HANDLERS ---
+  const handleWaiverSign = async () => {
+      const user = auth.currentUser;
+      if (user && currentGym) {
+          await signWaiver(user.uid, currentGym.id, currentWaiverVersion);
+      }
+  };
+
+  const handleWaiverDecline = async () => {
+      const user = auth.currentUser;
+      
+      // CASE 1: Waiver is just OUTDATED (User has signed before)
+      // Logic: Allow them to dismiss the update notification for this session.
+      if (isOutdated) {
+          setIsDismissed(true); // <--- THIS FIXES THE INFINITE SPIN
+          return;
+      }
+
+      // CASE 2: Waiver was NEVER signed
+      // Logic: Disconnect them because they refused the mandatory entry terms.
+      if (user && currentGym) {
+          await disconnectGym(user.uid, currentGym.id);
+          // Context listener will automatically handle the UI update (set currentGym null)
+      }
+  };
+
+  const handleLeaveGuestView = () => {
+      window.location.href = '/'; 
+  };
+
   // --- 1. ZERO STATE: FIND A GYM ---
-  if (!currentGym && memberships.length === 0) {
+  if (!currentGym) {
     
     useEffect(() => {
         const fetchGyms = async () => {
@@ -36,7 +96,6 @@ const MemberHomeScreen = () => {
             if (result.success) setGymsList(result.gyms);
             setIsSearching(false);
         };
-        // Debounce logic is ideal here, but basic effect works for MVP
         fetchGyms();
     }, [searchTerm]);
 
@@ -47,7 +106,7 @@ const MemberHomeScreen = () => {
 
         const result = await joinGym(user.uid, gym.id, gym.name);
         if (result.success) {
-            window.location.reload(); 
+            // Wait for context update
         }
         setJoiningGymId(null);
     };
@@ -75,9 +134,7 @@ const MemberHomeScreen = () => {
                     <div className="flex justify-center py-8"><Loader2 className="animate-spin text-gray-400" /></div>
                 ) : gymsList.length > 0 ? (
                     gymsList.map(gym => {
-                        // Extract gym specific theme if available, else fallback
                         const gymThemeColor = gym.theme?.primaryColor || '#2563eb';
-
                         return (
                             <div key={gym.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col gap-3 transition-all hover:shadow-md">
                                 <div className="flex justify-between items-start">
@@ -97,11 +154,9 @@ const MemberHomeScreen = () => {
                                         </div>
                                     </div>
                                 </div>
-                                
                                 <p className="text-sm text-gray-600 line-clamp-2">
                                     {gym.description || "No description available."}
                                 </p>
-
                                 <button 
                                     onClick={() => handleJoin(gym)}
                                     disabled={joiningGymId === gym.id}
@@ -123,13 +178,36 @@ const MemberHomeScreen = () => {
 
   // --- 2. DASHBOARD STATE ---
   return (
-    <div className="p-6 space-y-6 pb-24">
+    <div className="p-6 space-y-6 pb-24 relative">
+      
+      {/* WAIVER MODAL GATEKEEPER */}
+      {showWaiverModal && (
+          <WaiverModal 
+             gymId={currentGym.id} 
+             gymName={currentGym.name} 
+             theme={theme}
+             onAccept={handleWaiverSign}
+             onDecline={handleWaiverDecline}
+             targetVersion={currentWaiverVersion}
+             isUpdate={isOutdated}
+             lastSignedVersion={userSignedVersion}
+          />
+      )}
+
       {/* HEADER */}
       <div className="flex justify-between items-center">
         <div>
-           <h1 className="text-2xl font-bold text-gray-900">
-             {isActiveMember ? "Welcome Back" : "Hello Guest"}
-           </h1>
+           <div className="flex items-center gap-2">
+               {isProspect && memberships.length === 0 && (
+                   <button onClick={handleLeaveGuestView} className="p-1 -ml-2 text-gray-400 hover:text-gray-600">
+                       <ChevronLeft size={24} />
+                   </button>
+               )}
+               <h1 className="text-2xl font-bold text-gray-900">
+                 {isActiveMember ? "Welcome Back" : "Hello Guest"}
+               </h1>
+           </div>
+           
            <p className="text-gray-500 text-sm flex items-center gap-1 mt-1">
                 <MapPin size={12}/> {currentGym?.name || "My Gym"}
                 {isProspect && (
@@ -142,17 +220,10 @@ const MemberHomeScreen = () => {
                 )}
            </p>
         </div>
-        
-        {/* Only show logout here if desired, usually handled by Sidebar now */}
-        {/* <button onClick={() => auth.signOut()} className="text-gray-400 hover:text-red-600">
-           <LogOut size={20} />
-        </button> */}
       </div>
 
-      {/* COMPONENT: NEXT CLASS */}
       <NextClassCard hasActiveMembership={isActiveMember} />
 
-      {/* COMPONENT: MEMBERSHIP OFFERS */}
       {isProspect && (
           <MembershipOffers />
       )}
@@ -169,7 +240,7 @@ const MemberHomeScreen = () => {
             <div className="h-1 w-full bg-gray-100 rounded-full overflow-hidden mt-2">
                 <div 
                     className="h-full rounded-full" 
-                    style={{ width: '20%', backgroundColor: theme.primaryColor }} // Example progress
+                    style={{ width: '20%', backgroundColor: theme.primaryColor }} 
                 ></div>
             </div>
          </div>
@@ -181,7 +252,6 @@ const MemberHomeScreen = () => {
                 </div>
                 <div className="text-xs text-gray-500 font-medium">Current Rank</div>
             </div>
-            {/* Rank Belt Visualization (Placeholder) */}
             <div className="h-2 w-full bg-gray-100 border border-gray-300 rounded mt-2 relative">
                  <div className="absolute right-4 top-0 bottom-0 w-4 bg-black"></div>
             </div>
