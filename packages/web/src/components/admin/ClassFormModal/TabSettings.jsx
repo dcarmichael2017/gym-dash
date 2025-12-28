@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Medal, CheckSquare, Square } from 'lucide-react';
+import { Settings, Medal, CheckSquare, Square, Eye, Users, Lock, Globe } from 'lucide-react';
 
 export const TabSettings = ({ 
     formData, 
@@ -9,9 +9,63 @@ export const TabSettings = ({
     toggleRule, 
     handleNumberChange 
 }) => {
+    
+    // Reusable Component for this specific tab
+    const VisibilityOption = ({ value, label, icon: Icon, desc }) => (
+        <button
+          type="button"
+          onClick={() => setFormData({ ...formData, visibility: value })}
+          className={`flex-1 p-3 rounded-xl border text-left transition-all ${
+            formData.visibility === value 
+              ? 'bg-blue-50 border-blue-500 ring-1 ring-blue-500' 
+              : 'bg-white border-gray-200 hover:border-blue-200'
+          }`}
+        >
+          <div className={`mb-1 ${formData.visibility === value ? 'text-blue-600' : 'text-gray-400'}`}>
+            <Icon size={20} />
+          </div>
+          <div className={`text-xs font-bold uppercase ${formData.visibility === value ? 'text-blue-900' : 'text-gray-600'}`}>
+            {label}
+          </div>
+          <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">
+            {desc}
+          </div>
+        </button>
+      );
+
     return (
         <div className="space-y-6 animate-in slide-in-from-right-4 duration-200">
-            {/* Rank Tracking */}
+            
+            {/* 1. VISIBILITY SETTINGS (NEW) */}
+            <div className="space-y-2">
+                <label className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                    <Eye className="h-4 w-4 text-gray-500" /> Class Visibility
+                </label>
+                <div className="flex gap-2">
+                    <VisibilityOption 
+                        value="public" 
+                        label="Public" 
+                        icon={Globe} 
+                        desc="Everyone" 
+                    />
+                    <VisibilityOption 
+                        value="staff" 
+                        label="Internal" 
+                        icon={Users} 
+                        desc="Staff/Admins" 
+                    />
+                    <VisibilityOption 
+                        value="admin" 
+                        label="Hidden" 
+                        icon={Lock} 
+                        desc="Owners Only" 
+                    />
+                </div>
+            </div>
+
+            <div className="border-t border-gray-100"></div>
+
+            {/* 2. Rank Tracking */}
             <div className="space-y-2">
                 <label className="text-sm font-bold text-gray-800 flex items-center gap-2">
                     <Medal className="h-4 w-4 text-indigo-500" /> Attendance Tracking
@@ -32,9 +86,9 @@ export const TabSettings = ({
                 </div>
             </div>
 
-            <div className="border-t border-gray-100 pt-4"></div>
+            <div className="border-t border-gray-100"></div>
 
-            {/* Booking Rules Override */}
+            {/* 3. Booking Rules Override */}
             <div className="space-y-4">
                 <div className="flex items-center justify-between">
                     <div>

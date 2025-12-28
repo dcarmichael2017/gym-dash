@@ -1,16 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar, List, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useGym } from '../../../context/GymContext';
-import { auth } from '../../../../../../packages/shared/api/firebaseConfig';
+import { auth, db } from '../../../../../../packages/shared/api/firebaseConfig';
 import { 
   getClasses, 
   bookMember, 
   cancelBooking,
-  getWeeklyAttendanceCounts, 
-  getMemberSchedule // You might need to create this simple query helper
+  getWeeklyAttendanceCounts 
 } from '../../../../../../packages/shared/api/firestore';
-import { collection, query, where, getDocs } from 'firebase/firestore'; // Import needed for inline query
-import { db } from '../../../../../../packages/shared/api/firebaseConfig';
+import { collection, query, where, getDocs } from 'firebase/firestore'; 
 
 import MemberScheduleList from './MemberScheduleList';
 import MemberCalendarView from './MemberCalendarView';
@@ -22,12 +20,11 @@ const MemberScheduleScreen = () => {
   
   const [viewMode, setViewMode] = useState('list');
   const [loading, setLoading] = useState(true);
-  const [classes, setClasses] = useState([]);
+  const [classes, setClasses] = useState([]); // This will only hold VISIBLE classes
   const [weekStart, setWeekStart] = useState(new Date());
   
-  // --- NEW STATE FOR STATUSES ---
-  const [counts, setCounts] = useState({}); // { "classId_date": 5 }
-  const [userBookings, setUserBookings] = useState({}); // { "classId_date": { status: 'booked', id: 'attendanceDocId' } }
+  const [counts, setCounts] = useState({}); 
+  const [userBookings, setUserBookings] = useState({}); 
 
   const [selectedClass, setSelectedClass] = useState(null);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
@@ -37,11 +34,38 @@ const MemberScheduleScreen = () => {
     if (!currentGym) return;
     setLoading(true);
 
-    // 1. Get Class Definitions
+    // 1. Get All Classes (Raw Data)
     const classRes = await getClasses(currentGym.id);
-    if (classRes.success) setClasses(classRes.classList);
+    
+    if (classRes.success) {
+        // --- VISIBILITY FILTERING ENGINE ---
+        // We filter here so the 'classes' state NEVER holds hidden data.
+        // This prevents users from inspecting React components to see hidden data.
+        
+        const myMembership = memberships.find(m => m.gymId === currentGym.id);
+        const isOwner = currentGym.ownerId === auth.currentUser?.uid;
+        // Check if the user has a specific staff role in their membership
+        const isStaff = myMembership?.role === 'staff' || myMembership?.role === 'coach' || myMembership?.role === 'admin';
 
-    // 2. Define Time Range for Data (Current Week)
+        const visibleClasses = classRes.classList.filter(cls => {
+            const level = cls.visibility || 'public'; // Default to public if missing
+
+            // 1. Owners see EVERYTHING
+            if (isOwner) return true;
+
+            // 2. Staff see 'public' AND 'staff' (but not 'admin' specific)
+            if (isStaff) {
+                return level !== 'admin'; 
+            }
+
+            // 3. Standard Members (and Guests) see ONLY 'public'
+            return level === 'public';
+        });
+
+        setClasses(visibleClasses);
+    }
+
+    // 2. Define Time Range for Counts (Current Week)
     const startStr = weekStart.toISOString().split('T')[0];
     const endObj = new Date(weekStart);
     endObj.setDate(weekStart.getDate() + 7);
@@ -51,28 +75,28 @@ const MemberScheduleScreen = () => {
     const countRes = await getWeeklyAttendanceCounts(currentGym.id, startStr, endStr);
     if (countRes.success) setCounts(countRes.counts);
 
-    // 4. Get Current User's Status (Inline query for MVP)
+    // 4. Get Current User's Status
     if (auth.currentUser) {
        const attRef = collection(db, "gyms", currentGym.id, "attendance");
        const q = query(
-          attRef,
-          where("memberId", "==", auth.currentUser.uid),
-          where("dateString", ">=", startStr),
-          where("dateString", "<=", endStr),
-          where("status", "in", ["booked", "waitlisted", "attended"]) // Don't fetch cancelled
+         attRef,
+         where("memberId", "==", auth.currentUser.uid),
+         where("dateString", ">=", startStr),
+         where("dateString", "<=", endStr),
+         where("status", "in", ["booked", "waitlisted", "attended"]) 
        );
        const snap = await getDocs(q);
        const bookingMap = {};
        snap.forEach(doc => {
           const data = doc.data();
           const key = `${data.classId}_${data.dateString}`;
-          bookingMap[key] = { status: data.status, id: doc.id, checkedInAt: data.checkedInAt }; // Save Status and Doc ID (for cancelling)
+          bookingMap[key] = { status: data.status, id: doc.id, checkedInAt: data.checkedInAt }; 
        });
        setUserBookings(bookingMap);
     }
 
     setLoading(false);
-  }, [currentGym, weekStart]);
+  }, [currentGym, weekStart, memberships]);
 
   useEffect(() => {
     fetchData();
@@ -80,15 +104,14 @@ const MemberScheduleScreen = () => {
 
   // --- HANDLERS ---
   const handleClassClick = (classInstance) => {
-    // Inject current status into the instance before opening modal
     const bookingKey = `${classInstance.id}_${classInstance.dateString}`;
     const userState = userBookings[bookingKey];
     const currentCount = counts[bookingKey] || 0;
 
     setSelectedClass({
       ...classInstance,
-      userStatus: userState?.status || null, // 'booked', 'waitlisted', or null
-      attendanceId: userState?.id || null,   // Needed to cancel
+      userStatus: userState?.status || null, 
+      attendanceId: userState?.id || null, 
       currentCount: currentCount
     });
     setIsBookingModalOpen(true);
@@ -106,13 +129,13 @@ const MemberScheduleScreen = () => {
     };
 
     const result = await bookMember(currentGym.id, classInstance, currentUserProfile);
-    if (result.success) fetchData(); // Refresh UI
+    if (result.success) fetchData(); 
     return result;
   };
 
   const processCancellation = async (attendanceId) => {
     const result = await cancelBooking(currentGym.id, attendanceId);
-    if (result.success) fetchData(); // Refresh UI
+    if (result.success) fetchData(); 
     return result;
   };
 
@@ -126,6 +149,7 @@ const MemberScheduleScreen = () => {
 
   return (
     <div className="pb-24 safe-top">
+      {/* HEADER */}
       <div className="sticky top-0 bg-white z-30 px-6 py-4 border-b border-gray-100 shadow-sm">
         <div className="flex justify-between items-center mb-4">
           <h1 className="text-2xl font-bold text-gray-900">Schedule</h1>
@@ -147,6 +171,7 @@ const MemberScheduleScreen = () => {
         )}
       </div>
 
+      {/* CONTENT - Components receive already filtered classes */}
       <div className="p-4 bg-gray-50 min-h-[80vh]">
         {viewMode === 'list' ? (
           <MemberScheduleList 

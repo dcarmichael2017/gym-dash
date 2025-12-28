@@ -34,6 +34,8 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
         checkInWindowMinutes: '',
         lateCancelFee: '',
         cancelledDates: [],
+        // NEW: Visibility Field
+        visibility: 'public' 
     });
 
     const [activeRules, setActiveRules] = useState({
@@ -91,6 +93,8 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     checkInWindowMinutes: initCheckIn ?? 60,
                     lateCancelFee: initFee ?? 0,
                     cancelledDates: classData.cancelledDates || [],
+                    // Load existing visibility or default to public
+                    visibility: classData.visibility || 'public' 
                 });
 
                 setActiveRules({
@@ -122,6 +126,8 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     checkInWindowMinutes: globalSettings?.checkInWindowMinutes ?? 60,
                     lateCancelFee: globalSettings?.lateCancelFee ?? 0,
                     cancelledDates: [],
+                    // Default for new classes
+                    visibility: 'public'
                 });
 
                 setActiveRules({
@@ -189,6 +195,8 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
             dropInPrice: parseFloat(formData.dropInPrice) || 0,
             maxCapacity: parseInt(formData.maxCapacity) || 0,
             bookingRules: bookingRulesPayload,
+            // Ensure visibility is sent
+            visibility: formData.visibility || 'public'
         };
 
         let result;

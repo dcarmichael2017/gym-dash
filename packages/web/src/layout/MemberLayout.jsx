@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Home, Calendar, User, QrCode, LogOut, Dumbbell, Link as LinkIcon } from 'lucide-react';
+import { Home, Calendar, User, QrCode, LogOut, Dumbbell, Link as LinkIcon, ShoppingBag } from 'lucide-react';
 import { auth } from '../../../../packages/shared/api/firebaseConfig';
 import { useGym } from '../context/GymContext';
 
@@ -36,43 +36,33 @@ const MemberLayout = () => {
           
           // HEADER AREA (Logo Section)
           sidebarHeader: {
-              // If 'header' layout -> Primary Color BG
-              // If 'sidebar' layout -> Transparent (inherits bold sidebar)
-              // If 'classic' -> White
               backgroundColor: isBrandHeader ? theme.primaryColor : 'transparent',
-              borderColor: (isBoldSidebar || isBrandHeader) ? 'rgba(255,255,255,0.1)' : '#f3f4f6', // gray-100
+              borderColor: (isBoldSidebar || isBrandHeader) ? 'rgba(255,255,255,0.1)' : '#f3f4f6', 
               textColor: (isBoldSidebar || isBrandHeader) ? '#ffffff' : '#111827'
           },
 
           logoBox: {
-              // If Bold Sidebar -> Semi-transparent white
-              // If Brand Header -> Semi-transparent white (since header is colored)
-              // If Classic -> Primary Color
               backgroundColor: (isBoldSidebar || isBrandHeader) ? 'rgba(255,255,255, 0.2)' : theme.primaryColor,
               color: '#ffffff'
           },
 
           navItem: (isActive) => {
               if (isBoldSidebar) {
-                  // White Text on Colored Background
                   return {
                       bg: isActive ? 'rgba(255,255,255, 0.2)' : 'transparent',
                       text: isActive ? '#ffffff' : 'rgba(255,255,255, 0.7)',
                       icon: isActive ? '#ffffff' : 'rgba(255,255,255, 0.7)'
                   };
               } else {
-                  // Classic or Brand Header (Body is white)
                   return {
-                      bg: isActive ? `${theme.primaryColor}15` : 'transparent', // 10% opacity hex
-                      text: isActive ? theme.primaryColor : '#4b5563', // gray-600
-                      icon: isActive ? theme.primaryColor : '#9ca3af' // gray-400
+                      bg: isActive ? `${theme.primaryColor}15` : 'transparent', 
+                      text: isActive ? theme.primaryColor : '#4b5563', 
+                      icon: isActive ? theme.primaryColor : '#9ca3af' 
                   };
               }
           },
 
           checkInBtn: {
-              // On bold sidebar, make button white with colored text
-              // Everywhere else, colored button with white text
               backgroundColor: isBoldSidebar ? '#ffffff' : theme.primaryColor,
               color: isBoldSidebar ? theme.primaryColor : '#ffffff'
           },
@@ -136,12 +126,21 @@ const MemberLayout = () => {
             />
             
             {hasGyms && (
-                <DesktopNavItem 
-                    to="/members/schedule" 
-                    icon={Calendar} 
-                    label="Book Class" 
-                    getStyle={styles.navItem} 
-                />
+                <>
+                    <DesktopNavItem 
+                        to="/members/schedule" 
+                        icon={Calendar} 
+                        label="Schedule" 
+                        getStyle={styles.navItem} 
+                    />
+                    {/* UPDATED LINK */}
+                    <DesktopNavItem 
+                        to="/members/store" 
+                        icon={ShoppingBag} 
+                        label="Store" 
+                        getStyle={styles.navItem} 
+                    />
+                </>
             )}
             
             <DesktopNavItem 
@@ -192,10 +191,8 @@ const MemberLayout = () => {
         <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-3 pb-6 safe-bottom flex justify-between items-center z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
           <MobileNavItem to="/members/home" icon={<Home size={24} />} label={hasGyms ? "Home" : "Search"} theme={theme} />
           
-          {hasGyms ? (
+          {hasGyms && (
               <MobileNavItem to="/members/schedule" icon={<Calendar size={24} />} label="Book" theme={theme} />
-          ) : (
-              <div className="w-12"></div> 
           )}
           
           {/* FAB (Check-in) */}
@@ -216,7 +213,10 @@ const MemberLayout = () => {
                </div>
           )}
 
-          {hasGyms ? <div className="w-12"></div> : <div className="w-12"></div>} 
+          {hasGyms && (
+              /* UPDATED LINK */
+              <MobileNavItem to="/members/store" icon={<ShoppingBag size={24} />} label="Store" theme={theme} />
+          )}
 
           <MobileNavItem to="/members/profile" icon={<User size={24} />} label="Profile" theme={theme} />
         </div>

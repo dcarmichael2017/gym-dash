@@ -2,13 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Clock, ArrowRight, Loader2, CalendarX, Sparkles, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore'; 
-import { db } from '../../../../../../packages/shared/api/firebaseConfig'; 
+import { db, auth } from '../../../../../../packages/shared/api/firebaseConfig'; 
 import { useGym } from '../../../context/GymContext';
 import { getMembershipTiers } from '../../../../../../packages/shared/api/firestore'; 
 
 const NextClassCard = ({ hasActiveMembership }) => {
   const navigate = useNavigate();
-  const { currentGym } = useGym();
+  const { currentGym, memberships } = useGym();
   
   const theme = currentGym?.theme || { primaryColor: '#2563eb' };
 
@@ -35,8 +35,21 @@ const NextClassCard = ({ hasActiveMembership }) => {
         const classSnap = await getDocs(classesRef);
         const allClassTemplates = classSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        // 2. Calculate the next occurring instance (Recurring OR Single Event)
-        const foundNextClass = calculateNextClass(allClassTemplates);
+        // --- 2. SETUP USER ROLES ---
+        const myMembership = memberships.find(m => m.gymId === currentGym.id);
+        const isOwner = currentGym.ownerId === auth.currentUser?.uid;
+        const isStaff = myMembership?.role === 'staff' || myMembership?.role === 'coach' || myMembership?.role === 'admin';
+
+        // --- 3. FILTER CLASSES ---
+        const visibleTemplates = allClassTemplates.filter(cls => {
+            const level = cls.visibility || 'public';
+            if (isOwner) return true;
+            if (isStaff) return level !== 'admin';
+            return level === 'public';
+        });
+
+        // 4. Calculate the next occurring instance using ONLY visible classes
+        const foundNextClass = calculateNextClass(visibleTemplates);
 
         if (foundNextClass) {
           setNextClass(foundNextClass);
@@ -53,13 +66,23 @@ const NextClassCard = ({ hasActiveMembership }) => {
             setInstructorName(foundNextClass.instructorName || null);
           }
 
-          // Handle Membership Tiers
+          // Handle Membership Tiers (WITH VISIBILITY CHECK)
           if (foundNextClass.allowedMembershipIds?.length > 0) {
             const tiersResult = await getMembershipTiers(currentGym.id);
             if (tiersResult.success) {
               const names = tiersResult.tiers
-                .filter(t => foundNextClass.allowedMembershipIds.includes(t.id))
+                .filter(t => {
+                   // A. Must be allowed for this class
+                   if (!foundNextClass.allowedMembershipIds.includes(t.id)) return false;
+                   
+                   // B. Must be visible to the current user (Hide Staff plans from Public users)
+                   const level = t.visibility || 'public';
+                   if (isOwner) return true;
+                   if (isStaff) return level !== 'admin';
+                   return level === 'public';
+                })
                 .map(t => t.name);
+              
               setIncludedPlanNames(names);
             }
           }
@@ -72,7 +95,7 @@ const NextClassCard = ({ hasActiveMembership }) => {
     };
 
     fetchData();
-  }, [currentGym?.id]);
+  }, [currentGym?.id, memberships]);
 
   // Helper to find the absolute next class instance from all templates
   const calculateNextClass = (classes) => {
@@ -133,7 +156,6 @@ const NextClassCard = ({ hasActiveMembership }) => {
     return `${dateObj.toLocaleDateString([], { weekday: 'long' })}, ${timeStr}`;
   };
 
-  // ... (Keep existing Render Logic)
   if (loading) {
     return (
       <div 

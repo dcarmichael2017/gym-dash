@@ -29,7 +29,7 @@ import { StripeSuccessScreen } from './screens/onboarding/StripeSuccessScreen';
 
 // --- ADMIN SCREENS ---
 import DashboardHomeScreen from './screens/admin/DashboardHomeScreen';
-import DashboardMembershipsScreen from './screens/admin/DashboardMembershipsScreen';
+import DashboardMembershipsScreen from './screens/admin/MembershipsScreen';
 import DashboardMembersScreen from './screens/admin/DashboardMembersScreen';
 import DashboardStaffScreen from './screens/admin/DashboardStaffScreen';
 import DashboardSettingsScreen from './screens/admin/DashboardSettingsScreen';
@@ -41,6 +41,10 @@ import DashboardClassesScreen from './screens/admin/DashboardClassesScreen';
 import MemberHomeScreen from './screens/members/dashboard/MemberHomeScreen';
 import MemberScheduleScreen from './screens/members/schedule/MemberScheduleScreen';
 import MemberProfileScreen from './screens/members/profile/MemberProfileScreen';
+
+// UPDATED IMPORTS FOR STORE
+import { StoreScreen } from './screens/members/store'; // The UI
+import { StoreProvider } from './screens/members/store/StoreContext'; // The Data Layer
 
 function App() {
   const [user, setUser] = useState(null);
@@ -60,7 +64,6 @@ function App() {
           } else {
             setRole('member');
           }
-          // ONLY set the user AFTER the role is fetched to avoid the race condition
           setUser(currentUser);
         } catch (error) {
           setRole('member');
@@ -76,16 +79,12 @@ function App() {
   }, []);
 
   if (loading) {
-    console.log("[App] Render: Still Loading...");
     return <FullScreenLoader />;
   }
-
-  console.log("[App] Render: Router. User:", user?.uid, "Role:", role);
 
   // Helper to protect login routes
   const PublicOnlyRoute = ({ children }) => {
     if (user) {
-      console.log("[App] PublicRoute Redirecting to / because user exists");
       return <Navigate to="/" replace />;
     }
     return children;
@@ -127,10 +126,21 @@ function App() {
             </Route>
 
             {/* --- MEMBER ROUTES --- */}
-            <Route path="/members" element={user && role === 'member' ? <MemberLayout /> : <Navigate to="/login" />}>
+            <Route path="/members" element={
+                user && role === 'member' ? (
+                    // WRAP ALL MEMBER ROUTES SO CART PERSISTS
+                    <StoreProvider>
+                        <MemberLayout />
+                    </StoreProvider>
+                ) : <Navigate to="/login" />
+            }>
               <Route path="home" element={<MemberHomeScreen />} />
               <Route path="schedule" element={<MemberScheduleScreen />} />
               <Route path="profile" element={<MemberProfileScreen />} />
+              
+              {/* NEW STORE ROUTE */}
+              <Route path="store" element={<StoreScreen />} />
+              
               <Route index element={<Navigate to="home" replace />} />
             </Route>
 
