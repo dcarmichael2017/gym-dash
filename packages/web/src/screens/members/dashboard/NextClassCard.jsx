@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Clock, ArrowRight, Loader2, CalendarX, Sparkles, User } from 'lucide-react';
+import { Clock, ArrowRight, Loader2, CalendarX, Sparkles, User, ShoppingBag } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore'; 
 import { db, auth } from '../../../../../../packages/shared/api/firebaseConfig'; 
@@ -75,7 +75,7 @@ const NextClassCard = ({ hasActiveMembership }) => {
                    // A. Must be allowed for this class
                    if (!foundNextClass.allowedMembershipIds.includes(t.id)) return false;
                    
-                   // B. Must be visible to the current user (Hide Staff plans from Public users)
+                   // B. Must be visible to the current user
                    const level = t.visibility || 'public';
                    if (isOwner) return true;
                    if (isStaff) return level !== 'admin';
@@ -156,6 +156,23 @@ const NextClassCard = ({ hasActiveMembership }) => {
     return `${dateObj.toLocaleDateString([], { weekday: 'long' })}, ${timeStr}`;
   };
 
+  // --- NAVIGATION LOGIC ---
+  const handleAction = () => {
+      if (hasActiveMembership) {
+          // 1. ACTIVE MEMBER -> Go to Schedule to book immediately
+          navigate('/members/schedule');
+      } else {
+          // 2. PROSPECT -> Determine best store tab
+          if (nextClass?.dropInEnabled) {
+              // If drop-in allowed, send to Packs tab (likely has a "Single Class" pack)
+              navigate('/members/store', { state: { category: 'packs' } });
+          } else {
+              // If membership required, send to Memberships tab
+              navigate('/members/store', { state: { category: 'memberships' } });
+          }
+      }
+  };
+
   if (loading) {
     return (
       <div 
@@ -233,12 +250,23 @@ const NextClassCard = ({ hasActiveMembership }) => {
                         <span className="text-xs font-medium text-blue-100">Ready to train?</span>
                     )}
                 </div>
+                
+                {/* DYNAMIC ACTION BUTTON */}
                 <button 
-                    onClick={() => navigate('/members/schedule')}
+                    onClick={handleAction}
                     className="bg-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1 hover:bg-blue-50 transition-colors shadow-sm"
                     style={{ color: theme.primaryColor }}
                 >
-                    Book <ArrowRight size={14} />
+                    {hasActiveMembership ? (
+                        <>Book <ArrowRight size={14} /></>
+                    ) : (
+                        // If no membership, check if drop-in is allowed to change text
+                        nextClass.dropInEnabled ? (
+                            <>Get Pass <ShoppingBag size={14} /></>
+                        ) : (
+                            <>View Plans <ArrowRight size={14} /></>
+                        )
+                    )}
                 </button>
             </div>
         </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ShoppingBag, Shirt, Ticket, Dumbbell, ChevronRight, Loader2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom'; // Added useLocation
 import { useStore } from './StoreContext';
 import { ProductDetailModal } from './ProductDetailModal';
 import { CartDrawer } from './CartDrawer'; 
@@ -55,6 +55,7 @@ const MOCK_PRODUCTS = [
 
 export const StoreScreen = () => {
     const navigate = useNavigate();
+    const location = useLocation(); // Hook for state params
     const { currentGym, memberships } = useGym();
     const { cartCount, setIsCartOpen } = useStore();
     const theme = currentGym?.theme || { primaryColor: '#2563eb' };
@@ -64,6 +65,17 @@ export const StoreScreen = () => {
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [tiers, setTiers] = useState([]);
     const [loadingTiers, setLoadingTiers] = useState(true);
+
+    // --- DEEP LINK LISTENER ---
+    useEffect(() => {
+        if (location.state?.category) {
+            setActiveCategory(location.state.category);
+            
+            // Optional: Clear state so a page refresh doesn't stick to this category forever? 
+            // Usually fine to leave it, or replace history.
+            window.history.replaceState({}, document.title);
+        }
+    }, [location.state]);
 
     // --- 1. FETCH MEMBERSHIPS ---
     useEffect(() => {
