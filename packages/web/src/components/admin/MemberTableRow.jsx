@@ -11,16 +11,30 @@ export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
     // --- Helper: Find Payer ---
     const payer = member.payerId ? allMembers.find(m => m.id === member.payerId) : null;
 
+    // --- Helper: Naming Resilience ---
+    const firstName = member.firstName || member.name?.split(' ')[0] || 'U';
+    const lastName = member.lastName || member.name?.split(' ').slice(1).join(' ') || '';
+    const fullName = member.firstName ? `${member.firstName} ${member.lastName}` : (member.name || "Unknown Member");
+
     // --- Helper: Status Badge ---
     const getStatusBadge = () => {
-        const status = member.subscriptionStatus || member.status || 'inactive';
+        const status = (member.subscriptionStatus || member.status || 'inactive').toLowerCase();
+        
         switch(status) {
-            case 'active': return <span className="flex items-center text-xs font-bold text-green-700 bg-green-100 px-2 py-1 rounded-full w-fit"><CheckCircle2 className="w-3 h-3 mr-1"/> Active</span>;
-            case 'trialing': return <span className="flex items-center text-xs font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded-full w-fit"><Clock className="w-3 h-3 mr-1"/> Trial</span>;
-            case 'past_due': return <span className="flex items-center text-xs font-bold text-red-700 bg-red-100 px-2 py-1 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1"/> Past Due</span>;
-            case 'archived': return <span className="flex items-center text-xs font-bold text-gray-600 bg-gray-200 px-2 py-1 rounded-full w-fit"><Archive className="w-3 h-3 mr-1"/> Archived</span>;
-            case 'prospect': return <span className="text-xs font-bold text-yellow-700 bg-yellow-100 px-2 py-1 rounded-full w-fit">Prospect</span>;
-            default: return <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-full w-fit">Inactive</span>;
+            case 'active': 
+                return <span className="flex items-center text-xs font-bold text-green-700 bg-green-100 px-2 py-1 rounded-full w-fit"><CheckCircle2 className="w-3 h-3 mr-1"/> Active</span>;
+            case 'trialing': 
+                return <span className="flex items-center text-xs font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded-full w-fit"><Clock className="w-3 h-3 mr-1"/> Trial</span>;
+            case 'past_due': 
+                return <span className="flex items-center text-xs font-bold text-red-700 bg-red-100 px-2 py-1 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1"/> Past Due</span>;
+            case 'archived': 
+                return <span className="flex items-center text-xs font-bold text-gray-600 bg-gray-200 px-2 py-1 rounded-full w-fit"><Archive className="w-3 h-3 mr-1"/> Archived</span>;
+            // Consolidated Naming Strategy
+            case 'prospect': 
+            case 'guest':
+                return <span className="text-xs font-bold text-yellow-700 bg-yellow-100 px-2 py-1 rounded-full w-fit">Free Member</span>;
+            default: 
+                return <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-full w-fit">Inactive</span>;
         }
     };
 
@@ -29,16 +43,16 @@ export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
             {/* 1. Member Info */}
             <td className="px-6 py-4">
                 <div className="flex items-center">
-                    <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold mr-3 overflow-hidden">
+                    <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold mr-3 overflow-hidden shrink-0">
                         {member.photoUrl ? (
                             <img src={member.photoUrl} alt="" className="h-full w-full object-cover" />
                         ) : (
-                            (member.firstName?.[0] || 'U')
+                            firstName[0]
                         )}
                     </div>
-                    <div>
-                        <p className="font-medium text-gray-900">{member.firstName} {member.lastName}</p>
-                        <p className="text-xs text-gray-500">{member.email}</p>
+                    <div className="min-w-0">
+                        <p className="font-bold text-gray-900 truncate">{fullName}</p>
+                        <p className="text-xs text-gray-500 truncate">{member.email}</p>
                     </div>
                 </div>
             </td>
@@ -63,12 +77,12 @@ export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
                         {payer ? (
                             <button 
                                 onClick={(e) => {
-                                    e.stopPropagation(); // Stop row click
-                                    onEdit(payer);       // Edit PARENT instead
+                                    e.stopPropagation();
+                                    onEdit(payer);
                                 }}
                                 className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center"
                             >
-                                of {payer.firstName} {payer.lastName}
+                                of {payer.firstName || payer.name?.split(' ')[0]} {payer.lastName || ''}
                             </button>
                         ) : (
                             <span className="text-xs text-red-400">of Unknown</span>
@@ -89,12 +103,14 @@ export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
                     <button 
                         onClick={() => onEdit(member)}
                         className="text-gray-400 hover:text-blue-600 p-2 rounded-full hover:bg-blue-50 transition-colors"
+                        title="Edit Member"
                     >
                         <Edit2 className="h-4 w-4" />
                     </button>
                     <button 
                         onClick={() => onDelete(member)}
                         className="text-gray-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
+                        title={member.status === 'active' ? "Archive Member" : "Delete Member"}
                     >
                         {member.status === 'active' ? <Archive className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
                     </button>

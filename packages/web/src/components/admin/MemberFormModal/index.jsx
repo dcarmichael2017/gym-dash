@@ -46,8 +46,10 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
     firstName: '',
     lastName: '',
     email: '',
-    phone: '',
-    photoUrl: null,
+    phoneNumber: '',
+    // 1. Initialize empty state for new fields
+    emergencyName: '',
+    emergencyPhone: '',
     membershipId: '',
     ranks: {}
   });
@@ -98,8 +100,10 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
           firstName: memberData.firstName || '',
           lastName: memberData.lastName || '',
           email: memberData.email || '',
-          phone: memberData.phone || '',
-          photoUrl: memberData.photoUrl || null,
+          phoneNumber: memberData.phoneNumber || '',
+          // 2. Load existing data if available
+          emergencyName: memberData.emergencyName || '',
+          emergencyPhone: memberData.emergencyPhone || '',
           membershipId: memberData.membershipId || '',
           ranks: initialRanks
         });
@@ -108,6 +112,8 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
       } else {
         setFormData({
           firstName: '', lastName: '', email: '', phone: '', photoUrl: null,
+          // 3. Reset to empty for new members
+          emergencyName: '', emergencyPhone: '',
           membershipId: '', ranks: {}
         });
         setCustomPrice('');
@@ -121,6 +127,7 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
   // --- 3. SUBMIT HANDLER ---
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
     if (!formData.firstName || !formData.lastName || !formData.email) {
       setActiveTab('profile');
       alert("Please fill out First Name, Last Name, and Email.");
@@ -155,10 +162,18 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
       }
     }
 
+    const fullName = `${formData.firstName.trim()} ${formData.lastName.trim()}`;
+
     const payload = {
       ...formData,
-      photoUrl: finalPhotoUrl,
-      searchName: `${formData.firstName} ${formData.lastName}`.toLowerCase(),
+      firstName: formData.firstName.trim(),
+      lastName: formData.lastName.trim(),
+      name: fullName, 
+      searchName: fullName.toLowerCase(),
+      // 4. Ensure these are explicitly included in payload (though ...formData covers it usually, explicit is safer if you destructured above)
+      emergencyName: formData.emergencyName?.trim() || '',
+      emergencyPhone: formData.emergencyPhone?.replace(/[^\d]/g, '') || '',
+      
       status: subscriptionStatus || 'prospect',
       membershipId: formData.membershipId,
       membershipName: selectedPlan ? selectedPlan.name : null,
@@ -166,7 +181,6 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
       subscriptionStatus: subscriptionStatus,
       trialEndDate: trialEndDate,
 
-      // Data Cleanup
       programId: null, rankId: null, stripes: null, rankCredits: null
     };
 

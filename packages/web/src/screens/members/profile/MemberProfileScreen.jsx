@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, Mail, Phone, LogOut, Edit2, Check, X, Loader2 } from 'lucide-react';
+import { User, Mail, Phone, LogOut, Edit2, Check, X, Loader2, ShieldAlert } from 'lucide-react';
 import { useMemberProfile } from './useMemberProfile';
 import { ProfileField } from './ProfileFields';
 import { MembershipSection } from './MembershipSection';
@@ -25,7 +25,6 @@ const MemberProfileScreen = () => {
 
     return (
         <div className="pb-32 bg-gray-50 min-h-screen relative">
-            
             {/* SUCCESS TOAST */}
             {showSuccess && (
                 <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[110] animate-in fade-in slide-in-from-top-4 duration-300">
@@ -54,7 +53,7 @@ const MemberProfileScreen = () => {
                 <div className="flex justify-between items-start mb-6">
                     <div className="flex-1 min-w-0">
                         <h2 className="text-3xl font-bold text-gray-900 truncate">
-                            {formData.displayName || "Member"}
+                            {formData.firstName} {formData.lastName}
                         </h2>
                         <p className="text-sm text-gray-500 mt-0.5 truncate">{user?.email}</p>
                         <div className={`mt-3 inline-block px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border ${statusBadge.color}`}>
@@ -64,20 +63,12 @@ const MemberProfileScreen = () => {
 
                     <div className="flex gap-2 shrink-0 ml-4">
                         {!isEditing ? (
-                            <button 
-                                onClick={() => setIsEditing(true)} 
-                                className="p-2 bg-gray-50 rounded-full text-gray-500 hover:text-gray-900 transition-all"
-                            >
+                            <button onClick={() => setIsEditing(true)} className="p-2 bg-gray-50 rounded-full text-gray-500 hover:text-gray-900 transition-all">
                                 <Edit2 size={18} />
                             </button>
                         ) : (
                             <div className="flex gap-2">
-                                <button 
-                                    onClick={handleCancel} 
-                                    className="p-2 bg-gray-50 rounded-full text-gray-500"
-                                >
-                                    <X size={18} />
-                                </button>
+                                <button onClick={handleCancel} className="p-2 bg-gray-50 rounded-full text-gray-500"><X size={18} /></button>
                                 <button 
                                     onClick={handleUpdateProfile} 
                                     disabled={loading} 
@@ -93,15 +84,25 @@ const MemberProfileScreen = () => {
             </div>
 
             <div className="p-6 space-y-8">
+                {/* 1. PERSONAL DETAILS SECTION */}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                     <ProfileField 
                         icon={User} 
-                        label="Full Name" 
-                        value={formData.displayName} 
+                        label="First Name" 
+                        value={formData.firstName} 
                         isEditing={isEditing} 
                         editable 
-                        onChange={e => setFormData({...formData, displayName: e.target.value})} 
-                        placeholder="Your full name"
+                        onChange={e => setFormData({...formData, firstName: e.target.value})} 
+                        placeholder="John"
+                    />
+                    <ProfileField 
+                        icon={User} 
+                        label="Last Name" 
+                        value={formData.lastName} 
+                        isEditing={isEditing} 
+                        editable 
+                        onChange={e => setFormData({...formData, lastName: e.target.value})} 
+                        placeholder="Doe"
                     />
                     <ProfileField 
                         icon={Phone} 
@@ -112,12 +113,35 @@ const MemberProfileScreen = () => {
                         onChange={e => setFormData({...formData, phoneNumber: formatPhoneNumber(e.target.value)})} 
                         placeholder="(555) 000-0000"
                     />
-                    <ProfileField 
-                        icon={Mail} 
-                        label="Email Address" 
-                        value={user?.email} 
-                        editable={false} 
-                    />
+                    <ProfileField icon={Mail} label="Email Address" value={user?.email} editable={false} />
+                </div>
+
+                {/* 2. EMERGENCY CONTACT SECTION (NEW) */}
+                <div>
+                     <div className="flex items-center gap-2 mb-3 px-1">
+                        <ShieldAlert size={16} className="text-red-500" />
+                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Emergency Contact</h4>
+                    </div>
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                        <ProfileField 
+                            icon={User} 
+                            label="Contact Name" 
+                            value={formData.emergencyName} 
+                            isEditing={isEditing} 
+                            editable 
+                            onChange={e => setFormData({...formData, emergencyName: e.target.value})} 
+                            placeholder="Full Name"
+                        />
+                        <ProfileField 
+                            icon={Phone} 
+                            label="Contact Phone" 
+                            value={formData.emergencyPhone} 
+                            isEditing={isEditing} 
+                            editable 
+                            onChange={e => setFormData({...formData, emergencyPhone: formatPhoneNumber(e.target.value)})} 
+                            placeholder="(555) 000-0000"
+                        />
+                    </div>
                 </div>
 
                 <MembershipSection 
@@ -126,12 +150,14 @@ const MemberProfileScreen = () => {
                     onManageBilling={() => alert("Redirecting to Stripe...")}
                 />
 
-                <LegalSection 
-                    hasWaiver={hasWaiver}
-                    isOutdated={isOutdated}
-                    version={userSignedVersion}
-                    onOpenWaiver={() => setShowWaiverModal(true)}
-                />
+                {currentGym && (
+                    <LegalSection 
+                        hasWaiver={hasWaiver}
+                        isOutdated={isOutdated}
+                        version={userSignedVersion}
+                        onOpenWaiver={() => setShowWaiverModal(true)}
+                    />
+                )}
 
                 <button 
                     onClick={() => auth.signOut()} 

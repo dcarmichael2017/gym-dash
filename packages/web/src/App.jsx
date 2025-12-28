@@ -50,38 +50,26 @@ function App() {
   // 1. GLOBAL AUTH LISTENER
   useEffect(() => {
     console.log("[App] Effect mounted, listening for auth...");
-    
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      console.log("[App] Auth State Changed. User:", currentUser ? currentUser.uid : "null");
 
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
-        // 1. Set user immediately so router knows we are authenticated
-        setUser(currentUser);
-        
         try {
-          console.log("[App] Fetching role for:", currentUser.uid);
           const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-          
           if (userDoc.exists()) {
-            const userRole = userDoc.data().role || 'member';
-            console.log("[App] Role found:", userRole);
-            setRole(userRole);
+            setRole(userDoc.data().role || 'member');
           } else {
-            console.log("[App] No profile found, defaulting to member");
             setRole('member');
           }
+          // ONLY set the user AFTER the role is fetched to avoid the race condition
+          setUser(currentUser);
         } catch (error) {
-          console.error("[App] Error fetching role:", error);
           setRole('member');
+          setUser(currentUser);
         }
       } else {
-        console.log("[App] User logged out. Clearing state.");
         setUser(null);
         setRole(null);
       }
-      
-      // 2. Only stop loading AFTER role is determined
-      console.log("[App] Loading complete. Rendering Router.");
       setLoading(false);
     });
     return () => unsubscribe();
@@ -97,8 +85,8 @@ function App() {
   // Helper to protect login routes
   const PublicOnlyRoute = ({ children }) => {
     if (user) {
-        console.log("[App] PublicRoute Redirecting to / because user exists");
-        return <Navigate to="/" replace />;
+      console.log("[App] PublicRoute Redirecting to / because user exists");
+      return <Navigate to="/" replace />;
     }
     return children;
   };
@@ -149,8 +137,8 @@ function App() {
             {/* --- ROOT REDIRECT --- */}
             <Route path="/" element={
               !user ? <Navigate to="/login" /> :
-              (role === 'owner' || role === 'staff') ? <Navigate to="/admin" /> :
-              <Navigate to="/members/home" />
+                (role === 'owner' || role === 'staff') ? <Navigate to="/admin" /> :
+                  <Navigate to="/members/home" />
             } />
 
             <Route path="*" element={<Navigate to="/" replace />} />

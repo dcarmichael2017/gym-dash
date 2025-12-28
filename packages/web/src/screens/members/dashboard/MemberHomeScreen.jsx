@@ -13,6 +13,11 @@ import GymSearch from './GymSearch';
 
 const MemberHomeScreen = () => {
   const { currentGym, memberships } = useGym();
+
+  if (!currentGym) {
+      return <GymSearch onJoinSuccess={() => setIsAddingGym(false)} />;
+  }
+
   const theme = currentGym?.theme || { primaryColor: '#2563eb', secondaryColor: '#4f46e5' };
 
   // --- LOCAL STATE ---
@@ -103,9 +108,11 @@ const MemberHomeScreen = () => {
 
   // --- RENDER LOGIC ---
 
+  // If no gym is selected OR user specifically wants to add a gym -> Show Search
   if (!currentGym || isAddingGym) {
       return (
           <GymSearch 
+            // Only allow canceling if they actually have a gym to go back to
             onCancel={currentGym ? () => setIsAddingGym(false) : null} 
             onJoinSuccess={() => setIsAddingGym(false)}
           />

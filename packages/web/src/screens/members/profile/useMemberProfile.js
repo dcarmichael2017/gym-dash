@@ -4,21 +4,36 @@ import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { updateProfile } from 'firebase/auth';
 import { signWaiver, getGymWaiver } from '../../../../../../packages/shared/api/firestore';
 import { useGym } from '../../../context/GymContext';
-import { useConfirm } from '../../../context/ConfirmationContext'; // Import your context hook
+import { useConfirm } from '../../../context/ConfirmationContext'; 
 
 export const useMemberProfile = () => {
     const { currentGym, memberships } = useGym();
-    const { confirm } = useConfirm(); // Pull the confirm function
+    const { confirm } = useConfirm(); 
     const [user, setUser] = useState(auth.currentUser);
     const [isEditing, setIsEditing] = useState(false);
     const [loading, setLoading] = useState(false);
     const [showWaiverModal, setShowWaiverModal] = useState(false);
     const [currentWaiverVersion, setCurrentWaiverVersion] = useState(1);
-    const [formData, setFormData] = useState({ displayName: '', phoneNumber: '' });
-    const [initialData, setInitialData] = useState({ displayName: '', phoneNumber: '' });
+    
+    // Updated state to include Emergency Contact
+    const [formData, setFormData] = useState({ 
+        firstName: '', 
+        lastName: '', 
+        phoneNumber: '',
+        emergencyName: '',
+        emergencyPhone: ''
+    });
+    
+    const [initialData, setInitialData] = useState({ 
+        firstName: '', 
+        lastName: '', 
+        phoneNumber: '',
+        emergencyName: '',
+        emergencyPhone: ''
+    });
+    
     const [showSuccess, setShowSuccess] = useState(false);
 
-    // ... formatPhoneNumber and stripPhoneNumber helpers remain the same ...
     const formatPhoneNumber = (value) => {
         if (!value) return "";
         const phoneNumber = value.replace(/[^\d]/g, '');
@@ -36,9 +51,14 @@ export const useMemberProfile = () => {
             const userSnap = await getDoc(doc(db, 'users', user.uid));
             if (userSnap.exists()) {
                 const data = userSnap.data();
+                
                 const fetched = {
-                    displayName: data.name || user.displayName || '',
-                    phoneNumber: formatPhoneNumber(data.phoneNumber || '')
+                    firstName: data.firstName || data.name?.split(' ')[0] || '',
+                    lastName: data.lastName || data.name?.split(' ').slice(1).join(' ') || '',
+                    phoneNumber: formatPhoneNumber(data.phoneNumber || ''),
+                    // Fetch Emergency Contact info
+                    emergencyName: data.emergencyName || '',
+                    emergencyPhone: formatPhoneNumber(data.emergencyPhone || '')
                 };
                 setFormData(fetched);
                 setInitialData(fetched);
@@ -61,14 +81,21 @@ export const useMemberProfile = () => {
         setLoading(true);
         try {
             const userRef = doc(db, 'users', user.uid);
+            const fullName = `${formData.firstName.trim()} ${formData.lastName.trim()}`;
+            
             await updateDoc(userRef, {
-                name: formData.displayName,
+                firstName: formData.firstName.trim(),
+                lastName: formData.lastName.trim(),
+                name: fullName, 
                 phoneNumber: stripPhoneNumber(formData.phoneNumber),
+                // Save Emergency Contact info
+                emergencyName: formData.emergencyName.trim(),
+                emergencyPhone: stripPhoneNumber(formData.emergencyPhone),
                 updatedAt: new Date()
             });
 
             if (auth.currentUser) {
-                await updateProfile(auth.currentUser, { displayName: formData.displayName });
+                await updateProfile(auth.currentUser, { displayName: fullName });
             }
 
             setInitialData(formData);
@@ -82,16 +109,20 @@ export const useMemberProfile = () => {
         setLoading(false);
     };
 
-    // --- UPDATED LOGIC USING YOUR CONTEXT ---
     const handleCancel = async () => {
-        const hasChanges = formData.displayName !== initialData.displayName || 
-                           formData.phoneNumber !== initialData.phoneNumber;
+        // Check for changes in all fields including emergency contact
+        const hasChanges = 
+            formData.firstName !== initialData.firstName || 
+            formData.lastName !== initialData.lastName ||
+            formData.phoneNumber !== initialData.phoneNumber ||
+            formData.emergencyName !== initialData.emergencyName ||
+            formData.emergencyPhone !== initialData.emergencyPhone;
 
         if (hasChanges) {
             const confirmed = await confirm({
                 title: "Discard Changes?",
                 message: "You have unsaved changes. Are you sure you want to discard them?",
-                type: "danger", // This will trigger your red icon/theme
+                type: "danger",
                 confirmText: "Discard",
                 cancelText: "Keep Editing"
             });

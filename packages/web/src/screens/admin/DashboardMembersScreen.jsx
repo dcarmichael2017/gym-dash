@@ -144,9 +144,12 @@ const DashboardMembersScreen = () => {
     if (searchTerm) {
       const lowerTerm = searchTerm.toLowerCase();
       result = result.filter(m => 
+        // UPDATED: Search against firstName and lastName specifically
         (m.firstName && m.firstName.toLowerCase().includes(lowerTerm)) ||
         (m.lastName && m.lastName.toLowerCase().includes(lowerTerm)) ||
-        (m.email && m.email.toLowerCase().includes(lowerTerm))
+        (m.email && m.email.toLowerCase().includes(lowerTerm)) ||
+        // Fallback for legacy data
+        (m.name && m.name.toLowerCase().includes(lowerTerm))
       );
     }
     setFilteredMembers(result);

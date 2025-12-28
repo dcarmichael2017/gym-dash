@@ -2,18 +2,18 @@ import React, { useMemo } from 'react';
 import { User, Check, Trash2, CheckCircle, List, Plus, Search } from 'lucide-react';
 import { BOOKING_STATUS } from '../../../../../shared/constants/strings';
 
-export const SessionRoster = ({ 
-    roster, 
-    isAdding, 
-    setIsAdding, 
-    searchTerm, 
-    setSearchTerm, 
-    searchResults, 
-    membersLoading, 
-    onAddMember, 
-    onCheckIn, 
+export const SessionRoster = ({
+    roster,
+    isAdding,
+    setIsAdding,
+    searchTerm,
+    setSearchTerm,
+    searchResults,
+    membersLoading,
+    onAddMember,
+    onCheckIn,
     onRemove,
-    isSessionCancelled 
+    isSessionCancelled
 }) => {
 
     const { activeMembers, waitlistedMembers } = useMemo(() => {
@@ -24,7 +24,7 @@ export const SessionRoster = ({
             if (r.status === BOOKING_STATUS.WAITLISTED) waitlist.push(r);
             else active.push(r);
         });
-        
+
         waitlist.sort((a, b) => {
             const dateA = a.bookedAt?.seconds || a.createdAt?.seconds || 0;
             const dateB = b.bookedAt?.seconds || b.createdAt?.seconds || 0;
@@ -36,17 +36,20 @@ export const SessionRoster = ({
 
     const renderRow = (record, isWaitlist = false, rank = null) => {
         const isAttended = record.status === BOOKING_STATUS.ATTENDED;
+
+        const displayName = record.memberName || `${record.firstName} ${record.lastName}`;
+        const initial = displayName ? displayName.charAt(0) : '?';
         return (
             <li key={record.id} className={`flex items-center justify-between p-2.5 rounded-lg transition-colors border group ${isWaitlist ? 'bg-orange-50 border-orange-100' : 'hover:bg-gray-50 border-transparent hover:border-gray-100'}`}>
                 <div className="flex items-center gap-3">
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${isWaitlist ? 'bg-orange-200 text-orange-800' : (isAttended ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-600')}`}>
-                        {isWaitlist ? `#${rank}` : (record.memberName ? record.memberName.charAt(0) : '?')}
+                        {isWaitlist ? `#${rank}` : initial}
                     </div>
                     <div>
-                        <p className="text-sm font-medium text-gray-800">{record.memberName}</p>
+                        <p className="text-sm font-medium text-gray-800">{displayName}</p>
                         <div className="flex gap-2">
-                             <p className="text-[10px] text-gray-400 uppercase font-bold">{record.status}</p>
-                             {record.bookingType === 'drop-in' && <span className="text-[10px] text-purple-600 font-bold bg-purple-100 px-1 rounded">DROP-IN</span>}
+                            <p className="text-[10px] text-gray-400 uppercase font-bold">{record.status}</p>
+                            {record.bookingType === 'drop-in' && <span className="text-[10px] text-purple-600 font-bold bg-purple-100 px-1 rounded">DROP-IN</span>}
                         </div>
                     </div>
                 </div>
@@ -102,7 +105,7 @@ export const SessionRoster = ({
             {/* LISTS */}
             <div className="mt-4">
                 {activeMembers.length > 0 && <ul className="space-y-2 mb-4">{activeMembers.map(r => renderRow(r, false))}</ul>}
-                
+
                 {waitlistedMembers.length > 0 && (
                     <div className="border-t border-gray-100 pt-3">
                         <h5 className="text-xs font-bold text-orange-600 uppercase mb-2 flex items-center gap-1"><List size={12} /> Waitlist</h5>
