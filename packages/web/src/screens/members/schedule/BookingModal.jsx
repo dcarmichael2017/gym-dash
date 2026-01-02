@@ -1,57 +1,77 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, X, Calendar, Clock, AlertCircle, CheckCircle, Trash2, Hourglass, CheckSquare, User, ScrollText, Scale } from 'lucide-react';
-import { doc, getDoc } from 'firebase/firestore'; 
-import { db, auth } from '../../../../../../packages/shared/api/firebaseConfig';
-import { useGym } from '../../../context/GymContext'; 
-import { getGymWaiver, signWaiver } from '../../../../../../packages/shared/api/firestore'; // Import waiver API
+import { Loader2, X, Calendar, Clock, AlertCircle, CheckCircle, Trash2, Hourglass, CheckSquare, User, Scale, Coins, ShoppingCart, ArrowRight, Ticket, ShieldCheck, Lock, Star, ChevronRight, List } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { auth } from '../../../../../../packages/shared/api/firebaseConfig';
+import { useGym } from '../../../context/GymContext';
+import { getGymWaiver, signWaiver, checkBookingEligibility } from '../../../../../../packages/shared/api/firestore';
+
+// 1. IMPORT THE CUSTOM HOOK
+import { useConfirm } from '../../../context/ConfirmationContext'; 
 
 const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) => {
+  const navigate = useNavigate();
   const { currentGym, memberships } = useGym();
-  const [status, setStatus] = useState('idle');
+  
+  // 2. INITIALIZE HOOK
+  const { confirm } = useConfirm(); 
+
+  const [status, setStatus] = useState('loading_data'); 
   const [errorMessage, setErrorMessage] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [instructorName, setInstructorName] = useState(classInstance.resolvedInstructorName || classInstance.instructorName || null);
 
-  // --- WAIVER STATE ---
+  // ... (Data State, Waiver State, and useEffect remain unchanged) ...
+  const [data, setData] = useState({
+    instructorName: classInstance.resolvedInstructorName || classInstance.instructorName || null,
+    userProfile: null,
+    eligibility: null,
+    activePlanName: '',
+    weeklyUsage: null,
+    eligiblePublicPlans: []
+  });
   const [showWaiver, setShowWaiver] = useState(false);
   const [waiverData, setWaiverData] = useState(null);
 
-  // --- FETCH INSTRUCTOR IF MISSING ---
   useEffect(() => {
-    if (!instructorName && classInstance.instructorId && currentGym?.id) {
-        const fetchInstructor = async () => {
-            try {
-                const docRef = doc(db, 'gyms', currentGym.id, 'staff', classInstance.instructorId);
-                const snap = await getDoc(docRef);
-                if (snap.exists()) {
-                    setInstructorName(snap.data().name);
-                }
-            } catch (err) {
-                console.error("Failed to fetch instructor", err);
-            }
-        };
-        fetchInstructor();
-    }
-  }, [classInstance, currentGym, instructorName]);
+    const initData = async () => {
+      if (!auth.currentUser || !currentGym) return;
+      try {
+        const res = await checkBookingEligibility(currentGym.id, auth.currentUser.uid, classInstance);
+        if (res.success) {
+          setData(res.data);
+          setStatus('idle');
+        } else {
+          setStatus('error');
+          setErrorMessage("Failed to load booking details.");
+        }
+      } catch (err) {
+        setStatus('error');
+        setErrorMessage(err.message);
+      }
+    };
+    initData();
+  }, [classInstance, currentGym]);
 
-  // Derived state
+  const { instructorName, userProfile, eligibility: bookingEligibility, activePlanName, weeklyUsage, eligiblePublicPlans } = data;
+
+  // ... (Derived State & Actions helpers remain unchanged) ...
   const isAttended = classInstance.userStatus === 'attended';
   const isBooked = classInstance.userStatus === 'booked';
   const isWaitlisted = classInstance.userStatus === 'waitlisted';
   const isFull = classInstance.maxCapacity && classInstance.currentCount >= parseInt(classInstance.maxCapacity);
+  const dateDisplay = new Date(classInstance.dateString + 'T12:00:00').toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric'
+  });
 
-  const getCheckInTime = () => {
-      if (!classInstance.checkedInAt) return null;
-      const date = classInstance.checkedInAt.toDate ? classInstance.checkedInAt.toDate() : new Date(classInstance.checkedInAt);
-      return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const goToStore = (category) => {
+    onClose();
+    navigate('/members/store', { state: { category } });
   };
 
-  // --- CORE BOOKING LOGIC (Executed after checks) ---
   const executeBooking = async () => {
     setStatus('loading');
     setErrorMessage('');
     try {
-      const result = await onConfirm(classInstance); 
+      const result = await onConfirm(classInstance);
       if (result.success) {
         setStatus('success');
         setSuccessMsg(result.status === 'waitlisted' ? "Added to Waitlist" : "Class Booked!");
@@ -66,75 +86,96 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
     }
   };
 
-  // --- 1. INTERCEPT: CHECK WAIVER BEFORE BOOKING ---
   const handlePreBookingCheck = async () => {
-      // If already booked or waitlisted, this is a Cancel action, so skip waiver check
-      if (isBooked || isWaitlisted) {
-          handleCancel();
+    if (isBooked || isWaitlisted) { handleCancel(); return; }
+    // ... rest of pre-booking check ...
+    if (bookingEligibility && !bookingEligibility.allowed && !isFull) {
+      if (bookingEligibility.cost > 0) goToStore('packs');
+      else goToStore('memberships');
+      return;
+    }
+    setStatus('loading');
+    try {
+      const res = await getGymWaiver(currentGym.id);
+      if (res.success && res.enforceWaiver) {
+        const myMembership = memberships?.find(m => m.gymId === currentGym.id);
+        const hasSigned = myMembership?.waiverSigned;
+        const userVersion = myMembership?.waiverSignedVersion || 0;
+        const requiredVersion = res.version || 1;
+        if (!hasSigned || userVersion < requiredVersion) {
+          setWaiverData({ text: res.waiverText, version: requiredVersion });
+          setShowWaiver(true);
+          setStatus('idle');
           return;
+        }
       }
-
-      setStatus('loading');
-      
-      try {
-          // A. Fetch the Gym's Current Waiver Requirement
-          const res = await getGymWaiver(currentGym.id);
-          
-          if (res.success && res.enforceWaiver) {
-             // B. Get User's Current Status from Context
-             const myMembership = memberships?.find(m => m.gymId === currentGym.id);
-             const hasSigned = myMembership?.waiverSigned;
-             const userVersion = myMembership?.waiverSignedVersion || 0;
-             const requiredVersion = res.version || 1;
-
-             // C. If OUTDATED or NOT SIGNED -> Show Waiver
-             if (!hasSigned || userVersion < requiredVersion) {
-                 setWaiverData({
-                     text: res.waiverText,
-                     version: requiredVersion
-                 });
-                 setShowWaiver(true);
-                 setStatus('idle'); // Stop loading spinner, show waiver UI
-                 return; // STOP HERE
-             }
-          }
-      } catch (e) {
-          console.error("Waiver check failed", e);
-          // If check fails, we generally fail safe and try to book (or alert user)
-          // For now, let's proceed to book and let the backend handle strict enforcement if needed
-      }
-
-      // D. If All Good -> Execute
-      executeBooking();
+    } catch (e) { console.error("Waiver check failed", e); }
+    executeBooking();
   };
 
-  // --- 2. HANDLE SIGN & CONTINUE ---
   const handleSignAndBook = async () => {
-      setStatus('loading'); // Show loading on the "Agree" button
-      const user = auth.currentUser;
-      
-      try {
-          // A. Sign Waiver
-          if (user && currentGym && waiverData) {
-              await signWaiver(user.uid, currentGym.id, waiverData.version);
-          }
-          
-          // B. Close Waiver View (internal state)
-          setShowWaiver(false);
-          
-          // C. Proceed immediately to Booking
-          await executeBooking();
-
-      } catch (err) {
-          console.error("Signing failed", err);
-          setStatus('error');
-          setErrorMessage("Failed to sign waiver. Please try again.");
-          setShowWaiver(false); 
+    setStatus('loading');
+    const user = auth.currentUser;
+    try {
+      if (user && currentGym && waiverData) {
+        await signWaiver(user.uid, currentGym.id, waiverData.version);
       }
+      setShowWaiver(false);
+      await executeBooking();
+    } catch (err) {
+      setStatus('error');
+      setErrorMessage("Failed to sign waiver.");
+      setShowWaiver(false);
+    }
   };
 
+  // --- 3. UPDATED CANCEL HANDLER ---
   const handleCancel = async () => {
     if (!classInstance.attendanceId) return;
+
+    // Cancellation Logic
+    const CANCELLATION_WINDOW_MIN = classInstance.cancellationWindow ? parseInt(classInstance.cancellationWindow) : 120;
+    const [year, month, day] = classInstance.dateString.split('-').map(Number);
+    const [hours, minutes] = classInstance.time.split(':').map(Number);
+    const classDateObj = new Date(year, month - 1, day, hours, minutes);
+    const now = new Date();
+    const diffMs = classDateObj - now;
+    const diffMinutes = Math.floor(diffMs / 60000);
+    const isLateCancel = diffMinutes < CANCELLATION_WINDOW_MIN;
+    const isCreditBooking = classInstance.bookingType === 'credit';
+
+    let confirmMessage = "Are you sure you want to cancel this booking?";
+    let confirmTitle = "Cancel Booking";
+    let modalType = "danger"; // Use red theme for cancellation
+
+    if (isWaitlisted) {
+      confirmMessage = "You will be removed from the waitlist.";
+      confirmTitle = "Leave Waitlist";
+      modalType = "confirm"; // Standard blue for waitlist leaving (less severe)
+      if (isCreditBooking) confirmMessage += " Any credits used will be refunded.";
+    } else if (isLateCancel) {
+      confirmTitle = "Late Cancellation";
+      if (isCreditBooking) {
+        confirmMessage = `You are cancelling within the ${CANCELLATION_WINDOW_MIN / 60}-hour window. You will NOT receive a refund for your class credit.`;
+      } else {
+        confirmMessage = `You are cancelling within the ${CANCELLATION_WINDOW_MIN / 60}-hour window. This may be recorded as a late cancellation.`;
+      }
+    } else {
+      if (isCreditBooking) confirmMessage = "Your class credit will be refunded to your account.";
+    }
+
+    // --- REPLACEMENT START ---
+    const isConfirmed = await confirm({
+        title: confirmTitle,
+        message: confirmMessage,
+        type: modalType,
+        confirmText: isWaitlisted ? "Leave Waitlist" : "Yes, Cancel",
+        cancelText: "Keep Booking"
+    });
+
+    if (!isConfirmed) return;
+    // --- REPLACEMENT END ---
+
     setStatus('loading');
     try {
       const result = await onCancel(classInstance.attendanceId);
@@ -147,180 +188,311 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
         setErrorMessage(result.error || "Cancellation failed.");
       }
     } catch (err) {
-        setStatus('error');
-        setErrorMessage(err.message);
+      setStatus('error');
+      setErrorMessage(err.message);
     }
   };
 
-  const dateDisplay = new Date(classInstance.dateString + 'T12:00:00').toLocaleDateString('en-US', {
-     weekday: 'long', month: 'long', day: 'numeric'
-  });
-
-  // --- RENDER: WAIVER VIEW ---
-  if (showWaiver && waiverData) {
-      return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[80vh] animate-in fade-in zoom-in duration-200">
-                <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                    <div className="flex items-center gap-2 text-gray-900 font-bold">
-                        <Scale size={20} className="text-blue-600" />
-                        <h3>Waiver Required</h3>
+  const renderWeeklySchedule = () => {
+    // ... (helper logic same as before) ...
+    if (!weeklyUsage || !weeklyUsage.classes || weeklyUsage.classes.length === 0) return null;
+    return (
+      <div className="mt-3 bg-gray-50 rounded-lg border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-top-2">
+        <div className="px-3 py-2 bg-gray-100/50 border-b border-gray-200 flex justify-between items-center">
+            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                <List size={10} /> Your Schedule this Week
+            </span>
+            <span className="text-[10px] font-bold text-gray-700">{weeklyUsage.used}/{weeklyUsage.limit}</span>
+        </div>
+        <div className="max-h-32 overflow-y-auto divide-y divide-gray-100">
+            {weeklyUsage.classes.map((cls) => {
+                const [y, m, d] = cls.dateString.split('-').map(Number);
+                const dateObj = new Date(y, m-1, d);
+                const dayStr = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                return (
+                    <div key={cls.id} className="px-3 py-2 flex justify-between items-center text-xs hover:bg-white transition-colors">
+                        <div className="flex flex-col min-w-0 pr-2">
+                            <span className="font-semibold text-gray-700 truncate">{cls.className}</span>
+                            <span className="text-gray-400 text-[10px]">{dayStr}</span>
+                        </div>
+                        <div className="whitespace-nowrap font-medium text-gray-600 bg-white px-1.5 py-0.5 rounded border border-gray-200">
+                            {cls.classTime}
+                        </div>
                     </div>
-                    <button onClick={() => { setShowWaiver(false); setStatus('idle'); }} className="p-1 rounded-full hover:bg-gray-200 text-gray-500">
-                        <X size={20} />
-                    </button>
-                </div>
-                
-                <div className="p-4 bg-blue-50 text-blue-800 text-xs font-medium border-b border-blue-100">
-                    To book this class, you must accept the updated liability waiver.
-                </div>
+                );
+            })}
+        </div>
+      </div>
+    );
+  };
 
-                <div className="flex-1 overflow-y-auto p-6 bg-white">
-                     <div className="prose prose-sm text-gray-600 whitespace-pre-wrap text-xs">
-                        {waiverData.text}
-                     </div>
-                </div>
-
-                <div className="p-4 border-t border-gray-100 bg-gray-50">
-                    <button 
-                        onClick={handleSignAndBook}
-                        disabled={status === 'loading'}
-                        className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-md"
-                        style={{ backgroundColor: theme.primaryColor }}
-                    >
-                        {status === 'loading' ? <Loader2 className="animate-spin" /> : "Agree & Book Class"}
-                    </button>
-                </div>
+  // ... (Render sections: Loading, Waiver, Main Modal Content - all same as before) ...
+  
+  if (status === 'loading_data') {
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="bg-white p-6 rounded-xl shadow-xl flex items-center gap-3">
+                <Loader2 className="animate-spin text-blue-600" />
+                <span className="font-medium text-gray-700">Checking eligibility...</span>
             </div>
         </div>
       );
   }
 
-  // --- RENDER: STANDARD BOOKING MODAL ---
-  let title = "Confirm Booking";
-  if (isAttended) title = "Class Completed";
-  else if (isBooked) title = "Manage Booking";
-  else if (isWaitlisted) title = "Waitlist Status";
-  else if (isFull) title = "Class Full";
+  if (showWaiver && waiverData) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        {/* ... Waiver UI ... */}
+        <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[80vh] animate-in fade-in zoom-in duration-200">
+          <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+            <div className="flex items-center gap-2 text-gray-900 font-bold">
+              <Scale size={20} className="text-blue-600" />
+              <h3>Waiver Required</h3>
+            </div>
+            <button onClick={() => { setShowWaiver(false); setStatus('idle'); }} className="p-1 rounded-full hover:bg-gray-200 text-gray-500"><X size={20} /></button>
+          </div>
+          <div className="p-4 bg-blue-50 text-blue-800 text-xs font-medium border-b border-blue-100">
+            To book this class, you must accept the updated liability waiver.
+          </div>
+          <div className="flex-1 overflow-y-auto p-6 bg-white">
+            <div className="prose prose-sm text-gray-600 whitespace-pre-wrap text-xs">{waiverData.text}</div>
+          </div>
+          <div className="p-4 border-t border-gray-100 bg-gray-50">
+            <button onClick={handleSignAndBook} disabled={status === 'loading'} className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-md" style={{ backgroundColor: theme.primaryColor }}>
+              {status === 'loading' ? <Loader2 className="animate-spin" /> : "Agree & Book Class"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  let displayTitle = "Confirm Booking";
+  if (isAttended) displayTitle = "Class Completed";
+  else if (isBooked) displayTitle = "Manage Booking";
+  else if (isWaitlisted) displayTitle = "Waitlist Status";
+  else if (isFull) displayTitle = "Class Full";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
       <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in duration-200">
-        
-        {/* Header */}
+
         <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-           <h3 className="font-bold text-gray-900">{title}</h3>
-           <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-200 text-gray-500">
-             <X size={20} />
-           </button>
+          <h3 className="font-bold text-gray-900">{displayTitle}</h3>
+          <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-200 text-gray-500"><X size={20} /></button>
         </div>
 
-        {/* Content */}
         <div className="p-6">
-           {status === 'success' ? (
-              <div className="flex flex-col items-center justify-center py-4 text-center">
-                 <div className={`h-12 w-12 rounded-full flex items-center justify-center mb-3 ${isBooked ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                    {isBooked ? <Trash2 size={24}/> : <CheckCircle size={24} />}
-                 </div>
-                 <h4 className="text-xl font-bold text-gray-900">{successMsg}</h4>
+          {status === 'success' ? (
+            <div className="flex flex-col items-center justify-center py-4 text-center">
+              <div className={`h-12 w-12 rounded-full flex items-center justify-center mb-3 ${isBooked ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
+                {isBooked ? <Trash2 size={24} /> : <CheckCircle size={24} />}
               </div>
-           ) : (
-             <>
-               <div className="mb-6">
-                 <h2 className="text-lg font-bold text-gray-900 mb-1">{classInstance.name}</h2>
-                 
-                 {/* Instructor Badge */}
-                 {instructorName && (
-                    <div className="flex items-center gap-1.5 mb-4">
-                        <div className="bg-gray-100 p-1 rounded-full">
-                            <User size={12} className="text-gray-500" />
-                        </div>
-                        <span className="text-xs font-medium text-gray-600">{instructorName}</span>
-                    </div>
-                 )}
+              <h4 className="text-xl font-bold text-gray-900">{successMsg}</h4>
+            </div>
+          ) : (
+            <>
+              <div className="mb-6">
+                <h2 className="text-lg font-bold text-gray-900 mb-1">{classInstance.name}</h2>
 
-                 <div className="space-y-2 mt-3">
-                    <div className="flex items-center gap-3 text-sm text-gray-600">
-                       <Calendar size={16} className="text-gray-400" />
-                       <span>{dateDisplay}</span>
+                {instructorName && (
+                  <div className="flex items-center gap-1.5 mb-4">
+                    <div className="bg-gray-100 p-1 rounded-full"><User size={12} className="text-gray-500" /></div>
+                    <span className="text-xs font-medium text-gray-600">{instructorName}</span>
+                  </div>
+                )}
+
+                <div className="space-y-2 mt-3">
+                  <div className="flex items-center gap-3 text-sm text-gray-600">
+                    <Calendar size={16} className="text-gray-400" /><span>{dateDisplay}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-sm text-gray-600">
+                    <Clock size={16} className="text-gray-400" /><span>{classInstance.time} ({classInstance.duration} min)</span>
+                  </div>
+
+                  {isAttended && (
+                    <div className="mt-4 bg-gray-50 rounded-xl p-4 border border-gray-100 text-center">
+                      <div className="flex justify-center mb-2"><div className="bg-gray-200 p-2 rounded-full text-gray-600"><CheckSquare size={24} /></div></div>
+                      <p className="text-sm font-bold text-gray-800">You attended this class.</p>
                     </div>
-                    <div className="flex items-center gap-3 text-sm text-gray-600">
-                       <Clock size={16} className="text-gray-400" />
-                       <span>{classInstance.time} ({classInstance.duration} min)</span>
-                    </div>
-                    
-                    {/* Status Context Info */}
-                    {isAttended && (
-                        <div className="mt-4 bg-gray-50 rounded-xl p-4 border border-gray-100 text-center">
-                            <div className="flex justify-center mb-2">
-                                <div className="bg-gray-200 p-2 rounded-full text-gray-600">
-                                    <CheckSquare size={24} />
+                  )}
+                  {isBooked && !isAttended && (
+                    <div className="mt-2 text-xs font-medium text-green-700 bg-green-50 p-2 rounded border border-green-100 flex gap-2 items-center"><CheckCircle size={12} /> You are currently booked for this class.</div>
+                  )}
+                  {isWaitlisted && (
+                    <div className="mt-2 text-xs font-medium text-orange-700 bg-orange-50 p-2 rounded border border-orange-100 flex gap-2 items-center"><Hourglass size={12} /> You are on the waitlist.</div>
+                  )}
+
+                  {!isBooked && !isWaitlisted && !isAttended && bookingEligibility && (
+                    <div className="mt-4 space-y-3">
+                      
+                      {bookingEligibility.allowed && bookingEligibility.type === 'membership' && (
+                        <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+                          <div className="flex items-start gap-3">
+                            <div className="bg-blue-100 p-1.5 rounded-full mt-0.5"><ShieldCheck size={16} className="text-blue-600" /></div>
+                            <div className="w-full">
+                              <p className="text-sm font-bold text-blue-900">Covered by Membership</p>
+                              <p className="text-xs text-blue-700 mt-0.5">Included with your {activePlanName || "active plan"}.</p>
+                              {weeklyUsage && (
+                                <div className="mt-3 p-2 bg-blue-100/50 rounded-lg border border-blue-200">
+                                  <div className="flex justify-between items-center mb-1">
+                                    <span className="text-[10px] uppercase font-bold text-blue-700">Weekly Progress</span>
+                                    <span className="text-[10px] font-bold text-blue-900">{weeklyUsage.used} / {weeklyUsage.limit}</span>
+                                  </div>
+                                  <div className="w-full bg-blue-200 rounded-full h-1.5">
+                                    <div
+                                      className={`h-1.5 rounded-full ${weeklyUsage.used >= weeklyUsage.limit ? 'bg-orange-500' : 'bg-blue-600'}`}
+                                      style={{ width: `${Math.min((weeklyUsage.used / weeklyUsage.limit) * 100, 100)}%` }}
+                                    ></div>
+                                  </div>
                                 </div>
+                              )}
                             </div>
-                            <p className="text-sm font-bold text-gray-800">You attended this class.</p>
-                            {classInstance.checkedInAt && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                    Checked in at {getCheckInTime()}
-                                </p>
-                            )}
+                          </div>
                         </div>
-                    )}
+                      )}
 
-                    {isBooked && !isAttended && (
-                        <div className="mt-2 text-xs font-medium text-green-700 bg-green-50 p-2 rounded border border-green-100 flex gap-2 items-center">
-                            <CheckCircle size={12} /> You are currently booked for this class.
+                      {bookingEligibility.allowed && bookingEligibility.type === 'drop-in' && bookingEligibility.cost === 0 && (
+                        <div className="bg-green-50 border border-green-100 rounded-xl p-3">
+                          <div className="flex items-start gap-3">
+                            <div className="bg-green-100 p-1.5 rounded-full mt-0.5"><Ticket size={16} className="text-green-600" /></div>
+                            <div>
+                              <p className="text-sm font-bold text-green-900">Open Registration</p>
+                              <p className="text-xs text-green-700 mt-0.5">Free to book.</p>
+                            </div>
+                          </div>
                         </div>
-                    )}
-                    {isWaitlisted && (
-                        <div className="mt-2 text-xs font-medium text-orange-700 bg-orange-50 p-2 rounded border border-orange-100 flex gap-2 items-center">
-                            <Hourglass size={12} /> You are on the waitlist.
+                      )}
+
+                      {bookingEligibility.allowed && bookingEligibility.type === 'credit' && (
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                          <div className="flex justify-between items-center text-sm mb-1">
+                            <span className="text-gray-600 flex items-center gap-1"><Coins size={14} /> Credit Cost:</span>
+                            <span className="font-bold text-gray-900">{bookingEligibility.cost}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-sm">
+                            <span className="text-gray-600">Remaining Balance:</span>
+                            <span className="font-bold text-green-600">
+                              {(userProfile?.classCredits || 0)} <ArrowRight size={12} className="inline mx-1" /> {(userProfile?.classCredits || 0) - bookingEligibility.cost}
+                            </span>
+                          </div>
+                          {bookingEligibility.reason && bookingEligibility.reason.includes('Limit Reached') && (
+                            <>
+                              <p className="text-[10px] text-orange-600 mt-2 pt-2 border-t border-gray-200">
+                                Note: Booking via credits because you reached your weekly membership limit.
+                              </p>
+                              {renderWeeklySchedule()}
+                            </>
+                          )}
                         </div>
-                    )}
-                    {isFull && !isBooked && !isWaitlisted && !isAttended && (
-                         <div className="mt-2 text-xs font-medium text-red-700 bg-red-50 p-2 rounded border border-red-100 flex gap-2 items-center">
-                            <AlertCircle size={12} /> This class is at capacity ({classInstance.currentCount}/{classInstance.maxCapacity}).
-                         </div>
-                    )}
-                 </div>
-               </div>
+                      )}
 
-               {status === 'error' && (
-                 <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm flex items-start gap-2">
-                    <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                    <span>{errorMessage}</span>
-                 </div>
-               )}
+                      {!bookingEligibility.allowed && bookingEligibility.cost > 0 && (
+                        <div className="bg-red-50 border border-red-100 rounded-lg p-3">
+                          <div className="flex gap-2 items-center text-red-700 font-bold text-sm mb-2">
+                            <AlertCircle size={16} /> Insufficient Credits
+                          </div>
+                          <div className="flex justify-between items-center text-xs mb-1">
+                            <span className="text-gray-600">Cost:</span>
+                            <span className="font-medium">{bookingEligibility.cost} Credit(s)</span>
+                          </div>
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-gray-600">Your Balance:</span>
+                            <span className="font-bold text-red-600">{userProfile?.classCredits || 0} Credits</span>
+                          </div>
+                          {bookingEligibility.reason && bookingEligibility.reason.includes('Weekly limit') && (
+                            <>
+                              <p className="text-[10px] text-red-600 mt-2 pt-2 border-t border-red-100 opacity-80">
+                                (Membership limit reached for this week)
+                              </p>
+                              {renderWeeklySchedule()}
+                            </>
+                          )}
+                        </div>
+                      )}
 
-               {/* BUTTON LOGIC */}
-               {!isAttended && (
-                   <>
-                       {isBooked || isWaitlisted ? (
-                           <button
-                             onClick={handleCancel}
-                             disabled={status === 'loading'}
-                             className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 active:scale-95 transition-transform bg-red-500 hover:bg-red-600"
-                           >
-                             {status === 'loading' ? <Loader2 className="animate-spin" /> : (isWaitlisted ? "Leave Waitlist" : "Cancel Booking")}
-                           </button>
-                       ) : (
-                           <button
-                             // CHANGED: Call pre-check instead of confirm directly
-                             onClick={handlePreBookingCheck} 
-                             disabled={status === 'loading'}
-                             className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 active:scale-95 transition-transform"
-                             style={{ backgroundColor: isFull ? '#ea580c' : theme.primaryColor }}
-                           >
-                             {status === 'loading' ? <Loader2 className="animate-spin" /> : (isFull ? "Join Waitlist" : "Confirm Booking")}
-                           </button>
-                       )}
-                   </>
-               )}
-               
-               <button onClick={onClose} className="w-full py-3 mt-2 text-sm font-semibold text-gray-500 hover:text-gray-800">
-                 Close
-               </button>
-             </>
-           )}
+                      {!bookingEligibility.allowed && bookingEligibility.cost === 0 && (
+                        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                          <div className="bg-gray-50 p-3 border-b border-gray-100">
+                            <div className="flex gap-2 items-center text-gray-800 font-bold text-sm mb-1">
+                              <Lock size={16} className="text-orange-500" />
+                              <span>
+                                {bookingEligibility.reason.includes('Weekly limit') 
+                                  ? "Weekly Limit Reached" 
+                                  : bookingEligibility.reason.includes('currently') 
+                                    ? "Membership Unavailable" 
+                                    : "Membership Required"
+                                }
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-500 leading-relaxed">
+                              {bookingEligibility.reason.includes('Weekly limit')
+                                ? `You have used your ${weeklyUsage?.limit || ''} classes for this week.`
+                                : bookingEligibility.reason.includes('currently')
+                                  ? bookingEligibility.reason
+                                  : `This class is exclusive to members. ${eligiblePublicPlans.length > 0 ? "Unlock access below:" : "Contact staff to join."}`
+                              }
+                            </p>
+                            {bookingEligibility.reason.includes('Weekly limit') && renderWeeklySchedule()}
+                          </div>
+                          {eligiblePublicPlans.length > 0 && !bookingEligibility.reason.includes('Weekly limit') && (
+                            <div className="divide-y divide-gray-100">
+                              {eligiblePublicPlans.map(plan => (
+                                <button key={plan.id} onClick={() => goToStore('memberships')} className="w-full flex justify-between items-center p-3 hover:bg-blue-50 transition-colors group text-left">
+                                  <div>
+                                    <div className="text-sm font-bold text-gray-900 group-hover:text-blue-700 flex items-center gap-1.5"><Star size={12} className="text-yellow-400 fill-yellow-400" />{plan.name}</div>
+                                    <div className="text-xs text-gray-500 mt-0.5">${plan.price}/{plan.interval === 'one_time' ? 'once' : plan.interval}</div>
+                                  </div>
+                                  <ChevronRight size={16} className="text-gray-300 group-hover:text-blue-500" />
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {status === 'error' && (
+                <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm flex items-start gap-2"><AlertCircle size={16} className="mt-0.5 shrink-0" /><span>{errorMessage}</span></div>
+              )}
+
+              {!isAttended && (
+                <>
+                  {isBooked || isWaitlisted ? (
+                    <button onClick={handleCancel} disabled={status === 'loading'} className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 active:scale-95 transition-transform bg-red-500 hover:bg-red-600">
+                      {status === 'loading' ? <Loader2 className="animate-spin" /> : (isWaitlisted ? "Leave Waitlist" : "Cancel Booking")}
+                    </button>
+                  ) : (
+                    <>
+                      {bookingEligibility && !bookingEligibility.allowed && bookingEligibility.cost > 0 ? (
+                        <button onClick={() => goToStore('packs')} className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 active:scale-95 transition-transform bg-green-600 hover:bg-green-700 shadow-md">
+                          <ShoppingCart size={18} /> Get Class Credits
+                        </button>
+                      ) :
+                        bookingEligibility && !bookingEligibility.allowed ? (
+                          eligiblePublicPlans.length > 0 ? (
+                            <button onClick={() => goToStore('memberships')} className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 active:scale-95 transition-transform bg-blue-600 hover:bg-blue-700 shadow-md">
+                              <ShoppingCart size={18} /> View All Plans
+                            </button>
+                          ) : (
+                            <button disabled className="w-full py-3 rounded-xl font-bold text-gray-400 bg-gray-100 flex items-center justify-center gap-2 cursor-not-allowed"><Lock size={18} /> Unavailable</button>
+                          )
+                        ) :
+                          (
+                            <button onClick={handlePreBookingCheck} disabled={status === 'loading'} className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 active:scale-95 transition-transform" style={{ backgroundColor: isFull ? '#ea580c' : theme.primaryColor }}>
+                              {status === 'loading' ? <Loader2 className="animate-spin" /> : (isFull ? "Join Waitlist" : "Confirm Booking")}
+                            </button>
+                          )}
+                    </>
+                  )}
+                </>
+              )}
+              <button onClick={onClose} className="w-full py-3 mt-2 text-sm font-semibold text-gray-500 hover:text-gray-800">Close</button>
+            </>
+          )}
         </div>
       </div>
     </div>

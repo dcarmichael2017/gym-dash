@@ -127,7 +127,7 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
   // --- 3. SUBMIT HANDLER ---
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!formData.firstName || !formData.lastName || !formData.email) {
       setActiveTab('profile');
       alert("Please fill out First Name, Last Name, and Email.");
@@ -148,39 +148,77 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
 
     const isSamePlan = memberData && memberData.membershipId === formData.membershipId;
 
-    if (memberData && isSamePlan) {
-      subscriptionStatus = memberData.subscriptionStatus;
+    // --- STATUS LOGIC ---
+    if (!formData.membershipId) {
+      subscriptionStatus = 'prospect'; // Default to prospect if no plan
+      trialEndDate = null;
+    }
+    else if (memberData && isSamePlan && memberData.status !== 'prospect') {
+      // Keep existing status if plan hasn't changed (preserves 'past_due' etc)
+      subscriptionStatus = memberData.subscriptionStatus || memberData.status;
       trialEndDate = memberData.trialEndDate || null;
-    } else if (formData.membershipId && selectedPlan) {
-      if (selectedPlan.hasTrial && !skipTrial) {
+    }
+    else {
+      // New Plan or Activation
+      if (selectedPlan?.hasTrial && !skipTrial) {
         subscriptionStatus = 'trialing';
         const date = new Date();
         date.setDate(date.getDate() + (selectedPlan.trialDays || 7));
         trialEndDate = date;
       } else {
         subscriptionStatus = 'active';
+        trialEndDate = null;
       }
     }
 
     const fullName = `${formData.firstName.trim()} ${formData.lastName.trim()}`;
 
+    // --- CRITICAL CHANGE: CONSTRUCT MEMBERSHIPS ARRAY ---
+    // 1. Get existing memberships (to preserve other gyms)
+    let currentMemberships = memberData?.memberships || [];
+
+    // 2. Define the membership object for THIS gym
+    // This matches what checkBookingEligibility looks for
+    const gymMembershipData = {
+      gymId: gymId,
+      membershipId: formData.membershipId || null,
+      membershipName: selectedPlan ? selectedPlan.name : null,
+      status: subscriptionStatus, // 'active', 'trialing', 'prospect'
+      price: Number(customPrice),
+      trialEndDate: trialEndDate ? trialEndDate.toISOString() : null,
+      updatedAt: new Date().toISOString()
+    };
+
+    // 3. Update existing entry OR push new one
+    const existingIndex = currentMemberships.findIndex(m => m.gymId === gymId);
+    if (existingIndex >= 0) {
+      // Merge with existing to keep things like waiverSigned, waiverVersion
+      currentMemberships[existingIndex] = {
+        ...currentMemberships[existingIndex],
+        ...gymMembershipData
+      };
+    } else {
+      currentMemberships.push(gymMembershipData);
+    }
+
     const payload = {
       ...formData,
       firstName: formData.firstName.trim(),
       lastName: formData.lastName.trim(),
-      name: fullName, 
+      name: fullName,
       searchName: fullName.toLowerCase(),
-      // 4. Ensure these are explicitly included in payload (though ...formData covers it usually, explicit is safer if you destructured above)
       emergencyName: formData.emergencyName?.trim() || '',
       emergencyPhone: formData.emergencyPhone?.replace(/[^\d]/g, '') || '',
-      
-      status: subscriptionStatus || 'prospect',
+
+      // We still keep these on root for easy indexing/display in tables
+      status: subscriptionStatus,
       membershipId: formData.membershipId,
       membershipName: selectedPlan ? selectedPlan.name : null,
-      assignedPrice: Number(customPrice),
-      subscriptionStatus: subscriptionStatus,
-      trialEndDate: trialEndDate,
 
+      // CRITICAL: Send the array
+      memberships: currentMemberships,
+
+      // Rank data (handled by your other logic, ensured nulls here)
       programId: null, rankId: null, stripes: null, rankCredits: null
     };
 

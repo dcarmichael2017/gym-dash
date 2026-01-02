@@ -25,7 +25,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
         instructorId: '',
         frequency: 'Weekly',
         dropInEnabled: true,
-        dropInPrice: 20,
+        creditCost: 1, 
         allowedMembershipIds: [],
         programId: '',
         useCustomRules: false,
@@ -34,7 +34,6 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
         checkInWindowMinutes: '',
         lateCancelFee: '',
         cancelledDates: [],
-        // NEW: Visibility Field
         visibility: 'public' 
     });
 
@@ -74,6 +73,9 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
             const initFee = getSetting('lateCancelFee', 0);
 
             if (classData) {
+                // UX FIX: If cost is 0 in DB (because it was disabled), show 1 in the UI input so it's ready to use if toggled on.
+                const visualCreditCost = (classData.creditCost && classData.creditCost > 0) ? classData.creditCost : 1;
+
                 setFormData({
                     name: classData.name || '',
                     time: classData.time || '09:00',
@@ -84,7 +86,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     instructorId: classData.instructorId || '',
                     frequency: classData.frequency || 'Weekly',
                     dropInEnabled: classData.dropInEnabled !== undefined ? classData.dropInEnabled : true,
-                    dropInPrice: classData.dropInPrice !== undefined ? classData.dropInPrice : 20,
+                    creditCost: visualCreditCost, 
                     allowedMembershipIds: classData.allowedMembershipIds || [],
                     programId: classData.programId || '',
                     useCustomRules: !!classData.bookingRules,
@@ -93,7 +95,6 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     checkInWindowMinutes: initCheckIn ?? 60,
                     lateCancelFee: initFee ?? 0,
                     cancelledDates: classData.cancelledDates || [],
-                    // Load existing visibility or default to public
                     visibility: classData.visibility || 'public' 
                 });
 
@@ -113,12 +114,12 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     duration: 60,
                     startDate: defaultDate,
                     frequency: defaultFreq,
-                    days: defaultFreq === 'Single Event' ? [] : [], // Ensure empty days for single event
+                    days: defaultFreq === 'Single Event' ? [] : [], 
                     maxCapacity: 20,
                     instructorId: '',
-                    dropInEnabled: !hasMemberships,
-                    dropInPrice: 20,
-                    allowedMembershipIds: hasMemberships ? membershipList.map(m => m.id) : [],
+                    dropInEnabled: !hasMemberships, 
+                    creditCost: 1, 
+                    allowedMembershipIds: hasMemberships ? membershipList.filter(m => m.interval !== 'one_time').map(m => m.id) : [],
                     programId: '',
                     useCustomRules: false,
                     bookingWindowDays: globalSettings?.bookingWindowDays ?? 7,
@@ -126,7 +127,6 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     checkInWindowMinutes: globalSettings?.checkInWindowMinutes ?? 60,
                     lateCancelFee: globalSettings?.lateCancelFee ?? 0,
                     cancelledDates: [],
-                    // Default for new classes
                     visibility: 'public'
                 });
 
@@ -144,20 +144,17 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        // 1. Validate Name (Required for all)
         if (!formData.name) {
             await showConfirm({
                 title: "Missing Name",
                 message: "Please enter a name for this class.",
                 confirmText: "OK",
-                cancelText: null // Hides the cancel button to act like an Alert
+                cancelText: null 
             });
             return;
         }
 
-        // 2. Validate Schedule based on Frequency
         if (formData.frequency === 'Single Event') {
-            // Logic for One-Off: Must have a Date
             if (!formData.startDate) {
                 await showConfirm({
                     title: "Missing Date",
@@ -168,7 +165,6 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                 return;
             }
         } else {
-            // Logic for Recurring: Must have Days of Week
             if (formData.days.length === 0) {
                 await showConfirm({
                     title: "Missing Days",
@@ -189,13 +185,18 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
             lateCancelFee: activeRules.fee ? (parseFloat(formData.lateCancelFee) || 0) : 0,
         } : null;
 
+        // --- CRITICAL FIX HERE ---
+        // If dropInEnabled is FALSE, we force creditCost to 0.
+        // This ensures the BookingModal knows there is no credit option.
+        const finalCreditCost = formData.dropInEnabled ? (parseInt(formData.creditCost) || 0) : 0;
+
         const payload = {
             ...formData,
             duration: parseInt(formData.duration) || 60,
-            dropInPrice: parseFloat(formData.dropInPrice) || 0,
+            dropInEnabled: formData.dropInEnabled,
+            creditCost: finalCreditCost, 
             maxCapacity: parseInt(formData.maxCapacity) || 0,
             bookingRules: bookingRulesPayload,
-            // Ensure visibility is sent
             visibility: formData.visibility || 'public'
         };
 
@@ -239,9 +240,10 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
     };
 
     const toggleAllMemberships = () => {
+        const recurringPlans = membershipList.filter(m => m.interval !== 'one_time');
         setFormData(prev => ({
             ...prev,
-            allowedMembershipIds: prev.allowedMembershipIds.length === membershipList.length ? [] : membershipList.map(m => m.id)
+            allowedMembershipIds: prev.allowedMembershipIds.length === recurringPlans.length ? [] : recurringPlans.map(m => m.id)
         }));
     };
 
