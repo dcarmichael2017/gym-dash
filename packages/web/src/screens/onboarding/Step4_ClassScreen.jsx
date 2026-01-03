@@ -7,7 +7,7 @@ import {
   deleteClass,
   updateUserOnboardingStep,
   getMembershipTiers
-} from '../../../../shared/api/firestore.js'; // Check your relative path here
+} from '../../../../shared/api/firestore'; // Check your relative path here
 import { Trash2, Plus, Calendar as CalendarIcon, Clock, User } from 'lucide-react';
 
 // Import the reusable component

@@ -7,7 +7,7 @@ import {
   addStaffMember,
   getStaffList,
   updateUserOnboardingStep // --- 1. ADDED IMPORT ---
-} from '../../../../shared/api/firestore.js';
+} from '../../../../shared/api/firestore';
 
 export const Step3_StaffScreen = () => {
   const [name, setName] = useState('');

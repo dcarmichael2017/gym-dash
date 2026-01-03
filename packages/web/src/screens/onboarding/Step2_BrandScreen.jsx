@@ -8,7 +8,7 @@ import {
   updateGymBranding,
   getGymDetails,
   updateUserOnboardingStep 
-} from '../../../../shared/api/firestore.js';
+} from '../../../../shared/api/firestore';
 
 // Reuse the presets for consistency
 const THEME_PRESETS = [

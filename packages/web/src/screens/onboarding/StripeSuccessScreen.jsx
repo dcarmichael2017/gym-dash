@@ -3,7 +3,7 @@
 import React, { useState } from 'react'; // --- 1. IMPORT useState ---
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getAuth } from 'firebase/auth'; // --- 2. IMPORT getAuth ---
-import { updateUserOnboardingStep } from '../../../../shared/api/firestore.js'; // --- 2. IMPORT update ---
+import { updateUserOnboardingStep } from '../../../../shared/api/firestore'; // --- 2. IMPORT update ---
 import { CheckCircle, ArrowRight } from 'lucide-react';
 
 export const StripeSuccessScreen = () => {

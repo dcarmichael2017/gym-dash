@@ -9,7 +9,7 @@ import {
   updateUserOnboardingStep,
   getGymDetails,
   updateGymDetails
-} from '../../../../shared/api/firestore.js';
+} from '../../../../shared/api/firestore';
 
 export const Step1_GymDetailsScreen = () => {
   const [gymName, setGymName] = useState('');

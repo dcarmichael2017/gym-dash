@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { signUpWithEmail } from '../../../../shared/api/auth.js';
-import { createUserProfile } from '../../../../shared/api/firestore.js';
+import { createUserProfile } from '../../../../shared/api/firestore';
 import { Building, User, ChevronLeft, Briefcase, Mail, Lock, Phone, UserCircle } from 'lucide-react';
 
 export const SignUpScreen = () => {

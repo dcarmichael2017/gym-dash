@@ -7,7 +7,7 @@ import {
   getGymDetails,
   getClasses,
   updateUserOnboardingStep
-} from '../../../../shared/api/firestore.js';
+} from '../../../../shared/api/firestore';
 import { MobileSchedulePreview } from '../../../../shared/components/MobileSchedulePreview.jsx';
 
 export const Step5_AppPreviewScreen = () => {
