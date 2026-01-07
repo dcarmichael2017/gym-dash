@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, List, Loader2, ChevronLeft, ChevronRight, Coins } from 'lucide-react'; // ✅ Added Coins
+import { Calendar, List, Loader2, ChevronLeft, ChevronRight, Coins } from 'lucide-react';
 import { useGym } from '../../../context/GymContext';
 import { auth, db } from '../../../../../../packages/shared/api/firebaseConfig';
 import { 
@@ -8,7 +8,7 @@ import {
   cancelBooking,
   getWeeklyAttendanceCounts 
 } from '../../../../../../packages/shared/api/firestore';
-import { collection, query, where, getDocs, doc, onSnapshot } from 'firebase/firestore'; // ✅ Added doc, onSnapshot
+import { collection, query, where, getDocs, doc, onSnapshot } from 'firebase/firestore'; 
 
 import MemberScheduleList from './MemberScheduleList';
 import MemberCalendarView from './MemberCalendarView';
@@ -25,13 +25,12 @@ const MemberScheduleScreen = () => {
   
   const [counts, setCounts] = useState({}); 
   const [userBookings, setUserBookings] = useState({}); 
-  const [userCredits, setUserCredits] = useState(0); // ✅ New State for Real-time Credits
+  const [userCredits, setUserCredits] = useState(0); 
 
   const [selectedClass, setSelectedClass] = useState(null);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
 
-  // --- 1. NEW: Real-time Credit Listener ---
-  // We use onSnapshot so the badge updates instantly when they book/cancel
+  // --- Real-time Credit Listener ---
   useEffect(() => {
     if (!auth.currentUser) return;
     const userRef = doc(db, 'users', auth.currentUser.uid);
@@ -79,8 +78,9 @@ const MemberScheduleScreen = () => {
 
     const startStr = getLocalDateString(weekStart);
     
+    // ✅ FIX: Increased fetch range from 7 to 14 days to match MemberScheduleList loop
     const endObj = new Date(weekStart);
-    endObj.setDate(weekStart.getDate() + 7);
+    endObj.setDate(weekStart.getDate() + 14); 
     const endStr = getLocalDateString(endObj);
 
     // 3. Get Capacity Counts
@@ -175,7 +175,6 @@ const MemberScheduleScreen = () => {
       <div className="sticky top-0 bg-white z-30 px-6 py-4 border-b border-gray-100 shadow-sm">
         <div className="flex justify-between items-center mb-4">
           
-          {/* ✅ UPDATED: Title Area with Credit Badge */}
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900">Schedule</h1>
             {userCredits > 0 && (

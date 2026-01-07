@@ -26,6 +26,19 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
   const [showWaiver, setShowWaiver] = useState(false);
   const [waiverData, setWaiverData] = useState(null);
 
+  // --- ✅ FIX: Handle Auto-Close with Cleanup ---
+  useEffect(() => {
+    let timer;
+    if (status === 'success') {
+      timer = setTimeout(() => {
+        onClose();
+      }, 1500);
+    }
+    // This cleanup function runs if the user closes the modal manually 
+    // or if the component unmounts BEFORE the timer finishes.
+    return () => clearTimeout(timer);
+  }, [status, onClose]);
+
   useEffect(() => {
     const initData = async () => {
       if (!auth.currentUser || !currentGym) return;
@@ -66,21 +79,19 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
     setStatus('loading');
     setErrorMessage('');
     try {
-      // 1. Determine type and cost from the eligibility check we already ran
       const typeToBook = bookingEligibility?.type || 'membership';
       const costToCharge = bookingEligibility?.cost || 0;
 
-      // 2. Pass these as the SECOND argument to onConfirm
       const result = await onConfirm(classInstance, {
         bookingType: typeToBook,
-        creditCostOverride: costToCharge, // ✅ Ensure backend knows the cost
-        waiveCost: false // Explicitly say do not waive
+        creditCostOverride: costToCharge, 
+        waiveCost: false 
       });
 
       if (result.success) {
-        setStatus('success');
         setSuccessMsg(result.status === 'waitlisted' ? "Added to Waitlist" : "Class Booked!");
-        setTimeout(onClose, 1500);
+        // ✅ FIX: Set status to success, let useEffect handle the close
+        setStatus('success'); 
       } else {
         setStatus('error');
         setErrorMessage(result.error || "Booking failed.");
@@ -207,9 +218,9 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
     try {
       const result = await onCancel(classInstance.attendanceId);
       if (result.success) {
-        setStatus('success');
         setSuccessMsg(resultingSuccessMsg);
-        setTimeout(onClose, 1500);
+        // ✅ FIX: Set status to success, let useEffect handle the close
+        setStatus('success');
       } else {
         setStatus('error');
         setErrorMessage(result.error || "Cancellation failed.");
