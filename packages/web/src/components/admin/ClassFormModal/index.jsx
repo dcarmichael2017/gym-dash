@@ -33,12 +33,13 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
         cancelWindowHours: '',
         checkInWindowMinutes: '',
         lateCancelFee: '',
+        lateBookingMinutes: '',
         cancelledDates: [],
         visibility: 'public' 
     });
 
     const [activeRules, setActiveRules] = useState({
-        booking: true, cancel: true, checkIn: true, fee: true
+        booking: true, cancel: true, checkIn: true, fee: true, lateBooking: true
     });
 
     // --- INITIALIZATION ---
@@ -72,6 +73,8 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
             const initCheckIn = getSetting('checkInWindowMinutes', 60);
             const initFee = getSetting('lateCancelFee', 0);
 
+            const initLateBooking = getSetting('lateBookingMinutes', 15); // Default 15 mins if rule active
+
             if (classData) {
                 // UX FIX: If cost is 0 in DB (because it was disabled), show 1 in the UI input so it's ready to use if toggled on.
                 const visualCreditCost = (classData.creditCost && classData.creditCost > 0) ? classData.creditCost : 1;
@@ -93,6 +96,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     bookingWindowDays: initBooking ?? 7,
                     cancelWindowHours: initCancel ?? 2,
                     checkInWindowMinutes: initCheckIn ?? 60,
+                    lateBookingMinutes: initLateBooking ?? 15,
                     lateCancelFee: initFee ?? 0,
                     cancelledDates: classData.cancelledDates || [],
                     visibility: classData.visibility || 'public' 
@@ -103,6 +107,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     cancel: classData.bookingRules ? isRuleActive(classData.bookingRules.cancelWindowHours) : isRuleActive(initCancel),
                     checkIn: classData.bookingRules ? isRuleActive(classData.bookingRules.checkInWindowMinutes) : isRuleActive(initCheckIn),
                     fee: classData.bookingRules ? isFeeActive(classData.bookingRules.lateCancelFee) : isFeeActive(initFee),
+                    lateBooking: classData.bookingRules ? isRuleActive(classData.bookingRules.lateBookingMinutes) : isRuleActive(initLateBooking),
                 });
             } else {
                 const defaultFreq = initialViewMode === 'events' ? 'Single Event' : 'Weekly';
@@ -126,6 +131,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     cancelWindowHours: globalSettings?.cancelWindowHours ?? 2,
                     checkInWindowMinutes: globalSettings?.checkInWindowMinutes ?? 60,
                     lateCancelFee: globalSettings?.lateCancelFee ?? 0,
+                    lateBookingMinutes: globalSettings?.lateBookingMinutes ?? 15,
                     cancelledDates: [],
                     visibility: 'public'
                 });
@@ -134,7 +140,8 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     booking: globalSettings?.bookingWindowDays !== null,
                     cancel: globalSettings?.cancelWindowHours !== null,
                     checkIn: globalSettings?.checkInWindowMinutes !== null,
-                    fee: globalSettings?.lateCancelFee !== null && globalSettings?.lateCancelFee > 0
+                    fee: globalSettings?.lateCancelFee !== null && globalSettings?.lateCancelFee > 0,
+                    lateBooking: globalSettings?.lateBookingMinutes !== null
                 });
             }
         }
@@ -183,6 +190,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
             cancelWindowHours: activeRules.cancel ? (parseInt(formData.cancelWindowHours) || 0) : null,
             checkInWindowMinutes: activeRules.checkIn ? (parseInt(formData.checkInWindowMinutes) || 30) : null,
             lateCancelFee: activeRules.fee ? (parseFloat(formData.lateCancelFee) || 0) : 0,
+            lateBookingMinutes: activeRules.lateBooking ? (parseInt(formData.lateBookingMinutes) || 0) : null,
         } : null;
 
         // --- CRITICAL FIX HERE ---

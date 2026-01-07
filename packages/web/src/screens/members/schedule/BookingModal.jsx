@@ -4,22 +4,17 @@ import { useNavigate } from 'react-router-dom';
 import { auth } from '../../../../../../packages/shared/api/firebaseConfig';
 import { useGym } from '../../../context/GymContext';
 import { getGymWaiver, signWaiver, checkBookingEligibility } from '../../../../../../packages/shared/api/firestore';
-
-// 1. IMPORT THE CUSTOM HOOK
-import { useConfirm } from '../../../context/ConfirmationContext'; 
+import { useConfirm } from '../../../context/ConfirmationContext';
 
 const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) => {
   const navigate = useNavigate();
   const { currentGym, memberships } = useGym();
-  
-  // 2. INITIALIZE HOOK
-  const { confirm } = useConfirm(); 
+  const { confirm } = useConfirm();
 
-  const [status, setStatus] = useState('loading_data'); 
+  const [status, setStatus] = useState('loading_data');
   const [errorMessage, setErrorMessage] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // ... (Data State, Waiver State, and useEffect remain unchanged) ...
   const [data, setData] = useState({
     instructorName: classInstance.resolvedInstructorName || classInstance.instructorName || null,
     userProfile: null,
@@ -53,11 +48,11 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
 
   const { instructorName, userProfile, eligibility: bookingEligibility, activePlanName, weeklyUsage, eligiblePublicPlans } = data;
 
-  // ... (Derived State & Actions helpers remain unchanged) ...
   const isAttended = classInstance.userStatus === 'attended';
   const isBooked = classInstance.userStatus === 'booked';
   const isWaitlisted = classInstance.userStatus === 'waitlisted';
   const isFull = classInstance.maxCapacity && classInstance.currentCount >= parseInt(classInstance.maxCapacity);
+
   const dateDisplay = new Date(classInstance.dateString + 'T12:00:00').toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric'
   });
@@ -71,7 +66,17 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
     setStatus('loading');
     setErrorMessage('');
     try {
-      const result = await onConfirm(classInstance);
+      // 1. Determine type and cost from the eligibility check we already ran
+      const typeToBook = bookingEligibility?.type || 'membership';
+      const costToCharge = bookingEligibility?.cost || 0;
+
+      // 2. Pass these as the SECOND argument to onConfirm
+      const result = await onConfirm(classInstance, {
+        bookingType: typeToBook,
+        creditCostOverride: costToCharge, // ✅ Ensure backend knows the cost
+        waiveCost: false // Explicitly say do not waive
+      });
+
       if (result.success) {
         setStatus('success');
         setSuccessMsg(result.status === 'waitlisted' ? "Added to Waitlist" : "Class Booked!");
@@ -88,12 +93,13 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
 
   const handlePreBookingCheck = async () => {
     if (isBooked || isWaitlisted) { handleCancel(); return; }
-    // ... rest of pre-booking check ...
+
     if (bookingEligibility && !bookingEligibility.allowed && !isFull) {
       if (bookingEligibility.cost > 0) goToStore('packs');
       else goToStore('memberships');
       return;
     }
+
     setStatus('loading');
     try {
       const res = await getGymWaiver(currentGym.id);
@@ -129,59 +135,80 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
     }
   };
 
-  // --- 3. UPDATED CANCEL HANDLER ---
   const handleCancel = async () => {
     if (!classInstance.attendanceId) return;
 
-    // Cancellation Logic
+    const costUsed = classInstance.cost || 0;
+    const paidWithCredit = costUsed > 0;
+
     const CANCELLATION_WINDOW_MIN = classInstance.cancellationWindow ? parseInt(classInstance.cancellationWindow) : 120;
+    const windowHours = CANCELLATION_WINDOW_MIN / 60;
+
     const [year, month, day] = classInstance.dateString.split('-').map(Number);
     const [hours, minutes] = classInstance.time.split(':').map(Number);
     const classDateObj = new Date(year, month - 1, day, hours, minutes);
     const now = new Date();
     const diffMs = classDateObj - now;
     const diffMinutes = Math.floor(diffMs / 60000);
-    const isLateCancel = diffMinutes < CANCELLATION_WINDOW_MIN;
-    const isCreditBooking = classInstance.bookingType === 'credit';
 
-    let confirmMessage = "Are you sure you want to cancel this booking?";
+    const isLateCancel = diffMinutes < CANCELLATION_WINDOW_MIN;
+
     let confirmTitle = "Cancel Booking";
-    let modalType = "danger"; // Use red theme for cancellation
+    let confirmMessage = "Are you sure you want to cancel this booking?";
+    let confirmBtnText = "Yes, Cancel";
+    let modalType = "danger";
+    let resultingSuccessMsg = "Booking Cancelled";
 
     if (isWaitlisted) {
-      confirmMessage = "You will be removed from the waitlist.";
       confirmTitle = "Leave Waitlist";
-      modalType = "confirm"; // Standard blue for waitlist leaving (less severe)
-      if (isCreditBooking) confirmMessage += " Any credits used will be refunded.";
-    } else if (isLateCancel) {
-      confirmTitle = "Late Cancellation";
-      if (isCreditBooking) {
-        confirmMessage = `You are cancelling within the ${CANCELLATION_WINDOW_MIN / 60}-hour window. You will NOT receive a refund for your class credit.`;
-      } else {
-        confirmMessage = `You are cancelling within the ${CANCELLATION_WINDOW_MIN / 60}-hour window. This may be recorded as a late cancellation.`;
+      confirmMessage = "You will be removed from the waitlist.";
+      confirmBtnText = "Leave Waitlist";
+      modalType = "confirm";
+      if (paidWithCredit) {
+        confirmMessage += ` Your ${costUsed} credit(s) will be refunded.`;
+        resultingSuccessMsg = "Removed & Credit Refunded";
       }
-    } else {
-      if (isCreditBooking) confirmMessage = "Your class credit will be refunded to your account.";
+    }
+    else if (isLateCancel) {
+      confirmTitle = "Late Cancellation";
+      if (paidWithCredit) {
+        confirmMessage = `You are cancelling within the ${windowHours}-hour cancellation window. You will NOT receive a refund for your ${costUsed} credit(s).`;
+        confirmBtnText = `Forfeit Credit & Cancel`;
+        resultingSuccessMsg = "Cancelled (Credit Forfeited)";
+      } else {
+        confirmMessage = `You are cancelling within the ${windowHours}-hour window. This will be recorded as a Late Cancellation.`;
+        confirmBtnText = "Accept & Cancel";
+        resultingSuccessMsg = "Late Cancellation Recorded";
+      }
+    }
+    else {
+      if (paidWithCredit) {
+        confirmTitle = "Cancel & Refund";
+        confirmMessage = `You are cancelling safely outside the window. Your ${costUsed} credit(s) will be immediately refunded to your account.`;
+        confirmBtnText = `Refund Credit & Cancel`;
+        modalType = "confirm";
+        resultingSuccessMsg = "Cancelled & Credit Refunded";
+      } else {
+        confirmMessage = "You are cancelling outside the window. There is no penalty.";
+      }
     }
 
-    // --- REPLACEMENT START ---
     const isConfirmed = await confirm({
-        title: confirmTitle,
-        message: confirmMessage,
-        type: modalType,
-        confirmText: isWaitlisted ? "Leave Waitlist" : "Yes, Cancel",
-        cancelText: "Keep Booking"
+      title: confirmTitle,
+      message: confirmMessage,
+      type: modalType,
+      confirmText: confirmBtnText,
+      cancelText: "Keep Booking"
     });
 
     if (!isConfirmed) return;
-    // --- REPLACEMENT END ---
 
     setStatus('loading');
     try {
       const result = await onCancel(classInstance.attendanceId);
       if (result.success) {
         setStatus('success');
-        setSuccessMsg(isWaitlisted ? "Removed from Waitlist" : "Booking Cancelled");
+        setSuccessMsg(resultingSuccessMsg);
         setTimeout(onClose, 1500);
       } else {
         setStatus('error');
@@ -194,55 +221,51 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
   };
 
   const renderWeeklySchedule = () => {
-    // ... (helper logic same as before) ...
     if (!weeklyUsage || !weeklyUsage.classes || weeklyUsage.classes.length === 0) return null;
     return (
       <div className="mt-3 bg-gray-50 rounded-lg border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-top-2">
         <div className="px-3 py-2 bg-gray-100/50 border-b border-gray-200 flex justify-between items-center">
-            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1">
-                <List size={10} /> Your Schedule this Week
-            </span>
-            <span className="text-[10px] font-bold text-gray-700">{weeklyUsage.used}/{weeklyUsage.limit}</span>
+          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+            <List size={10} /> Your Schedule this Week
+          </span>
+          <span className="text-[10px] font-bold text-gray-700">{weeklyUsage.used}/{weeklyUsage.limit}</span>
         </div>
         <div className="max-h-32 overflow-y-auto divide-y divide-gray-100">
-            {weeklyUsage.classes.map((cls) => {
-                const [y, m, d] = cls.dateString.split('-').map(Number);
-                const dateObj = new Date(y, m-1, d);
-                const dayStr = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-                return (
-                    <div key={cls.id} className="px-3 py-2 flex justify-between items-center text-xs hover:bg-white transition-colors">
-                        <div className="flex flex-col min-w-0 pr-2">
-                            <span className="font-semibold text-gray-700 truncate">{cls.className}</span>
-                            <span className="text-gray-400 text-[10px]">{dayStr}</span>
-                        </div>
-                        <div className="whitespace-nowrap font-medium text-gray-600 bg-white px-1.5 py-0.5 rounded border border-gray-200">
-                            {cls.classTime}
-                        </div>
-                    </div>
-                );
-            })}
+          {weeklyUsage.classes.map((cls) => {
+            const [y, m, d] = cls.dateString.split('-').map(Number);
+            const dateObj = new Date(y, m - 1, d);
+            const dayStr = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            return (
+              <div key={cls.id} className="px-3 py-2 flex justify-between items-center text-xs hover:bg-white transition-colors">
+                <div className="flex flex-col min-w-0 pr-2">
+                  <span className="font-semibold text-gray-700 truncate">{cls.className}</span>
+                  <span className="text-gray-400 text-[10px]">{dayStr}</span>
+                </div>
+                <div className="whitespace-nowrap font-medium text-gray-600 bg-white px-1.5 py-0.5 rounded border border-gray-200">
+                  {cls.classTime}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     );
   };
 
-  // ... (Render sections: Loading, Waiver, Main Modal Content - all same as before) ...
-  
   if (status === 'loading_data') {
-      return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="bg-white p-6 rounded-xl shadow-xl flex items-center gap-3">
-                <Loader2 className="animate-spin text-blue-600" />
-                <span className="font-medium text-gray-700">Checking eligibility...</span>
-            </div>
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="bg-white p-6 rounded-xl shadow-xl flex items-center gap-3">
+          <Loader2 className="animate-spin text-blue-600" />
+          <span className="font-medium text-gray-700">Checking eligibility...</span>
         </div>
-      );
+      </div>
+    );
   }
 
   if (showWaiver && waiverData) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-        {/* ... Waiver UI ... */}
         <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[80vh] animate-in fade-in zoom-in duration-200">
           <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
             <div className="flex items-center gap-2 text-gray-900 font-bold">
@@ -325,7 +348,8 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
 
                   {!isBooked && !isWaitlisted && !isAttended && bookingEligibility && (
                     <div className="mt-4 space-y-3">
-                      
+
+                      {/* MEMBERSHIP PLAN */}
                       {bookingEligibility.allowed && bookingEligibility.type === 'membership' && (
                         <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
                           <div className="flex items-start gap-3">
@@ -352,6 +376,7 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                         </div>
                       )}
 
+                      {/* FREE DROP IN */}
                       {bookingEligibility.allowed && bookingEligibility.type === 'drop-in' && bookingEligibility.cost === 0 && (
                         <div className="bg-green-50 border border-green-100 rounded-xl p-3">
                           <div className="flex items-start gap-3">
@@ -364,8 +389,30 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                         </div>
                       )}
 
+                      {/* CREDIT BOOKING (Includes LIMIT REACHED logic) */}
                       {bookingEligibility.allowed && bookingEligibility.type === 'credit' && (
                         <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+
+                          {/* Limit Reached Warning - Case insensitive check */}
+                          {bookingEligibility.reason && bookingEligibility.reason.toLowerCase().includes('limit') && (
+                            <div className="mb-3 pb-3 border-b border-gray-200">
+                              <div className="flex gap-2 items-start text-orange-700 mb-2">
+                                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                                <div>
+                                  <p className="text-sm font-bold">Weekly Limit Reached</p>
+                                  <p className="text-xs mt-1 text-orange-800 leading-relaxed">
+                                    You have used your <span className="font-bold">{weeklyUsage?.limit || 'weekly'}</span> classes for this week.
+                                  </p>
+                                </div>
+                              </div>
+                              {/* Always show schedule here so they know WHY */}
+                              {renderWeeklySchedule()}
+                              <div className="mt-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                Booking this class requires:
+                              </div>
+                            </div>
+                          )}
+
                           <div className="flex justify-between items-center text-sm mb-1">
                             <span className="text-gray-600 flex items-center gap-1"><Coins size={14} /> Credit Cost:</span>
                             <span className="font-bold text-gray-900">{bookingEligibility.cost}</span>
@@ -376,22 +423,26 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                               {(userProfile?.classCredits || 0)} <ArrowRight size={12} className="inline mx-1" /> {(userProfile?.classCredits || 0) - bookingEligibility.cost}
                             </span>
                           </div>
-                          {bookingEligibility.reason && bookingEligibility.reason.includes('Limit Reached') && (
-                            <>
-                              <p className="text-[10px] text-orange-600 mt-2 pt-2 border-t border-gray-200">
-                                Note: Booking via credits because you reached your weekly membership limit.
-                              </p>
-                              {renderWeeklySchedule()}
-                            </>
-                          )}
                         </div>
                       )}
 
+                      {/* INSUFFICIENT CREDITS */}
                       {!bookingEligibility.allowed && bookingEligibility.cost > 0 && (
                         <div className="bg-red-50 border border-red-100 rounded-lg p-3">
                           <div className="flex gap-2 items-center text-red-700 font-bold text-sm mb-2">
                             <AlertCircle size={16} /> Insufficient Credits
                           </div>
+
+                          {/* Show if it's due to Limit */}
+                          {bookingEligibility.reason && bookingEligibility.reason.toLowerCase().includes('limit') && (
+                            <div className="mb-3">
+                              <p className="text-xs text-red-800 mb-2">
+                                You reached your weekly limit of <span className="font-bold">{weeklyUsage?.limit}</span> classes. You need credits to book more.
+                              </p>
+                              {renderWeeklySchedule()}
+                            </div>
+                          )}
+
                           <div className="flex justify-between items-center text-xs mb-1">
                             <span className="text-gray-600">Cost:</span>
                             <span className="font-medium">{bookingEligibility.cost} Credit(s)</span>
@@ -400,42 +451,35 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                             <span className="text-gray-600">Your Balance:</span>
                             <span className="font-bold text-red-600">{userProfile?.classCredits || 0} Credits</span>
                           </div>
-                          {bookingEligibility.reason && bookingEligibility.reason.includes('Weekly limit') && (
-                            <>
-                              <p className="text-[10px] text-red-600 mt-2 pt-2 border-t border-red-100 opacity-80">
-                                (Membership limit reached for this week)
-                              </p>
-                              {renderWeeklySchedule()}
-                            </>
-                          )}
                         </div>
                       )}
 
+                      {/* LOCKED / UNAVAILABLE */}
                       {!bookingEligibility.allowed && bookingEligibility.cost === 0 && (
                         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                           <div className="bg-gray-50 p-3 border-b border-gray-100">
                             <div className="flex gap-2 items-center text-gray-800 font-bold text-sm mb-1">
                               <Lock size={16} className="text-orange-500" />
                               <span>
-                                {bookingEligibility.reason.includes('Weekly limit') 
-                                  ? "Weekly Limit Reached" 
-                                  : bookingEligibility.reason.includes('currently') 
-                                    ? "Membership Unavailable" 
+                                {bookingEligibility.reason.toLowerCase().includes('limit')
+                                  ? "Weekly Limit Reached"
+                                  : bookingEligibility.reason.includes('currently')
+                                    ? "Membership Unavailable"
                                     : "Membership Required"
                                 }
                               </span>
                             </div>
                             <p className="text-xs text-gray-500 leading-relaxed">
-                              {bookingEligibility.reason.includes('Weekly limit')
+                              {bookingEligibility.reason.toLowerCase().includes('limit')
                                 ? `You have used your ${weeklyUsage?.limit || ''} classes for this week.`
                                 : bookingEligibility.reason.includes('currently')
                                   ? bookingEligibility.reason
                                   : `This class is exclusive to members. ${eligiblePublicPlans.length > 0 ? "Unlock access below:" : "Contact staff to join."}`
                               }
                             </p>
-                            {bookingEligibility.reason.includes('Weekly limit') && renderWeeklySchedule()}
+                            {bookingEligibility.reason.toLowerCase().includes('limit') && renderWeeklySchedule()}
                           </div>
-                          {eligiblePublicPlans.length > 0 && !bookingEligibility.reason.includes('Weekly limit') && (
+                          {eligiblePublicPlans.length > 0 && !bookingEligibility.reason.toLowerCase().includes('limit') && (
                             <div className="divide-y divide-gray-100">
                               {eligiblePublicPlans.map(plan => (
                                 <button key={plan.id} onClick={() => goToStore('memberships')} className="w-full flex justify-between items-center p-3 hover:bg-blue-50 transition-colors group text-left">

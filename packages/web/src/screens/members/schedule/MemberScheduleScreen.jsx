@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, List, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar, List, Loader2, ChevronLeft, ChevronRight, Coins } from 'lucide-react'; // ✅ Added Coins
 import { useGym } from '../../../context/GymContext';
 import { auth, db } from '../../../../../../packages/shared/api/firebaseConfig';
 import { 
@@ -8,7 +8,7 @@ import {
   cancelBooking,
   getWeeklyAttendanceCounts 
 } from '../../../../../../packages/shared/api/firestore';
-import { collection, query, where, getDocs } from 'firebase/firestore'; 
+import { collection, query, where, getDocs, doc, onSnapshot } from 'firebase/firestore'; // ✅ Added doc, onSnapshot
 
 import MemberScheduleList from './MemberScheduleList';
 import MemberCalendarView from './MemberCalendarView';
@@ -20,56 +20,68 @@ const MemberScheduleScreen = () => {
   
   const [viewMode, setViewMode] = useState('list');
   const [loading, setLoading] = useState(true);
-  const [classes, setClasses] = useState([]); // This will only hold VISIBLE classes
+  const [classes, setClasses] = useState([]); 
   const [weekStart, setWeekStart] = useState(new Date());
   
   const [counts, setCounts] = useState({}); 
   const [userBookings, setUserBookings] = useState({}); 
+  const [userCredits, setUserCredits] = useState(0); // ✅ New State for Real-time Credits
 
   const [selectedClass, setSelectedClass] = useState(null);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+
+  // --- 1. NEW: Real-time Credit Listener ---
+  // We use onSnapshot so the badge updates instantly when they book/cancel
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const userRef = doc(db, 'users', auth.currentUser.uid);
+    
+    const unsubscribe = onSnapshot(userRef, (docSnap) => {
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            setUserCredits(parseInt(data.classCredits) || 0);
+        }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   // --- DATA FETCHING ---
   const fetchData = useCallback(async () => {
     if (!currentGym) return;
     setLoading(true);
 
-    // 1. Get All Classes (Raw Data)
+    // 1. Get All Classes
     const classRes = await getClasses(currentGym.id);
     
     if (classRes.success) {
-        // --- VISIBILITY FILTERING ENGINE ---
-        // We filter here so the 'classes' state NEVER holds hidden data.
-        // This prevents users from inspecting React components to see hidden data.
-        
         const myMembership = memberships.find(m => m.gymId === currentGym.id);
         const isOwner = currentGym.ownerId === auth.currentUser?.uid;
-        // Check if the user has a specific staff role in their membership
         const isStaff = myMembership?.role === 'staff' || myMembership?.role === 'coach' || myMembership?.role === 'admin';
 
         const visibleClasses = classRes.classList.filter(cls => {
-            const level = cls.visibility || 'public'; // Default to public if missing
-
-            // 1. Owners see EVERYTHING
+            const level = cls.visibility || 'public'; 
             if (isOwner) return true;
-
-            // 2. Staff see 'public' AND 'staff' (but not 'admin' specific)
-            if (isStaff) {
-                return level !== 'admin'; 
-            }
-
-            // 3. Standard Members (and Guests) see ONLY 'public'
+            if (isStaff) return level !== 'admin'; 
             return level === 'public';
         });
 
         setClasses(visibleClasses);
     }
 
-    // 2. Define Time Range for Counts (Current Week)
-    const startStr = weekStart.toISOString().split('T')[0];
+    // 2. Define Time Range
+    const getLocalDateString = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    const startStr = getLocalDateString(weekStart);
+    
     const endObj = new Date(weekStart);
     endObj.setDate(weekStart.getDate() + 7);
-    const endStr = endObj.toISOString().split('T')[0];
+    const endStr = getLocalDateString(endObj);
 
     // 3. Get Capacity Counts
     const countRes = await getWeeklyAttendanceCounts(currentGym.id, startStr, endStr);
@@ -88,9 +100,17 @@ const MemberScheduleScreen = () => {
        const snap = await getDocs(q);
        const bookingMap = {};
        snap.forEach(doc => {
-          const data = doc.data();
-          const key = `${data.classId}_${data.dateString}`;
-          bookingMap[key] = { status: data.status, id: doc.id, checkedInAt: data.checkedInAt }; 
+         const data = doc.data();
+         const key = `${data.classId}_${data.dateString}`;
+         
+         bookingMap[key] = { 
+             status: data.status, 
+             id: doc.id, 
+             checkedInAt: data.checkedInAt,
+             bookingType: data.bookingType, 
+             cost: data.costUsed,          
+             attendanceId: doc.id          
+         }; 
        });
        setUserBookings(bookingMap);
     }
@@ -105,19 +125,21 @@ const MemberScheduleScreen = () => {
   // --- HANDLERS ---
   const handleClassClick = (classInstance) => {
     const bookingKey = `${classInstance.id}_${classInstance.dateString}`;
-    const userState = userBookings[bookingKey];
+    const userState = userBookings[bookingKey]; 
     const currentCount = counts[bookingKey] || 0;
 
     setSelectedClass({
       ...classInstance,
       userStatus: userState?.status || null, 
       attendanceId: userState?.id || null, 
-      currentCount: currentCount
+      currentCount: currentCount,
+      bookingType: userState?.bookingType,
+      cost: userState?.cost
     });
     setIsBookingModalOpen(true);
   };
 
-  const processBooking = async (classInstance) => {
+  const processBooking = async (classInstance, options = {}) => {
     if (!auth.currentUser) return { success: false, error: "Not logged in" };
 
     const currentUserProfile = {
@@ -128,7 +150,7 @@ const MemberScheduleScreen = () => {
       status: memberships.find(m => m.gymId === currentGym.id)?.status || 'prospect'
     };
 
-    const result = await bookMember(currentGym.id, classInstance, currentUserProfile);
+    const result = await bookMember(currentGym.id, classInstance, currentUserProfile, options);
     if (result.success) fetchData(); 
     return result;
   };
@@ -152,7 +174,18 @@ const MemberScheduleScreen = () => {
       {/* HEADER */}
       <div className="sticky top-0 bg-white z-30 px-6 py-4 border-b border-gray-100 shadow-sm">
         <div className="flex justify-between items-center mb-4">
-          <h1 className="text-2xl font-bold text-gray-900">Schedule</h1>
+          
+          {/* ✅ UPDATED: Title Area with Credit Badge */}
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-900">Schedule</h1>
+            {userCredits > 0 && (
+                <div className="flex items-center gap-1.5 px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-bold border border-purple-200 animate-in fade-in slide-in-from-left-2">
+                    <Coins size={14} className="fill-purple-700/20" />
+                    <span>{userCredits} Credits</span>
+                </div>
+            )}
+          </div>
+
           <div className="flex bg-gray-100 rounded-lg p-1">
             <button onClick={() => setViewMode('list')} className={`p-2 rounded-md transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-400'}`}>
               <List size={20} />
@@ -171,7 +204,7 @@ const MemberScheduleScreen = () => {
         )}
       </div>
 
-      {/* CONTENT - Components receive already filtered classes */}
+      {/* CONTENT */}
       <div className="p-4 bg-gray-50 min-h-[80vh]">
         {viewMode === 'list' ? (
           <MemberScheduleList 

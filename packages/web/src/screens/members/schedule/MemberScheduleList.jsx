@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Clock, User, CheckCircle, AlertCircle, Hourglass, CheckSquare, Search, Filter, X } from 'lucide-react';
+import { Clock, User, CheckCircle, AlertCircle, Hourglass, CheckSquare, Search, Filter, X, Coins, ShieldCheck } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../../../../../packages/shared/api/firebaseConfig';
 import { useGym } from '../../../context/GymContext'; 
@@ -11,6 +11,11 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedInstructor, setSelectedInstructor] = useState('All');
   const [instructorMap, setInstructorMap] = useState({}); 
+
+  // --- DEBUG: Log the props coming in ---
+  useEffect(() => {
+    // console.log("📊 MemberScheduleList Received Bookings:", Object.keys(userBookings));
+  }, [userBookings]);
 
   // --- 1. FETCH INSTRUCTORS ---
   useEffect(() => {
@@ -56,6 +61,7 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
   const upcomingSessions = useMemo(() => {
     const sessions = [];
     const today = new Date();
+    const now = new Date(); 
     const DAYS_MAP = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
     for (let i = 0; i < 14; i++) {
@@ -68,23 +74,34 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
       const dateString = `${year}-${month}-${day}`;
 
       classes.forEach(cls => {
-        // --- LOGIC UPDATE START ---
-        // 1. Check Recurring: Matches Day AND Not Cancelled
+        // --- LOGIC 1: Date Matching ---
         const isRecurringMatch = cls.days && cls.days.map(d => d.toLowerCase()).includes(dayName);
         const isNotCancelled = !cls.cancelledDates || !cls.cancelledDates.includes(dateString);
-        
-        // 2. Check Single Event: Explicit Date Match
         const isSingleEventMatch = cls.frequency === 'Single Event' && cls.startDate === dateString;
 
-        // 3. Combine Logic: (Recurring & Valid) OR (Single Event)
         if ((isRecurringMatch && isNotCancelled && cls.frequency !== 'Single Event') || isSingleEventMatch) {
-        // --- LOGIC UPDATE END ---
+          
+          // --- LOGIC 2: Time Filtering ---
+          const [hours, minutes] = cls.time.split(':').map(Number);
+          const sessionStart = new Date(targetDate);
+          sessionStart.setHours(hours, minutes, 0, 0);
 
+          const durationMinutes = parseInt(cls.duration) || 60;
+          const sessionEnd = new Date(sessionStart.getTime() + durationMinutes * 60000);
+
+          if (now > sessionEnd) {
+             return; 
+          }
+
+          // --- LOGIC 3: Data Mapping ---
           const instanceId = `${cls.id}_${dateString}`;
           const currentCount = counts[instanceId] || 0;
+          
           const bookingData = userBookings[instanceId];
           const userState = bookingData?.status || null; 
+          const bookingType = bookingData?.bookingType || null; // <--- Extract Booking Type
           const checkedInAt = bookingData?.checkedInAt || null;
+          
           const maxCap = parseInt(cls.maxCapacity) || 999;
           const isFull = currentCount >= maxCap;
 
@@ -95,6 +112,7 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
             dateObj: new Date(targetDate),
             dayLabel: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : dayName.charAt(0).toUpperCase() + dayName.slice(1),
             userStatus: userState,
+            bookingType: bookingType, // <--- Pass it down
             checkedInAt: checkedInAt,
             isFull: isFull,
             currentCount: currentCount,
@@ -142,7 +160,6 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
       {/* --- FILTER BAR --- */}
       <div className="space-y-3 sticky top-0 bg-gray-50 pt-2 pb-4 z-20 -mx-4 px-4 shadow-sm border-b border-gray-100/50 backdrop-blur-sm bg-gray-50/95">
         
-        {/* Search Input */}
         <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
             <input 
@@ -159,7 +176,6 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
             )}
         </div>
 
-        {/* Instructor Chips */}
         {instructors.length > 1 && (
             <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                 {instructors.map(inst => (
@@ -189,12 +205,14 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
           <div className="space-y-3 mt-2">
             {sessions.map((session) => {
               
-              // Badge Logic
+              // --- BADGE & STATE LOGIC ---
               let badge = null;
+              let paymentBadge = null;
               let btnText = "Book";
               let btnStyle = { backgroundColor: theme.primaryColor, color: 'white' };
               let containerClass = "border-gray-100 hover:border-blue-200";
 
+              // 1. Status Badges
               if (session.userStatus === 'attended') {
                  const timeStr = formatCheckInTime(session.checkedInAt);
                  const label = timeStr ? `Checked in: ${timeStr}` : 'Attended';
@@ -222,6 +240,23 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
                  btnStyle = { backgroundColor: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' };
               }
 
+              // 2. Payment Badges (Only show if booked/attended)
+              if (session.userStatus === 'booked' || session.userStatus === 'attended') {
+                  if (session.bookingType === 'credit') {
+                      paymentBadge = (
+                          <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded flex items-center gap-1 ml-1">
+                              <Coins size={10}/> Credit
+                          </span>
+                      );
+                  } else if (session.bookingType === 'comp' || session.bookingType === 'admin_comp') {
+                      paymentBadge = (
+                          <span className="text-[10px] font-bold text-gray-600 bg-gray-200 border border-gray-300 px-2 py-0.5 rounded flex items-center gap-1 ml-1">
+                              <ShieldCheck size={10}/> Comp
+                          </span>
+                      );
+                  }
+              }
+
               return (
                 <div 
                   key={session.instanceId} 
@@ -239,6 +274,7 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
                                 {session.name}
                             </h4>
                             {badge}
+                            {paymentBadge}
                         </div>
                         
                         <div className="flex items-center gap-3">

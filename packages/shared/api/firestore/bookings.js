@@ -5,23 +5,24 @@ import { createCreditLog } from './credits'; // Import helper from credits modul
 
 // --- BOOKING ENGINE ---
 
+
 /**
- * 2. BOOK: Add a member to the roster (With Weekly Limits Enforced)
+ * 2. BOOK: Add a member to the roster
  */
 export const bookMember = async (gymId, classInfo, member, options = {}) => {
   try {
     return await runTransaction(db, async (transaction) => {
-      // OPTIMIZATION: Composite Key ID
+      // Setup Refs
       const bookingId = `${classInfo.id}_${classInfo.dateString}_${member.id}`;
       const attendanceRef = doc(db, "gyms", gymId, "attendance", bookingId);
-
-      // A. Fetch Data
       const classDocRef = doc(db, "gyms", gymId, "classes", classInfo.id);
       const userDocRef = doc(db, "users", member.id);
 
-      const classSnap = await transaction.get(classDocRef);
-      const userSnap = await transaction.get(userDocRef);
-      const bookingSnap = await transaction.get(attendanceRef);
+      const [classSnap, userSnap, bookingSnap] = await Promise.all([
+        transaction.get(classDocRef),
+        transaction.get(userDocRef),
+        transaction.get(attendanceRef)
+      ]);
 
       if (!classSnap.exists()) throw "Class does not exist.";
       if (!userSnap.exists()) throw "User does not exist.";
@@ -29,157 +30,184 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
       const classData = classSnap.data();
       const userData = userSnap.data();
 
-      // B. Check Existing Booking
-      if (bookingSnap.exists()) {
-        const existingData = bookingSnap.data();
-        if (existingData.status !== BOOKING_STATUS.CANCELLED) {
-          throw "Member is already booked in this class.";
-        }
+      // Check Duplicates
+      if (bookingSnap.exists() && bookingSnap.data().status !== BOOKING_STATUS.CANCELLED) {
+        throw "Member is already booked.";
       }
 
-      // C. Run Gatekeeper
-      let gatekeeper = canUserBook(classData, userData, gymId);
+      // --- 1. DETERMINE COST & WINDOW ---
+      const [h, m] = classInfo.time.split(':').map(Number);
+      const [Y, M, D] = classInfo.dateString.split('-').map(Number);
+      const classStartObj = new Date(Y, M - 1, D, h, m);
+      const now = new Date();
 
-      if (!gatekeeper.allowed && !options.force) {
-        throw gatekeeper.reason;
+      const duration = parseInt(classData.duration) || 60;
+      const classEndTime = new Date(classStartObj.getTime() + duration * 60000);
+      const isRetroactive = now > classEndTime;
+
+      let lateMinutes = classData.bookingRules?.lateBookingMinutes != null 
+        ? parseInt(classData.bookingRules.lateBookingMinutes) 
+        : duration;
+      const cutoffTime = new Date(classStartObj.getTime() + lateMinutes * 60000);
+
+      const isAllowedLate = options.force || options.isStaff; 
+
+      if (now > cutoffTime && !isAllowedLate) throw "Booking closed.";
+
+      let baseCost = 1;
+      if (options.creditCostOverride !== undefined) {
+        baseCost = parseInt(options.creditCostOverride);
+      } else {
+        baseCost = parseInt(classData.creditCost);
+        if (isNaN(baseCost)) baseCost = 1;
       }
 
-      // --- NEW: WEEKLY LIMIT CHECK ---
-      if (gatekeeper.type === 'membership') {
-        const userMembership = (userData.memberships || []).find(m => m.gymId === gymId);
-
-        if (userMembership && userMembership.membershipId) {
-          const tierRef = doc(db, "gyms", gymId, "membershipTiers", userMembership.membershipId);
-          const tierSnap = await transaction.get(tierRef);
-
-          if (tierSnap.exists()) {
-            const tierData = tierSnap.data();
-            const weeklyLimit = tierData.weeklyLimit;
-
-            if (!isNaN(weeklyLimit) && weeklyLimit > 0) {
-              const { start, end } = getWeekRange(classInfo.dateString);
-              
-              // Note: Queries in transactions usually require an index.
-              const historyRef = collection(db, "gyms", gymId, "attendance");
-              const historyQuery = query(
-                historyRef,
-                where("memberId", "==", member.id),
-                where("dateString", ">=", start),
-                where("dateString", "<=", end),
-                where("status", "in", [BOOKING_STATUS.BOOKED, BOOKING_STATUS.ATTENDED])
-              );
-              const historySnap = await getDocs(historyQuery);
-              const classesThisWeek = historySnap.size;
-
-              if (classesThisWeek >= weeklyLimit && !options.force) {
-                // Fallback to credits?
-                const creditCost = parseInt(classData.creditCost) || 0;
-                const userCredits = parseInt(userData.classCredits) || 0;
-
-                if (classData.dropInEnabled && creditCost > 0 && userCredits >= creditCost) {
-                  gatekeeper = {
-                    allowed: true,
-                    type: 'credit',
-                    cost: creditCost,
-                    reason: `Weekly Limit Reached (${classesThisWeek}/${weeklyLimit}). Using Credits.`
-                  };
-                } else {
-                  throw `Weekly booking limit reached (${classesThisWeek}/${weeklyLimit}).`;
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // D. CAPACITY & WAITLIST CHECK
-      const attendanceCollection = collection(db, "gyms", gymId, "attendance");
-      const rosterQuery = query(
-        attendanceCollection,
-        where("classId", "==", classInfo.id),
-        where("dateString", "==", classInfo.dateString),
-        where("status", "in", [BOOKING_STATUS.BOOKED, BOOKING_STATUS.ATTENDED])
-      );
-      const rosterSnap = await getDocs(rosterQuery);
-      const currentCount = rosterSnap.size;
-      const maxCapacity = parseInt(classData.maxCapacity) || 999;
-
-      const waitlistQuery = query(
-        attendanceCollection,
-        where("classId", "==", classInfo.id),
-        where("dateString", "==", classInfo.dateString),
-        where("status", "==", BOOKING_STATUS.WAITLISTED)
-      );
-      const waitlistSnap = await getDocs(waitlistQuery);
-      const waitlistCount = waitlistSnap.size;
-
-      let finalStatus = BOOKING_STATUS.BOOKED;
-      if (!options.force) {
-        if (currentCount >= maxCapacity || waitlistCount > 0) {
-          finalStatus = BOOKING_STATUS.WAITLISTED;
-        }
-      }
-
-      // E. CREDIT DEDUCTION
+      // --- 2. SOURCE OF FUNDS LOGIC ---
+      let bookingType = 'unknown'; 
       let costUsed = 0;
-      if (gatekeeper.type === 'credit') {
-        if (!options.force) {
-          transaction.update(userDocRef, { classCredits: increment(-gatekeeper.cost) });
-          costUsed = gatekeeper.cost;
-          
-          createCreditLog(
-            transaction, 
-            member.id, 
-            -gatekeeper.cost, 
-            'booking', 
-            `Booked: ${classInfo.name} (${classInfo.time})`
-          );
+      let gatekeeper = canUserBook(classData, userData, gymId); 
+
+      if (options.bookingType) {
+          bookingType = options.bookingType;
+          if (bookingType === 'credit') costUsed = baseCost;
+          else if (['membership', 'comp', 'admin_comp'].includes(bookingType)) costUsed = 0;
+          if (options.waiveCost) costUsed = 0;
+      } else if (options.force) {
+        if (options.waiveCost) {
+          bookingType = 'comp';
+          costUsed = 0;
+        } else {
+          bookingType = 'credit';
+          costUsed = baseCost;
+        }
+      } else {
+        if (!gatekeeper.allowed) throw gatekeeper.reason;
+        if (gatekeeper.type === 'membership') {
+          bookingType = 'membership';
+          costUsed = 0;
+        } else if (gatekeeper.type === 'credit' || gatekeeper.type === 'drop-in') {
+          bookingType = 'credit';
+          costUsed = gatekeeper.cost > 0 ? gatekeeper.cost : baseCost;
         }
       }
 
-      // F. WRITE TO DB
-      const timestamp = new Date();
-      const [year, month, day] = classInfo.dateString.split('-').map(Number);
-      const [hours, minutes] = classInfo.time.split(':').map(Number);
-      const sessionDateObj = new Date(year, month - 1, day, hours, minutes);
+      // --- 3. DEDUCT CREDITS ---
+      if (costUsed > 0) {
+        const userCredits = parseInt(userData.classCredits) || 0;
+        if (!options.force && userCredits < costUsed) throw "Insufficient credits.";
+        
+        if (userCredits >= costUsed) {
+            transaction.update(userDocRef, { classCredits: increment(-costUsed) });
+            createCreditLog(
+              transaction, member.id, -costUsed, 'booking', 
+              options.isStaff ? `Admin Booked: ${classInfo.name}` : `Booked: ${classInfo.name}`, 
+              
+              options.force ? 'admin_forced' : 'system'
+            );
+        } else if (options.force) {
+            costUsed = 0; 
+        } else {
+            throw "Insufficient credits.";
+        }
+      }
 
-      const bookingPayload = {
+      // --- 4. CAPACITY CHECK ---
+      let status = BOOKING_STATUS.BOOKED;
+      if (!options.force && !isRetroactive) {
+        const rosterQuery = query(
+          collection(db, "gyms", gymId, "attendance"),
+          where("classId", "==", classInfo.id),
+          where("dateString", "==", classInfo.dateString),
+          where("status", "in", [BOOKING_STATUS.BOOKED, BOOKING_STATUS.ATTENDED])
+        );
+        const rosterSnap = await getDocs(rosterQuery);
+        const maxCap = parseInt(classData.maxCapacity) || 999;
+        if (rosterSnap.size >= maxCap) status = BOOKING_STATUS.WAITLISTED;
+      }
+
+      // If adding retroactively, auto-set status to ATTENDED
+      if (isRetroactive && status !== BOOKING_STATUS.WAITLISTED) {
+          status = BOOKING_STATUS.ATTENDED;
+      }
+
+      // --- 5. HANDLE PROGRESSION (The "Check-In" Logic) ---
+      // If we are setting them to ATTENDED immediately, we must update their profile stats
+      const programId = classData.programId || null;
+
+      if (status === BOOKING_STATUS.ATTENDED) {
+          const userUpdates = {
+              attendanceCount: increment(1),
+              lastAttended: new Date()
+          };
+
+          // Update Program Specific Ranks
+          if (programId) {
+              const userRanks = userData.ranks || {};
+              
+              if (userRanks[programId]) {
+                  // User already has this rank, just add credit
+                  userUpdates[`ranks.${programId}.credits`] = increment(1);
+              } else {
+                  // User needs initialization for this program (Prospect -> Active logic)
+                  const gymDoc = await transaction.get(doc(db, "gyms", gymId));
+                  if (gymDoc.exists()) {
+                      const gymData = gymDoc.data();
+                      const programs = gymData.grading?.programs || [];
+                      const targetProgram = programs.find(p => p.id === programId);
+
+                      if (targetProgram && targetProgram.ranks?.length > 0) {
+                          const firstRank = targetProgram.ranks[0];
+                          userUpdates[`ranks.${programId}`] = {
+                              rankId: firstRank.id,
+                              stripes: 0,
+                              credits: 1 // Start with 1 credit
+                          };
+
+                          if (userData.status === 'prospect') {
+                              userUpdates.status = 'active';
+                              userUpdates.convertedAt = new Date();
+                          }
+                      }
+                  }
+              }
+          }
+          // Apply updates to user
+          transaction.update(userDocRef, userUpdates);
+      }
+
+      // --- 6. WRITE ATTENDANCE RECORD ---
+      const payload = {
         classId: classInfo.id,
         className: classInfo.name,
         instructorName: classData.instructorName || classInfo.instructorName || null,
         dateString: classInfo.dateString,
         classTime: classInfo.time,
-        classTimestamp: sessionDateObj,
+        classTimestamp: classStartObj,
         memberId: member.id,
         memberName: member.name || "Unknown Member",
         memberPhoto: member.photoUrl || null,
-        status: finalStatus,
-        bookedAt: timestamp,
-        bookingType: gatekeeper.type,
-        costUsed: costUsed
+        status: status,
+        bookedAt: new Date(),
+        bookingType: bookingType, 
+        costUsed: costUsed,
+        
+        // Save programId so we can reverse this easily in cancelBooking
+        programId: programId, 
+        
+        checkedInAt: status === BOOKING_STATUS.ATTENDED ? classStartObj : null
       };
 
       if (bookingSnap.exists()) {
-        transaction.update(attendanceRef, {
-          ...bookingPayload,
-          cancelledAt: null,
-          refunded: false,
-          lateCancel: false
-        });
-        return { success: true, status: finalStatus, recovered: true };
+        transaction.update(attendanceRef, { ...payload, cancelledAt: null, refunded: false });
       } else {
-        transaction.set(attendanceRef, {
-          ...bookingPayload,
-          createdAt: timestamp
-        });
-        return { success: true, status: finalStatus, id: bookingId };
+        transaction.set(attendanceRef, { ...payload, createdAt: new Date() });
       }
-    });
 
+      return { success: true, status, recovered: bookingSnap.exists() };
+    });
   } catch (error) {
-    console.error("Booking transaction failed:", error);
-    const msg = typeof error === 'string' ? error : error.message;
-    return { success: false, error: msg };
+    console.error("Booking failed:", error);
+    return { success: false, error: typeof error === 'string' ? error : error.message };
   }
 };
 
@@ -195,68 +223,90 @@ export const cancelBooking = async (gymId, attendanceId, options = {}) => {
       if (!attSnap.exists()) throw "Booking not found.";
       const data = attSnap.data();
 
+      // --- 1. DETERMINE REFUND POLICY ---
+      let shouldRefund = false;
       const classRef = doc(db, "gyms", gymId, "classes", data.classId);
-      const classSnap = await transaction.get(classRef);
-
-      const cancelWindowMinutes = classSnap.exists() && classSnap.data().cancellationWindow
-        ? parseInt(classSnap.data().cancellationWindow)
-        : 120;
-
-      const now = new Date();
-      const classTime = data.classTimestamp.toDate();
-      const diffMs = classTime - now;
-      const minutesUntilClass = Math.floor(diffMs / 60000);
-
-      const isWaitlisted = data.status === BOOKING_STATUS.WAITLISTED;
-      const isWithinSafeWindow = minutesUntilClass >= cancelWindowMinutes;
-
-      // REFUND LOGIC: Refund if (Waitlisted) OR (Paid with Credit AND Cancelled Early enough) OR (Admin Override)
-      let shouldRefund = isWaitlisted || isWithinSafeWindow || options.isStaff;
-      let refundApplied = false;
-
-      if (data.bookingType === 'credit' && data.costUsed > 0) {
-        if (shouldRefund) {
-          const userRef = doc(db, "users", data.memberId);
-          transaction.update(userRef, { classCredits: increment(data.costUsed) });
-          refundApplied = true;
-
-          createCreditLog(
-            transaction, 
-            data.memberId, 
-            data.costUsed, 
-            'refund', 
-            `Refund: ${data.className} (${options.isStaff ? 'Admin Cancel' : 'User Cancel'})`
-          );
-        }
+      const classSnap = await transaction.get(classRef); // Fetch class data early
+      
+      if (options.refundPolicy) {
+        shouldRefund = options.refundPolicy === 'refund';
+      } else {
+        const cancelWindow = classSnap.exists() ? (parseInt(classSnap.data().cancellationWindow) || 120) : 120;
+        const now = new Date();
+        const classTime = data.classTimestamp.toDate();
+        const diffMinutes = Math.floor((classTime - now) / 60000);
+        
+        const isWaitlisted = data.status === BOOKING_STATUS.WAITLISTED;
+        const isSafeWindow = diffMinutes >= cancelWindow;
+        shouldRefund = isWaitlisted || isSafeWindow;
       }
 
-      const wasTakingSpot = data.status === BOOKING_STATUS.BOOKED || data.status === BOOKING_STATUS.ATTENDED;
+      // --- 2. HANDLE CREDIT REFUNDS ---
+      let refundedAmount = 0;
+      if (shouldRefund && data.costUsed > 0) {
+        const userRef = doc(db, "users", data.memberId);
+        transaction.update(userRef, { classCredits: increment(data.costUsed) });
+        refundedAmount = data.costUsed;
 
+        createCreditLog(
+          transaction,
+          data.memberId,
+          data.costUsed,
+          'refund',
+          options.isStaff ? `Admin Refunded: ${data.className}` : `Refund: ${data.className}`, 
+          options.isStaff ? 'admin_cancel' : 'user_cancel'
+        );
+      }
+
+      // --- 3. REVERSE PROGRESSION (The "Un-Check-In" Logic) ---
+      // If the user was marked as ATTENDED, we must remove that credit from their profile
+      if (data.status === BOOKING_STATUS.ATTENDED) {
+          const userRef = doc(db, "users", data.memberId);
+          const userUpdates = {
+              attendanceCount: increment(-1) 
+          };
+
+          // Determine Program ID (Try data first, then class info)
+          let programId = data.programId;
+          if (!programId && classSnap.exists()) {
+              programId = classSnap.data().programId;
+          }
+
+          if (programId) {
+              // Decrement the credit for this specific program
+              userUpdates[`ranks.${programId}.credits`] = increment(-1);
+          }
+
+          transaction.update(userRef, userUpdates);
+      }
+
+      // --- 4. UPDATE ATTENDANCE RECORD ---
+      const wasTakingSpot = [BOOKING_STATUS.BOOKED, BOOKING_STATUS.ATTENDED].includes(data.status);
+      
       transaction.update(attRef, {
         status: BOOKING_STATUS.CANCELLED,
         cancelledAt: new Date(),
         updatedAt: new Date(),
-        refunded: refundApplied,
-        lateCancel: !isWithinSafeWindow && !isWaitlisted && !options.isStaff
+        refunded: refundedAmount > 0,
+        refundAmount: refundedAmount,
+        lateCancel: !shouldRefund && !options.isStaff
       });
 
+      // --- 5. PROMOTE WAITLIST ---
       if (wasTakingSpot) {
-        const attendanceCollection = collection(db, "gyms", gymId, "attendance");
         const q = query(
-          attendanceCollection,
+          collection(db, "gyms", gymId, "attendance"),
           where("classId", "==", data.classId),
           where("dateString", "==", data.dateString),
           where("status", "==", BOOKING_STATUS.WAITLISTED),
           orderBy("bookedAt", "asc"),
           limit(1)
         );
-
         const waitlistSnap = await getDocs(q);
-
         if (!waitlistSnap.empty) {
-          const nextInLine = waitlistSnap.docs[0];
-          transaction.update(nextInLine.ref, {
-            status: BOOKING_STATUS.BOOKED,
+          const nextUser = waitlistSnap.docs[0];
+          transaction.update(nextUser.ref, { 
+            status: BOOKING_STATUS.BOOKED, 
             promotedAt: new Date(),
             updatedAt: new Date()
           });
@@ -266,7 +316,7 @@ export const cancelBooking = async (gymId, attendanceId, options = {}) => {
 
     return { success: true };
   } catch (error) {
-    console.error("Error cancelling booking:", error);
+    console.error("Cancel failed:", error);
     return { success: false, error: error.message };
   }
 };
@@ -278,126 +328,112 @@ export const checkBookingEligibility = async (gymId, userId, classInstanceProp) 
     eligibility: null,
     activePlanName: '',
     weeklyUsage: null,
-    eligiblePublicPlans: [],
-    error: null
+    eligiblePublicPlans: []
   };
 
   try {
+    // 1. Fetch Authoritative Class Data
     const classRef = doc(db, 'gyms', gymId, 'classes', classInstanceProp.id);
     const classSnap = await getDoc(classRef);
+    
+    // Merge prop data with DB data (DB takes precedence for rules)
+    const classData = classSnap.exists() 
+      ? { ...classInstanceProp, ...classSnap.data(), id: classInstanceProp.id } 
+      : classInstanceProp;
 
-    let authoritativeClassData = { ...classInstanceProp };
-    if (classSnap.exists()) {
-      const dbData = classSnap.data();
-      authoritativeClassData = {
-        ...classInstanceProp,
-        ...dbData,
-        dateString: classInstanceProp.dateString,
-        time: classInstanceProp.time
-      };
-    }
-
-    if (!result.instructorName && authoritativeClassData.instructorId) {
-      const staffRef = doc(db, 'gyms', gymId, 'staff', authoritativeClassData.instructorId);
-      const snap = await getDoc(staffRef);
-      if (snap.exists()) result.instructorName = snap.data().name;
-    }
-
+    // 2. Fetch User & Membership
     const userRef = doc(db, 'users', userId);
     const userSnap = await getDoc(userRef);
-    if (!userSnap.exists()) throw new Error("User profile not found");
-
+    if (!userSnap.exists()) throw new Error("User not found");
+    
     const userData = userSnap.data();
     result.userProfile = userData;
 
-    const userMem = (userData.memberships || []).find(m => m.gymId === gymId);
-    let baseEligibility = canUserBook(authoritativeClassData, userData, gymId);
-
-    if (baseEligibility.type === 'membership' && userMem && userMem.membershipId) {
-      try {
-        const tierRef = doc(db, 'gyms', gymId, 'membershipTiers', userMem.membershipId);
-        const tierSnap = await getDoc(tierRef);
-
+    // 3. Initial Gatekeeper Check
+    let baseEligibility = canUserBook(classData, userData, gymId);
+    
+    // 4. Deep Membership Check (Weekly Limits)
+    if (baseEligibility.type === 'membership') {
+      const userMem = (userData.memberships || []).find(m => m.gymId === gymId);
+      
+      if (userMem?.membershipId) {
+        const tierSnap = await getDoc(doc(db, 'gyms', gymId, 'membershipTiers', userMem.membershipId));
+        
         if (tierSnap.exists()) {
           const tierData = tierSnap.data();
           result.activePlanName = tierData.name;
-          const limit = tierData.weeklyLimit;
-
-          if (limit && limit > 0) {
-            const usageRes = await getWeeklyClassCount(gymId, userId, authoritativeClassData.dateString);
-
+          
+          const limit = parseInt(tierData.weeklyLimit);
+          
+          // Only check usage if a valid limit > 0 exists
+          if (!isNaN(limit) && limit > 0) {
+            const usageRes = await getWeeklyClassCount(gymId, userId, classData.dateString);
+            
             if (usageRes.success) {
-              result.weeklyUsage = { 
-                used: usageRes.count, 
-                limit: limit, 
-                classes: usageRes.classes 
+              result.weeklyUsage = {
+                used: usageRes.count,
+                limit: limit,
+                classes: usageRes.classes
               };
 
+              // --- LIMIT REACHED LOGIC ---
               if (usageRes.count >= limit) {
-                const creditCost = parseInt(authoritativeClassData.creditCost) || 0;
+                // Determine if we can fallback to credits
+                const creditCost = parseInt(classData.creditCost) || 1;
                 const userCredits = parseInt(userData.classCredits) || 0;
-
-                if (creditCost > 0 && userCredits >= creditCost) {
+                
+                if (classData.dropInEnabled && userCredits >= creditCost) {
                   baseEligibility = {
                     allowed: true,
-                    type: 'credit',
+                    type: 'credit', // Switches type to credit
                     cost: creditCost,
-                    reason: `Weekly limit reached (${usageRes.count}/${limit}). Using credits.`
+                    reason: `Weekly limit reached (${usageRes.count}/${limit}). Booking via Credit.`
                   };
                 } else {
                   baseEligibility = {
                     allowed: false,
                     type: 'denied',
-                    reason: `Weekly limit of ${limit} classes reached.`,
-                    cost: creditCost
+                    cost: creditCost,
+                    reason: `Weekly limit of ${limit} classes reached.`
                   };
                 }
               }
             }
           }
         }
-      } catch (err) {
-        console.warn("Could not read membership tier details:", err);
       }
     }
 
     result.eligibility = baseEligibility;
-
-    if (!baseEligibility.allowed && authoritativeClassData.allowedMembershipIds?.length > 0) {
-      const tiersRef = collection(db, 'gyms', gymId, 'membershipTiers');
-      const q = query(tiersRef, where("visibility", "==", "public"), where("active", "==", true));
+    
+    // 5. Populate Public Plans (if denied)
+    if (!baseEligibility.allowed && classData.allowedMembershipIds?.length > 0) {
+      const q = query(
+        collection(db, 'gyms', gymId, 'membershipTiers'), 
+        where("visibility", "==", "public"), 
+        where("active", "==", true)
+      );
       const tiersSnap = await getDocs(q);
-
-      const validPlans = [];
-      tiersSnap.forEach(doc => {
-        if (authoritativeClassData.allowedMembershipIds.includes(doc.id)) {
-          const data = doc.data();
-          validPlans.push({
-            id: doc.id,
-            name: data.name,
-            price: data.price,
-            interval: data.interval
-          });
-        }
-      });
-      result.eligiblePublicPlans = validPlans;
+      result.eligiblePublicPlans = tiersSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(p => classData.allowedMembershipIds.includes(p.id));
     }
 
     return { success: true, data: result };
 
   } catch (error) {
-    console.error("Booking Check Error:", error);
+    console.error("Eligibility Check Error:", error);
     return { success: false, error: error.message };
   }
 };
 
 export const canUserBook = (classData, userData, targetGymId) => {
   const allowedPlans = classData.allowedMembershipIds || [];
-  const creditCost = parseInt(classData.creditCost) || 0; 
+  const creditCost = parseInt(classData.creditCost) || 0;
   let credits = parseInt(userData.classCredits) || 0;
 
   const relevantMembership = (userData.memberships || []).find(m => m.gymId === targetGymId);
-  const VALID_ACCESS_STATUSES = ['active', 'trialing']; 
+  const VALID_ACCESS_STATUSES = ['active', 'trialing'];
 
   if (relevantMembership) {
     const memStatus = (relevantMembership.status || '').toLowerCase().trim();
@@ -406,29 +442,29 @@ export const canUserBook = (classData, userData, targetGymId) => {
     const isGoodStanding = VALID_ACCESS_STATUSES.includes(memStatus);
 
     if (planCoversClass && isGoodStanding) {
-       return { allowed: true, reason: "Membership Access", type: 'membership', cost: 0 };
+      return { allowed: true, reason: "Membership Access", type: 'membership', cost: 0 };
     }
   }
 
-  if (userData.status !== 'banned') { 
-      if (creditCost > 0 && credits >= creditCost) {
-          return { 
-            allowed: true, 
-            reason: `${creditCost} Credit(s) applied`, 
-            type: 'credit',
-            cost: creditCost
-          };
-      }
-      if (classData.dropInEnabled && creditCost === 0) {
-        return { allowed: true, reason: "Open Registration", type: 'drop-in', cost: 0 };
-      }
+  if (userData.status !== 'banned') {
+    if (creditCost > 0 && credits >= creditCost) {
+      return {
+        allowed: true,
+        reason: `${creditCost} Credit(s) applied`,
+        type: 'credit',
+        cost: creditCost
+      };
+    }
+    if (classData.dropInEnabled && creditCost === 0) {
+      return { allowed: true, reason: "Open Registration", type: 'drop-in', cost: 0 };
+    }
   }
 
   let denialReason = "Membership required to book.";
   if (relevantMembership && allowedPlans.includes(relevantMembership.membershipId)) {
-      denialReason = `Your membership is currently ${relevantMembership.status}.`;
+    denialReason = `Your membership is currently ${relevantMembership.status}.`;
   } else if (creditCost > 0) {
-      denialReason = `Insufficient Credits. (Requires ${creditCost}, you have ${credits})`;
+    denialReason = `Insufficient Credits. (Requires ${creditCost}, you have ${credits})`;
   }
 
   return { allowed: false, reason: denialReason, type: 'denied', cost: creditCost };
@@ -443,7 +479,7 @@ export const recordAttendance = async (gymId, data) => {
       transaction.set(attendanceRef, {
         ...data,
         createdAt: new Date(),
-        status: data.status || 'attended', 
+        status: data.status || 'attended',
       });
 
       if (data.status === 'attended' && data.programId) {
@@ -479,7 +515,7 @@ export const checkInMember = async (gymId, attendanceId, memberId, programId) =>
       const userSnap = await getDoc(memberRef);
       if (userSnap.exists()) {
         const userData = userSnap.data();
-        const userRanks = userData.ranks || {}; 
+        const userRanks = userData.ranks || {};
 
         if (userRanks[programId]) {
           userUpdates[`ranks.${programId}.credits`] = increment(1);
@@ -495,7 +531,7 @@ export const checkInMember = async (gymId, attendanceId, memberId, programId) =>
               userUpdates[`ranks.${programId}`] = {
                 rankId: firstRank.id,
                 stripes: 0,
-                credits: 1 
+                credits: 1
               };
 
               if (userData.status === 'prospect') {
@@ -529,7 +565,7 @@ export const processWaitlist = async (gymId, classId, dateString) => {
         where("classId", "==", classId),
         where("dateString", "==", dateString)
       );
-      const snapshot = await getDocs(q); 
+      const snapshot = await getDocs(q);
 
       let currentActive = 0;
       let waitlist = [];
@@ -562,7 +598,7 @@ export const processWaitlist = async (gymId, classId, dateString) => {
           spotsAvailable--;
           promotedCount++;
         } else {
-          break; 
+          break;
         }
       }
 
@@ -651,16 +687,16 @@ export const getWeeklyClassCount = async (gymId, userId, dateString) => {
 
     const snapshot = await getDocs(q);
     const classes = snapshot.docs.map(doc => {
-        const d = doc.data();
-        return {
-            id: doc.id,
-            className: d.className,
-            dateString: d.dateString,
-            classTime: d.classTime,
-            status: d.status
-        };
+      const d = doc.data();
+      return {
+        id: doc.id,
+        className: d.className,
+        dateString: d.dateString,
+        classTime: d.classTime,
+        status: d.status
+      };
     });
-    
+
     return { success: true, count: snapshot.size, classes: classes, start, end };
   } catch (error) {
     console.error("Error counting weekly classes:", error);
@@ -676,7 +712,7 @@ export const getMemberSchedule = async (gymId, memberId, startDate, endDate) => 
       where("memberId", "==", memberId),
       where("dateString", ">=", startDate),
       where("dateString", "<=", endDate),
-      where("status", "in", ["booked", "waitlisted", "attended"]) 
+      where("status", "in", ["booked", "waitlisted", "attended"])
     );
 
     const snapshot = await getDocs(q);
@@ -685,9 +721,15 @@ export const getMemberSchedule = async (gymId, memberId, startDate, endDate) => 
     snapshot.forEach(doc => {
       const data = doc.data();
       const key = `${data.classId}_${data.dateString}`;
+
+      // --- FIX IS HERE ---
+      // We map the database fields to the properties the Modal expects
       scheduleMap[key] = {
         status: data.status,
-        id: doc.id
+        attendanceId: doc.id, // Use explicit name
+        bookingType: data.bookingType, // <--- Now the modal will know it's a credit booking
+        cost: data.costUsed,           // <--- Now the modal knows how many credits to refund
+        cancellationWindow: data.cancellationWindow // (Optional if you snapshot this on booking)
       };
     });
 

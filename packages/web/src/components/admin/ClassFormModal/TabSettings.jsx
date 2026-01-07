@@ -1,64 +1,63 @@
 import React from 'react';
 import { Settings, Medal, CheckSquare, Square, Eye, Users, Lock, Globe } from 'lucide-react';
 
-export const TabSettings = ({ 
-    formData, 
-    setFormData, 
-    rankSystems, 
-    activeRules, 
-    toggleRule, 
-    handleNumberChange 
+export const TabSettings = ({
+    formData,
+    setFormData,
+    rankSystems,
+    activeRules,
+    toggleRule,
+    handleNumberChange
 }) => {
-    
+
     // Reusable Component for this specific tab
     const VisibilityOption = ({ value, label, icon: Icon, desc }) => (
         <button
-          type="button"
-          onClick={() => setFormData({ ...formData, visibility: value })}
-          className={`flex-1 p-3 rounded-xl border text-left transition-all ${
-            formData.visibility === value 
-              ? 'bg-blue-50 border-blue-500 ring-1 ring-blue-500' 
-              : 'bg-white border-gray-200 hover:border-blue-200'
-          }`}
+            type="button"
+            onClick={() => setFormData({ ...formData, visibility: value })}
+            className={`flex-1 p-3 rounded-xl border text-left transition-all ${formData.visibility === value
+                    ? 'bg-blue-50 border-blue-500 ring-1 ring-blue-500'
+                    : 'bg-white border-gray-200 hover:border-blue-200'
+                }`}
         >
-          <div className={`mb-1 ${formData.visibility === value ? 'text-blue-600' : 'text-gray-400'}`}>
-            <Icon size={20} />
-          </div>
-          <div className={`text-xs font-bold uppercase ${formData.visibility === value ? 'text-blue-900' : 'text-gray-600'}`}>
-            {label}
-          </div>
-          <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">
-            {desc}
-          </div>
+            <div className={`mb-1 ${formData.visibility === value ? 'text-blue-600' : 'text-gray-400'}`}>
+                <Icon size={20} />
+            </div>
+            <div className={`text-xs font-bold uppercase ${formData.visibility === value ? 'text-blue-900' : 'text-gray-600'}`}>
+                {label}
+            </div>
+            <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">
+                {desc}
+            </div>
         </button>
-      );
+    );
 
     return (
         <div className="space-y-6 animate-in slide-in-from-right-4 duration-200">
-            
+
             {/* 1. VISIBILITY SETTINGS (NEW) */}
             <div className="space-y-2">
                 <label className="text-sm font-bold text-gray-800 flex items-center gap-2">
                     <Eye className="h-4 w-4 text-gray-500" /> Class Visibility
                 </label>
                 <div className="flex gap-2">
-                    <VisibilityOption 
-                        value="public" 
-                        label="Public" 
-                        icon={Globe} 
-                        desc="Everyone" 
+                    <VisibilityOption
+                        value="public"
+                        label="Public"
+                        icon={Globe}
+                        desc="Everyone"
                     />
-                    <VisibilityOption 
-                        value="staff" 
-                        label="Internal" 
-                        icon={Users} 
-                        desc="Staff/Admins" 
+                    <VisibilityOption
+                        value="staff"
+                        label="Internal"
+                        icon={Users}
+                        desc="Staff/Admins"
                     />
-                    <VisibilityOption 
-                        value="admin" 
-                        label="Hidden" 
-                        icon={Lock} 
-                        desc="Owners Only" 
+                    <VisibilityOption
+                        value="admin"
+                        label="Hidden"
+                        icon={Lock}
+                        desc="Owners Only"
                     />
                 </div>
             </div>
@@ -144,6 +143,31 @@ export const TabSettings = ({
                         Using Gym Defaults
                     </div>
                 )}
+            </div>
+            <div className="flex items-center gap-3">
+                <div className="w-8 flex justify-center">
+                    <button type="button" onClick={() => toggleRule('lateBooking')} className="text-blue-600 hover:text-blue-800">
+                        {activeRules.lateBooking ? <CheckSquare size={18} /> : <Square size={18} />}
+                    </button>
+                </div>
+                <div className="flex-1">
+                    <label className="block text-xs font-semibold text-gray-500">Late Booking Grace Period (Minutes)</label>
+                    {activeRules.lateBooking ? (
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="number"
+                                min="0"
+                                value={formData.lateBookingMinutes}
+                                onChange={e => handleNumberChange('lateBookingMinutes', e.target.value)}
+                                className="w-full p-2 border border-gray-300 rounded text-sm"
+                                placeholder="15"
+                            />
+                            <span className="text-xs text-gray-400 whitespace-nowrap">after start</span>
+                        </div>
+                    ) : (
+                        <div className="text-xs text-green-600 py-2">Until Class Ends</div>
+                    )}
+                </div>
             </div>
         </div>
     );
