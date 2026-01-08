@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Clock, CheckCircle, AlertCircle, Hourglass, CheckSquare, XCircle } from 'lucide-react'; 
+import { Clock, CheckCircle, AlertCircle, Hourglass, CheckSquare, XCircle, Lock } from 'lucide-react'; // Added Lock
 
 // --- CONFIGURATION ---
 const START_HOUR = 6;  // 6 AM
@@ -24,7 +24,7 @@ const MemberCalendarView = ({
     return () => clearInterval(interval);
   }, []);
 
-  // --- 1. DYNAMIC DAY GENERATION (FIXED TIMEZONE ISSUE) ---
+  // --- 1. DYNAMIC DAY GENERATION ---
   const calendarDays = useMemo(() => {
     return Array.from({ length: 7 }).map((_, i) => {
       const date = new Date(weekStart);
@@ -45,7 +45,6 @@ const MemberCalendarView = ({
   }, [weekStart]);
 
   // --- HELPERS ---
-
   const isToday = (dateObj) => {
     const now = new Date();
     return dateObj.getDate() === now.getDate() &&
@@ -106,17 +105,17 @@ const MemberCalendarView = ({
               `}
               style={activeToday ? { backgroundColor: `${theme.primaryColor}10` } : {}}
             >
-               <div className="text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">
-                 {day.dayName.slice(0, 3)}
-               </div>
-               <div 
-                 className={`text-sm md:text-base font-bold h-8 w-8 flex items-center justify-center rounded-full
-                   ${activeToday ? 'text-white shadow-sm' : 'text-gray-800'}
-                 `}
-                 style={activeToday ? { backgroundColor: theme.primaryColor } : {}}
-               >
-                 {day.dayNum}
-               </div>
+                <div className="text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">
+                  {day.dayName.slice(0, 3)}
+                </div>
+                <div 
+                  className={`text-sm md:text-base font-bold h-8 w-8 flex items-center justify-center rounded-full
+                    ${activeToday ? 'text-white shadow-sm' : 'text-gray-800'}
+                  `}
+                  style={activeToday ? { backgroundColor: theme.primaryColor } : {}}
+                >
+                  {day.dayNum}
+                </div>
             </div>
           );
         })}
@@ -184,15 +183,32 @@ const MemberCalendarView = ({
                       const currentCount = counts[instanceId] || 0;
                       const isFull = cls.maxCapacity && currentCount >= parseInt(cls.maxCapacity);
 
-                      // --- NEW: TIME CHECK LOGIC ---
+                      // --- TIME CHECK LOGIC ---
                       const [h, m] = cls.time.split(':').map(Number);
                       const classStart = new Date(day.dateObj);
                       classStart.setHours(h, m, 0, 0);
                       const duration = parseInt(cls.duration) || 60;
                       const classEnd = new Date(classStart.getTime() + duration * 60000);
                       
-                      // Check if class has ended (with 1 min buffer)
                       const isPassed = currentTime > classEnd;
+
+                      // --- ✅ NEW: LOCKED LOGIC ---
+                      let isLocked = false;
+                      const rules = cls.bookingRules || {};
+                      
+                      if (!userState && rules.bookingWindowDays) {
+                         const windowDays = parseInt(rules.bookingWindowDays);
+                         const openDateObj = new Date(day.dateObj);
+                         openDateObj.setDate(day.dateObj.getDate() - windowDays);
+                         openDateObj.setHours(0,0,0,0);
+                         
+                         const todayMidnight = new Date();
+                         todayMidnight.setHours(0,0,0,0);
+
+                         if (todayMidnight < openDateObj) {
+                            isLocked = true;
+                         }
+                      }
 
                       // --- DYNAMIC STYLES ---
                       let bgStyle = { 
@@ -203,7 +219,6 @@ const MemberCalendarView = ({
                       
                       let isDisabled = false;
 
-                      // Priority: Attended > Booked/Waitlisted > Passed > Full > Standard
                       if (userState === 'attended') {
                           bgStyle = { backgroundColor: '#f3f4f6', borderLeft: '3px solid #6b7280', color: '#374151' }; 
                           isDisabled = true;
@@ -212,13 +227,21 @@ const MemberCalendarView = ({
                       } else if (userState === 'waitlisted') {
                          bgStyle = { backgroundColor: '#ffedd5', borderLeft: '3px solid #f97316', color: '#c2410c' };
                       } else if (isPassed) {
-                         // --- VISUAL STYLE FOR PASSED CLASSES ---
                          bgStyle = { 
-                           backgroundColor: '#fafafa', // Very light grey
-                           borderLeft: '3px solid #e5e7eb', // Light grey border
-                           color: '#9ca3af', // Muted text
+                           backgroundColor: '#fafafa', 
+                           borderLeft: '3px solid #e5e7eb', 
+                           color: '#9ca3af',
                            opacity: 0.7,
-                           backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 5px, #f3f4f6 5px, #f3f4f6 10px)' // Subtle stripe
+                           backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 5px, #f3f4f6 5px, #f3f4f6 10px)'
+                         };
+                         isDisabled = true;
+                      } else if (isLocked) {
+                         // ✅ VISUAL STYLE FOR LOCKED
+                         bgStyle = { 
+                            backgroundColor: '#f9fafb', 
+                            borderLeft: '3px solid #d1d5db', 
+                            color: '#6b7280',
+                            border: '1px solid #e5e7eb'
                          };
                          isDisabled = true;
                       } else if (isFull) {
@@ -240,17 +263,18 @@ const MemberCalendarView = ({
                            }}
                         >
                            <div>
-                               <div className="font-bold text-[10px] md:text-xs leading-tight truncate">
-                                   {cls.name}
+                               <div className="font-bold text-[10px] md:text-xs leading-tight truncate flex items-center gap-1">
+                                   {isLocked && <Lock size={10} className="shrink-0" />}
+                                   <span className="truncate">{cls.name}</span>
                                </div>
                                <div className="flex items-center gap-1 mt-0.5 opacity-80">
                                    {userState === 'attended' && <CheckSquare size={10} />}
                                    {userState === 'booked' && <CheckCircle size={10} />}
                                    {userState === 'waitlisted' && <Hourglass size={10} />}
                                    {isPassed && !userState && <XCircle size={10} />}
-                                   {isFull && !userState && !isPassed && <AlertCircle size={10} />}
+                                   {isFull && !userState && !isPassed && !isLocked && <AlertCircle size={10} />}
                                    
-                                   {(!userState && !isFull && !isPassed) && <span className="text-[9px] font-semibold">{cls.time}</span>}
+                                   {(!userState && !isFull && !isPassed && !isLocked) && <span className="text-[9px] font-semibold">{cls.time}</span>}
                                </div>
                            </div>
                            
@@ -259,12 +283,13 @@ const MemberCalendarView = ({
                                  {userState === 'attended' ? 'Attended' : 
                                   userState === 'booked' ? 'Confirmed' : 
                                   isPassed ? 'Ended' :
+                                  isLocked ? 'Locked' :
                                   isFull ? 'Full' : 
                                   `${cls.duration} min`}
                              </div>
                            )}
                         </button>
-                     );
+                      );
                   })}
                </div>
              );

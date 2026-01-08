@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Clock, User, CheckCircle, AlertCircle, Hourglass, CheckSquare, Search, Filter, X, Coins, ShieldCheck } from 'lucide-react';
+import { Clock, User, CheckCircle, AlertCircle, Hourglass, CheckSquare, Search, Filter, X, Coins, ShieldCheck, Lock } from 'lucide-react'; // Added Lock
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../../../../../packages/shared/api/firebaseConfig';
 import { useGym } from '../../../context/GymContext'; 
@@ -11,11 +11,6 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedInstructor, setSelectedInstructor] = useState('All');
   const [instructorMap, setInstructorMap] = useState({}); 
-
-  // --- DEBUG: Log the props coming in ---
-  useEffect(() => {
-    // console.log("📊 MemberScheduleList Received Bookings:", Object.keys(userBookings));
-  }, [userBookings]);
 
   // --- 1. FETCH INSTRUCTORS ---
   useEffect(() => {
@@ -99,11 +94,34 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
           
           const bookingData = userBookings[instanceId];
           const userState = bookingData?.status || null; 
-          const bookingType = bookingData?.bookingType || null; // <--- Extract Booking Type
+          const bookingType = bookingData?.bookingType || null;
           const checkedInAt = bookingData?.checkedInAt || null;
           
           const maxCap = parseInt(cls.maxCapacity) || 999;
           const isFull = currentCount >= maxCap;
+
+          // --- ✅ LOGIC 4: Booking Window Check ---
+          let isLocked = false;
+          let openDate = null;
+          const rules = cls.bookingRules || {};
+          
+          // Only check if not already booked/waitlisted
+          if (!userState && rules.bookingWindowDays) {
+             const windowDays = parseInt(rules.bookingWindowDays);
+             // Calculate when it opens (Class Date minus Window Days)
+             const openDateObj = new Date(targetDate);
+             openDateObj.setDate(targetDate.getDate() - windowDays);
+             openDateObj.setHours(0,0,0,0); // Set to beginning of that day
+
+             // Logic: If Today is BEFORE the open date, it is locked
+             const todayMidnight = new Date();
+             todayMidnight.setHours(0,0,0,0);
+
+             if (todayMidnight < openDateObj) {
+                isLocked = true;
+                openDate = openDateObj;
+             }
+          }
 
           sessions.push({
             ...cls,
@@ -112,11 +130,13 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
             dateObj: new Date(targetDate),
             dayLabel: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : dayName.charAt(0).toUpperCase() + dayName.slice(1),
             userStatus: userState,
-            bookingType: bookingType, // <--- Pass it down
+            bookingType: bookingType,
             checkedInAt: checkedInAt,
             isFull: isFull,
             currentCount: currentCount,
-            resolvedInstructorName: getInstructorName(cls) 
+            resolvedInstructorName: getInstructorName(cls),
+            isLocked: isLocked, // <--- New Prop
+            openDate: openDate  // <--- New Prop
           });
         }
       });
@@ -214,13 +234,10 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
 
               // 1. Status Badges
               if (session.userStatus === 'attended') {
+                 // ... existing logic ...
                  const timeStr = formatCheckInTime(session.checkedInAt);
                  const label = timeStr ? `Checked in: ${timeStr}` : 'Attended';
-                 badge = (
-                    <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded flex items-center gap-1">
-                        <CheckSquare size={10}/> {label}
-                    </span>
-                 );
+                 badge = <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded flex items-center gap-1"><CheckSquare size={10}/> {label}</span>;
                  btnText = "Completed";
                  btnStyle = { backgroundColor: '#f3f4f6', color: '#9ca3af', cursor: 'default' };
                  containerClass = "border-gray-200 bg-gray-50/50 opacity-75"; 
@@ -238,22 +255,22 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
                  badge = <span className="text-[10px] font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded flex items-center gap-1"><AlertCircle size={10}/> Full</span>;
                  btnText = "Waitlist";
                  btnStyle = { backgroundColor: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' };
+              } else if (session.isLocked) {
+                 // ✅ NEW LOCKED STATE
+                 badge = <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded flex items-center gap-1"><Lock size={10}/> Opens Soon</span>;
+                 // Calculate formatted date for button
+                 const openDateStr = session.openDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                 btnText = `Opens ${openDateStr}`;
+                 btnStyle = { backgroundColor: '#f3f4f6', color: '#9ca3af', cursor: 'not-allowed' };
+                 containerClass = "border-gray-200 bg-gray-50/30";
               }
 
               // 2. Payment Badges (Only show if booked/attended)
               if (session.userStatus === 'booked' || session.userStatus === 'attended') {
                   if (session.bookingType === 'credit') {
-                      paymentBadge = (
-                          <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded flex items-center gap-1 ml-1">
-                              <Coins size={10}/> Credit
-                          </span>
-                      );
+                      paymentBadge = <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded flex items-center gap-1 ml-1"><Coins size={10}/> Credit</span>;
                   } else if (session.bookingType === 'comp' || session.bookingType === 'admin_comp') {
-                      paymentBadge = (
-                          <span className="text-[10px] font-bold text-gray-600 bg-gray-200 border border-gray-300 px-2 py-0.5 rounded flex items-center gap-1 ml-1">
-                              <ShieldCheck size={10}/> Comp
-                          </span>
-                      );
+                      paymentBadge = <span className="text-[10px] font-bold text-gray-600 bg-gray-200 border border-gray-300 px-2 py-0.5 rounded flex items-center gap-1 ml-1"><ShieldCheck size={10}/> Comp</span>;
                   }
               }
 
@@ -270,7 +287,7 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
 
                     <div>
                         <div className="flex flex-wrap items-center gap-2 mb-1">
-                            <h4 className={`font-bold ${session.userStatus === 'attended' ? 'text-gray-500' : 'text-gray-900'}`}>
+                            <h4 className={`font-bold ${session.userStatus === 'attended' || session.isLocked ? 'text-gray-500' : 'text-gray-900'}`}>
                                 {session.name}
                             </h4>
                             {badge}
@@ -287,9 +304,9 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
 
                   <button 
                     onClick={() => {
-                        if (session.userStatus !== 'attended') onBook(session);
+                        if (session.userStatus !== 'attended' && !session.isLocked) onBook(session);
                     }}
-                    disabled={session.userStatus === 'attended'}
+                    disabled={session.userStatus === 'attended' || session.isLocked}
                     className="px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-transform active:scale-95 w-full sm:w-auto"
                     style={btnStyle}
                   >

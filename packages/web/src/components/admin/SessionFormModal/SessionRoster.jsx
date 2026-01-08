@@ -31,12 +31,12 @@ export const SessionRoster = ({
         try {
             const [h, m] = timeStr.split(':').map(Number);
             const [Y, M, D] = dateStr.split('-').map(Number);
-            
+
             const classStartObj = new Date(Y, M - 1, D, h, m);
             const duration = parseInt(classData.duration) || 60;
             const cutoffTime = new Date(classStartObj.getTime() + duration * 60000);
             const now = new Date();
-            
+
             return now > cutoffTime;
         } catch (e) {
             console.error("Error in class over check:", e);
@@ -67,10 +67,18 @@ export const SessionRoster = ({
             timeMessage = `Class was on ${dateStr} at ${timeStr}`;
         }
 
+        let windowLimit = 120; // Default 2 hours (in minutes)
+        if (record.bookingRulesSnapshot && record.bookingRulesSnapshot.cancelWindowHours !== undefined) {
+            windowLimit = parseFloat(record.bookingRulesSnapshot.cancelWindowHours) * 60;
+        } else if (classData?.bookingRules?.cancelWindowHours !== undefined) {
+            windowLimit = parseFloat(classData.bookingRules.cancelWindowHours) * 60;
+        } else if (classData?.cancellationWindow) {
+            windowLimit = parseInt(classData.cancellationWindow);
+        }
+
         const minutesUntilStart = Math.floor((startTime - now) / 60000);
-        const windowLimit = classData?.cancellationWindow ? parseInt(classData.cancellationWindow) : 120;
         const isLateCancel = minutesUntilStart < windowLimit;
-        
+
         const isWaitlisted = record.status === BOOKING_STATUS.WAITLISTED;
         const costUsed = record.costUsed || 0;
         const paidWithCredit = costUsed > 0;
@@ -85,16 +93,16 @@ export const SessionRoster = ({
                 confirmText: "Remove Member"
             });
             // ✅ FIX: Stop execution if clicked outside
-            if (ok === null) return; 
+            if (ok === null) return;
             if (!ok) return;
-            refundPolicy = 'refund'; 
+            refundPolicy = 'refund';
         }
 
         // --- SCENARIO B: PAID WITH CREDIT ---
         else if (paidWithCredit) {
             if (isLateCancel) {
                 const title = isFuture ? "Late Cancellation" : "Retroactive Removal";
-                
+
                 const proceed = await confirm({
                     title: title,
                     message: `${timeMessage}. Remove ${record.memberName}?`,
@@ -104,7 +112,7 @@ export const SessionRoster = ({
                 });
 
                 // ✅ FIX: Stop execution if clicked outside
-                if (proceed === null) return; 
+                if (proceed === null) return;
                 if (!proceed) return;
 
                 const shouldRefund = await confirm({
@@ -134,7 +142,7 @@ export const SessionRoster = ({
                     ),
                     confirmText: "Remove & Refund"
                 });
-                
+
                 // ✅ FIX: Stop execution if clicked outside
                 if (ok === null) return;
                 if (!ok) return;
@@ -157,11 +165,11 @@ export const SessionRoster = ({
                 ),
                 confirmText: "Yes, Remove"
             });
-            
+
             // ✅ FIX: Stop execution if clicked outside
             if (ok === null) return;
             if (!ok) return;
-            refundPolicy = 'refund'; 
+            refundPolicy = 'refund';
         }
 
         onRemove(record.id, refundPolicy);
@@ -190,6 +198,10 @@ export const SessionRoster = ({
         const displayName = record.memberName || `${record.firstName} ${record.lastName}`;
         const initial = displayName ? displayName.charAt(0) : '?';
         const isDropIn = record.bookingType === 'credit' || record.bookingType === 'drop-in';
+        // (Simple check: compare cancel window)
+        const liveWindow = classData?.bookingRules?.cancelWindowHours || 2;
+        const snapWindow = record.bookingRulesSnapshot?.cancelWindowHours;
+        const hasLegacyRules = snapWindow !== undefined && parseFloat(snapWindow) !== parseFloat(liveWindow);
 
         return (
             <li key={record.id} className={`flex items-center justify-between p-2.5 rounded-lg transition-colors border group ${isWaitlistRow ? 'bg-orange-50 border-orange-100' : 'hover:bg-gray-50 border-transparent hover:border-gray-100'}`}>
@@ -198,7 +210,14 @@ export const SessionRoster = ({
                         {isWaitlistRow ? `#${rank}` : initial}
                     </div>
                     <div>
-                        <p className="text-sm font-medium text-gray-800">{displayName}</p>
+                        <p className="text-sm font-medium text-gray-800">{displayName}
+                            {/* ✅ VISUAL INDICATOR FOR ADMIN */}
+                            {hasLegacyRules && (
+                                <span className="text-[10px] bg-gray-100 text-gray-500 border border-gray-200 px-1 rounded flex items-center gap-0.5" title={`Booked with ${snapWindow}h cancel window (Current: ${liveWindow}h)`}>
+                                    <History size={10} /> Legacy Rules
+                                </span>
+                            )}
+                        </p>
                         <div className="flex gap-2 items-center">
                             <p className="text-[10px] text-gray-400 uppercase font-bold">{record.status}</p>
                             {isDropIn && (
@@ -252,11 +271,11 @@ export const SessionRoster = ({
                                 <span className="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-1.5 rounded flex items-center gap-1">
                                     <Clock size={12} /> Ended
                                 </span>
-                                <button 
-                                    onClick={() => setIsAdding(!isAdding)} 
+                                <button
+                                    onClick={() => setIsAdding(!isAdding)}
                                     className={`text-[10px] font-bold border border-orange-200 text-orange-700 px-2 py-1 rounded-md flex items-center gap-1 hover:bg-orange-50 transition-all ${isAdding ? 'bg-orange-100 ring-2 ring-orange-200' : ''}`}
                                 >
-                                    <History size={12} /> 
+                                    <History size={12} />
                                     {isAdding ? 'Close' : 'Adjust Roster'}
                                 </button>
                             </div>
@@ -271,27 +290,27 @@ export const SessionRoster = ({
                         <div className="flex items-start gap-2 mb-2 pb-2 border-b border-orange-200/50">
                             <AlertTriangle size={14} className="text-orange-500 mt-0.5" />
                             <p className="text-xs text-orange-800 leading-tight">
-                                <strong>Retroactive Adjustment:</strong> You are editing a past class. 
+                                <strong>Retroactive Adjustment:</strong> You are editing a past class.
                                 Members added now will be charged immediately if applicable.
                             </p>
                         </div>
                     )}
                     <div className="relative">
                         <Search className={`absolute left-3 top-2.5 h-4 w-4 ${isClassOver ? 'text-orange-400' : 'text-blue-400'}`} />
-                        <input 
-                            autoFocus 
-                            type="text" 
-                            placeholder={membersLoading ? "Loading..." : "Search by name..."} 
-                            disabled={membersLoading} 
-                            value={searchTerm} 
-                            onChange={(e) => setSearchTerm(e.target.value)} 
-                            className={`w-full pl-9 pr-4 py-2 border rounded-md text-sm outline-none ${isClassOver ? 'border-orange-200 focus:ring-orange-200' : 'border-blue-200'}`} 
+                        <input
+                            autoFocus
+                            type="text"
+                            placeholder={membersLoading ? "Loading..." : "Search by name..."}
+                            disabled={membersLoading}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className={`w-full pl-9 pr-4 py-2 border rounded-md text-sm outline-none ${isClassOver ? 'border-orange-200 focus:ring-orange-200' : 'border-blue-200'}`}
                         />
                     </div>
                     {searchResults.length > 0 && (
                         <div className="mt-2 bg-white rounded-md border border-gray-200 shadow-sm max-h-60 overflow-y-auto z-10">
                             {searchResults.map(member => {
-                                const activeMembership = (member.memberships || []).find(m => 
+                                const activeMembership = (member.memberships || []).find(m =>
                                     m.gymId === gymId && ['active', 'trialing'].includes(m.status)
                                 );
                                 const displayLabel = activeMembership ? (activeMembership.membershipName || 'Active Member') : 'Free Member';

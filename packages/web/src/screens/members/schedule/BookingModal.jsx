@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, X, Calendar, Clock, AlertCircle, CheckCircle, Trash2, Hourglass, CheckSquare, User, Scale, Coins, ShoppingCart, ArrowRight, Ticket, ShieldCheck, Lock, Star, ChevronRight, List } from 'lucide-react';
+import { Loader2, X, Calendar, Clock, AlertCircle, CheckCircle, Trash2, Hourglass, CheckSquare, User, Scale, Coins, ShoppingCart, ArrowRight, Ticket, ShieldCheck, Lock, Star, ChevronRight, List, Info, Ban } from 'lucide-react'; // Added Info icon
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../../../../../../packages/shared/api/firebaseConfig';
 import { useGym } from '../../../context/GymContext';
@@ -26,6 +26,25 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
   const [showWaiver, setShowWaiver] = useState(false);
   const [waiverData, setWaiverData] = useState(null);
 
+  // --- Extract Rules for Display ---
+
+  // 🔍 DEBUG: Check if we have the snapshot
+  console.log("Modal Instance Data:", classInstance);
+
+  // If the user is booked, we MUST use the snapshot attached to their booking.
+  // Otherwise, we use the current live class rules.
+  const rules = (classInstance.userStatus === 'booked' && classInstance.bookingRulesSnapshot)
+    ? classInstance.bookingRulesSnapshot
+    : (classInstance.bookingRules || {});
+
+  // Default to 2 hours if undefined, but respect 0
+  const cancelHours = rules.cancelWindowHours !== undefined ? parseFloat(rules.cancelWindowHours) : 2;
+  const lateFee = rules.lateCancelFee ? parseFloat(rules.lateCancelFee) : 0;
+
+  // 👇 ADD THESE TWO LINES 👇
+  const duration = parseInt(classInstance.duration) || 60;
+  const lateBookingMinutes = rules.lateBookingMinutes !== undefined ? parseInt(rules.lateBookingMinutes) : duration;
+
   // --- ✅ FIX: Handle Auto-Close with Cleanup ---
   useEffect(() => {
     let timer;
@@ -34,8 +53,6 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
         onClose();
       }, 1500);
     }
-    // This cleanup function runs if the user closes the modal manually 
-    // or if the component unmounts BEFORE the timer finishes.
     return () => clearTimeout(timer);
   }, [status, onClose]);
 
@@ -84,14 +101,13 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
 
       const result = await onConfirm(classInstance, {
         bookingType: typeToBook,
-        creditCostOverride: costToCharge, 
-        waiveCost: false 
+        creditCostOverride: costToCharge,
+        waiveCost: false
       });
 
       if (result.success) {
         setSuccessMsg(result.status === 'waitlisted' ? "Added to Waitlist" : "Class Booked!");
-        // ✅ FIX: Set status to success, let useEffect handle the close
-        setStatus('success'); 
+        setStatus('success');
       } else {
         setStatus('error');
         setErrorMessage(result.error || "Booking failed.");
@@ -152,8 +168,9 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
     const costUsed = classInstance.cost || 0;
     const paidWithCredit = costUsed > 0;
 
-    const CANCELLATION_WINDOW_MIN = classInstance.cancellationWindow ? parseInt(classInstance.cancellationWindow) : 120;
-    const windowHours = CANCELLATION_WINDOW_MIN / 60;
+    // Use fetched rules or legacy field
+    const windowHours = cancelHours;
+    const CANCELLATION_WINDOW_MIN = windowHours * 60;
 
     const [year, month, day] = classInstance.dateString.split('-').map(Number);
     const [hours, minutes] = classInstance.time.split(':').map(Number);
@@ -182,12 +199,17 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
     }
     else if (isLateCancel) {
       confirmTitle = "Late Cancellation";
+
+      // Determine message based on penalty type (Credit Loss vs Fee)
       if (paidWithCredit) {
-        confirmMessage = `You are cancelling within the ${windowHours}-hour cancellation window. You will NOT receive a refund for your ${costUsed} credit(s).`;
+        confirmMessage = `You are cancelling within the ${windowHours > 0 ? windowHours + '-hour' : 'restricted'} window. You will NOT receive a refund for your ${costUsed} credit(s).`;
         confirmBtnText = `Forfeit Credit & Cancel`;
         resultingSuccessMsg = "Cancelled (Credit Forfeited)";
       } else {
-        confirmMessage = `You are cancelling within the ${windowHours}-hour window. This will be recorded as a Late Cancellation.`;
+        confirmMessage = `You are cancelling within the ${windowHours > 0 ? windowHours + '-hour' : 'restricted'} window. This will be recorded as a Late Cancellation.`;
+        if (lateFee > 0) {
+          confirmMessage += ` A fee of $${lateFee.toFixed(2)} may be charged to your account.`;
+        }
         confirmBtnText = "Accept & Cancel";
         resultingSuccessMsg = "Late Cancellation Recorded";
       }
@@ -219,7 +241,6 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
       const result = await onCancel(classInstance.attendanceId);
       if (result.success) {
         setSuccessMsg(resultingSuccessMsg);
-        // ✅ FIX: Set status to success, let useEffect handle the close
         setStatus('success');
       } else {
         setStatus('error');
@@ -233,6 +254,7 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
 
   const renderWeeklySchedule = () => {
     if (!weeklyUsage || !weeklyUsage.classes || weeklyUsage.classes.length === 0) return null;
+    
     return (
       <div className="mt-3 bg-gray-50 rounded-lg border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-top-2">
         <div className="px-3 py-2 bg-gray-100/50 border-b border-gray-200 flex justify-between items-center">
@@ -246,13 +268,29 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
             const [y, m, d] = cls.dateString.split('-').map(Number);
             const dateObj = new Date(y, m - 1, d);
             const dayStr = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            
+            // Check if this specific item is a Late Cancel
+            const isLateCancel = cls.status === 'cancelled' && cls.lateCancel;
+
             return (
               <div key={cls.id} className="px-3 py-2 flex justify-between items-center text-xs hover:bg-white transition-colors">
                 <div className="flex flex-col min-w-0 pr-2">
-                  <span className="font-semibold text-gray-700 truncate">{cls.className}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`font-semibold truncate ${isLateCancel ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                      {cls.className}
+                    </span>
+                    
+                    {/* VISUAL INDICATOR FOR LATE CANCEL */}
+                    {isLateCancel && (
+                      <span className="flex items-center gap-0.5 text-[9px] font-bold text-red-600 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded">
+                        <Ban size={8} /> Late Cancel
+                      </span>
+                    )}
+                  </div>
                   <span className="text-gray-400 text-[10px]">{dayStr}</span>
                 </div>
-                <div className="whitespace-nowrap font-medium text-gray-600 bg-white px-1.5 py-0.5 rounded border border-gray-200">
+                
+                <div className={`whitespace-nowrap font-medium px-1.5 py-0.5 rounded border ${isLateCancel ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-white text-gray-600 border-gray-200'}`}>
                   {cls.classTime}
                 </div>
               </div>
@@ -263,6 +301,7 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
     );
   };
 
+  // ... (Loaders for waiver and data remain the same) ...
   if (status === 'loading_data') {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -275,6 +314,7 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
   }
 
   if (showWaiver && waiverData) {
+    // ... (Waiver modal code remains same) ...
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
         <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[80vh] animate-in fade-in zoom-in duration-200">
@@ -344,6 +384,51 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                     <Clock size={16} className="text-gray-400" /><span>{classInstance.time} ({classInstance.duration} min)</span>
                   </div>
 
+                  {/* ✅ NEW: Class Policies Section (Booking/Cancel Rules) */}
+                  {!isAttended && !isBooked && !isWaitlisted && (
+                    <div className="mt-4 pt-3 border-t border-gray-100 grid grid-cols-2 gap-2">
+                      {classInstance.userStatus === 'booked' && classInstance.bookingRulesSnapshot && (
+                        <div className="col-span-2 mb-2">
+                          <div className="bg-blue-50 text-blue-700 text-[10px] px-2 py-1 rounded border border-blue-100 flex items-center gap-1">
+                            <ShieldCheck size={10} />
+                            <span className="font-bold">Price & Policy Guarantee:</span>
+                            <span>You are locked into the rules from when you booked.</span>
+                          </div>
+                        </div>
+                      )}
+                      {/* Cancellation Policy */}
+                      <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100">
+                        <div className="flex items-center gap-1.5 text-gray-900 font-bold text-xs mb-1">
+                          <AlertCircle size={12} className="text-blue-500" />
+                          <span>Cancellation</span>
+                        </div>
+                        <p className="text-[10px] text-gray-500 leading-tight">
+                          {cancelHours > 0
+                            ? `Free cancel up to ${cancelHours}h before start.`
+                            : "Cancel freely until class starts."
+                          }
+                          {lateFee > 0 && <span className="text-red-600 font-semibold block mt-0.5">Late Fee: ${lateFee.toFixed(2)}</span>}
+                        </p>
+                      </div>
+
+                      {/* Late Booking Policy */}
+                      <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100">
+                        <div className="flex items-center gap-1.5 text-gray-900 font-bold text-xs mb-1">
+                          <Clock size={12} className="text-green-600" />
+                          <span>Late Entry</span>
+                        </div>
+                        <p className="text-[10px] text-gray-500 leading-tight">
+                          {lateBookingMinutes >= duration
+                            ? "Book anytime until class ends."
+                            : lateBookingMinutes === 0
+                              ? "Booking closes strictly at start time."
+                              : `Booking closes ${lateBookingMinutes}m after start.`
+                          }
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {isAttended && (
                     <div className="mt-4 bg-gray-50 rounded-xl p-4 border border-gray-100 text-center">
                       <div className="flex justify-center mb-2"><div className="bg-gray-200 p-2 rounded-full text-gray-600"><CheckSquare size={24} /></div></div>
@@ -357,10 +442,9 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                     <div className="mt-2 text-xs font-medium text-orange-700 bg-orange-50 p-2 rounded border border-orange-100 flex gap-2 items-center"><Hourglass size={12} /> You are on the waitlist.</div>
                   )}
 
+                  {/* ... (Existing Logic for Plans/Credits) ... */}
                   {!isBooked && !isWaitlisted && !isAttended && bookingEligibility && (
                     <div className="mt-4 space-y-3">
-
-                      {/* MEMBERSHIP PLAN */}
                       {bookingEligibility.allowed && bookingEligibility.type === 'membership' && (
                         <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
                           <div className="flex items-start gap-3">
@@ -387,7 +471,6 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                         </div>
                       )}
 
-                      {/* FREE DROP IN */}
                       {bookingEligibility.allowed && bookingEligibility.type === 'drop-in' && bookingEligibility.cost === 0 && (
                         <div className="bg-green-50 border border-green-100 rounded-xl p-3">
                           <div className="flex items-start gap-3">
@@ -400,11 +483,8 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                         </div>
                       )}
 
-                      {/* CREDIT BOOKING (Includes LIMIT REACHED logic) */}
                       {bookingEligibility.allowed && bookingEligibility.type === 'credit' && (
                         <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-
-                          {/* Limit Reached Warning - Case insensitive check */}
                           {bookingEligibility.reason && bookingEligibility.reason.toLowerCase().includes('limit') && (
                             <div className="mb-3 pb-3 border-b border-gray-200">
                               <div className="flex gap-2 items-start text-orange-700 mb-2">
@@ -416,7 +496,6 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                                   </p>
                                 </div>
                               </div>
-                              {/* Always show schedule here so they know WHY */}
                               {renderWeeklySchedule()}
                               <div className="mt-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                                 Booking this class requires:
@@ -437,14 +516,11 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                         </div>
                       )}
 
-                      {/* INSUFFICIENT CREDITS */}
                       {!bookingEligibility.allowed && bookingEligibility.cost > 0 && (
                         <div className="bg-red-50 border border-red-100 rounded-lg p-3">
                           <div className="flex gap-2 items-center text-red-700 font-bold text-sm mb-2">
                             <AlertCircle size={16} /> Insufficient Credits
                           </div>
-
-                          {/* Show if it's due to Limit */}
                           {bookingEligibility.reason && bookingEligibility.reason.toLowerCase().includes('limit') && (
                             <div className="mb-3">
                               <p className="text-xs text-red-800 mb-2">
@@ -453,7 +529,6 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                               {renderWeeklySchedule()}
                             </div>
                           )}
-
                           <div className="flex justify-between items-center text-xs mb-1">
                             <span className="text-gray-600">Cost:</span>
                             <span className="font-medium">{bookingEligibility.cost} Credit(s)</span>
@@ -465,7 +540,6 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                         </div>
                       )}
 
-                      {/* LOCKED / UNAVAILABLE */}
                       {!bookingEligibility.allowed && bookingEligibility.cost === 0 && (
                         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                           <div className="bg-gray-50 p-3 border-b border-gray-100">

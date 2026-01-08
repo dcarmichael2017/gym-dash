@@ -109,7 +109,10 @@ const MemberScheduleScreen = () => {
              checkedInAt: data.checkedInAt,
              bookingType: data.bookingType, 
              cost: data.costUsed,          
-             attendanceId: doc.id          
+             attendanceId: doc.id,
+             
+             // ✅ ADD THIS LINE: Pass the snapshot to the UI
+             bookingRulesSnapshot: data.bookingRulesSnapshot || null 
          }; 
        });
        setUserBookings(bookingMap);
@@ -134,7 +137,8 @@ const MemberScheduleScreen = () => {
       attendanceId: userState?.id || null, 
       currentCount: currentCount,
       bookingType: userState?.bookingType,
-      cost: userState?.cost
+      cost: userState?.cost,
+      bookingRulesSnapshot: userState?.bookingRulesSnapshot || null
     });
     setIsBookingModalOpen(true);
   };
