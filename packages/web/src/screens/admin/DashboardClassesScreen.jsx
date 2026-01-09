@@ -19,6 +19,7 @@ const DashboardClassesScreen = () => {
 
   // Tab State: 'weekly' or 'events'
   const [viewMode, setViewMode] = useState('weekly');
+  const [showArchived, setShowArchived] = useState(false);
 
   // Modal
   const [isClassModalOpen, setIsClassModalOpen] = useState(false);
@@ -126,6 +127,12 @@ const DashboardClassesScreen = () => {
 
   // Filter Logic
   const filteredClasses = classes.filter(cls => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isArchived = cls.recurrenceEndDate && cls.recurrenceEndDate <= todayStr;
+    if (isArchived && !showArchived) {
+      return false;
+    }
+
     if (viewMode === 'weekly') {
       return cls.frequency !== 'Single Event';
     } else {
@@ -150,20 +157,34 @@ const DashboardClassesScreen = () => {
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit mb-6">
-        <button
-          onClick={() => setViewMode('weekly')}
-          className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-all ${viewMode === 'weekly' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-        >
-          <CalendarDays size={16} /> Weekly Schedule
-        </button>
-        <button
-          onClick={() => setViewMode('events')}
-          className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-all ${viewMode === 'events' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-        >
-          <Layers size={16} /> One-Off Events
-        </button>
+      {/* Tabs & Filters */}
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
+          <button
+            onClick={() => setViewMode('weekly')}
+            className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-all ${viewMode === 'weekly' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <CalendarDays size={16} /> Weekly Schedule
+          </button>
+          <button
+            onClick={() => setViewMode('events')}
+            className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-all ${viewMode === 'events' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <Layers size={16} /> One-Off Events
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+            <input
+                type="checkbox"
+                id="showArchived"
+                checked={showArchived}
+                onChange={(e) => setShowArchived(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <label htmlFor="showArchived" className="text-sm text-gray-600 select-none">
+                Show Archived
+            </label>
+        </div>
       </div>
 
       {/* List */}
@@ -183,8 +204,8 @@ const DashboardClassesScreen = () => {
         {filteredClasses
           .sort((a, b) => {
             const todayStr = new Date().toISOString().split('T')[0];
-            const aIsArchived = a.recurrenceEndDate && a.recurrenceEndDate < todayStr;
-            const bIsArchived = b.recurrenceEndDate && b.recurrenceEndDate < todayStr;
+            const aIsArchived = a.recurrenceEndDate && a.recurrenceEndDate <= todayStr;
+            const bIsArchived = b.recurrenceEndDate && b.recurrenceEndDate <= todayStr;
             if (aIsArchived && !bIsArchived) return 1;
             if (!aIsArchived && bIsArchived) return -1;
             
@@ -196,7 +217,6 @@ const DashboardClassesScreen = () => {
           .map((cls) => {
             const todayStr = new Date().toISOString().split('T')[0];
             const isArchived = cls.recurrenceEndDate && cls.recurrenceEndDate <= todayStr;
-            // console.log(`Class: ${cls.name}, EndDate: ${cls.recurrenceEndDate}, Today: ${todayStr}, IsArchived: ${isArchived}`);
 
             return (
               <div 
