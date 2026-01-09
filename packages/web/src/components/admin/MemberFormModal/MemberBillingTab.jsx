@@ -57,7 +57,16 @@ export const MemberBillingTab = ({
     const handlePlanChange = (e) => {
         const newPlanId = e.target.value;
         const plan = tiers.find(t => t.id === newPlanId);
-        setFormData(prev => ({ ...prev, membershipId: newPlanId }));
+        const isNewAssignment = memberData?.membershipId !== newPlanId;
+
+        setFormData(prev => ({
+            ...prev,
+            membershipId: newPlanId,
+            // Store plan name and start date for better record-keeping and display
+            planName: plan ? plan.name : null,
+            startDate: isNewAssignment ? new Date() : (prev.startDate || memberData?.startDate),
+        }));
+        
         if (plan) setCustomPrice(plan.price);
         else setCustomPrice('');
     };

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { User, Mail, Phone, LogOut, Edit2, Check, X, Loader2, ShieldAlert, History, XCircle, Calendar, Clock } from 'lucide-react';
 import { useMemberProfile } from './useMemberProfile';
 import { ProfileField } from './ProfileFields';
@@ -16,7 +16,24 @@ const MemberProfileScreen = () => {
     } = useMemberProfile();
 
     const theme = currentGym?.theme || { primaryColor: '#2563eb' };
-    const myMembership = memberships?.find(m => m.gymId === currentGym?.id);
+    
+    // Find the user's membership for the current gym and enrich it with plan details
+    const myMembership = useMemo(() => {
+        const rawMembership = memberships?.find(m => m.gymId === currentGym?.id);
+        if (!rawMembership) return null;
+
+        // If planName is already on the user's membership record, use it.
+        if (rawMembership.planName) return rawMembership;
+
+        // Otherwise, look it up from the gym's list of tiers (for legacy data)
+        const tierDetails = currentGym?.membershipTiers?.find(t => t.id === rawMembership.membershipId);
+        
+        return {
+            ...tierDetails, // Provides name, price, interval from the tier definition
+            ...rawMembership, // Provides user-specific status, startDate, etc.
+        };
+    }, [memberships, currentGym]);
+
     const statusBadge = getStatusDisplay(myMembership?.status || 'guest');
     
     const hasWaiver = myMembership?.waiverSigned === true;
