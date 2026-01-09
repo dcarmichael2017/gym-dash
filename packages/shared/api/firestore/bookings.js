@@ -242,6 +242,36 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
   }
 };
 
+export const handleClassSeriesRetirement = async (gymId, classId) => {
+    try {
+        const historyCheck = await getAllBookingsForClass(gymId, classId);
+
+        if (historyCheck.success && historyCheck.bookings.length === 0) {
+            // Case A: No history, safe to hard delete.
+            const result = await deleteClass(gymId, classId);
+            if (result.success) {
+                return { success: true, action: 'deleted' };
+            } else {
+                throw new Error(result.error);
+            }
+        } else if (historyCheck.success) {
+            // Case B: History exists, must archive ("ghost").
+            const today = new Date().toISOString().split('T')[0];
+            const result = await migrateClassSeries(gymId, { oldClassId: classId, cutoffDateString: today, newClassData: null });
+             if (result.success) {
+                return { success: true, action: 'archived', refundedCount: result.refundedUserIds.length };
+            } else {
+                throw new Error(result.error);
+            }
+        } else {
+             throw new Error(historyCheck.error);
+        }
+    } catch (error) {
+        console.error("Class series retirement failed:", error);
+        return { success: false, error: error.message };
+    }
+};
+
 /**
  * 4. CANCEL BOOKING (Smart Cancel + Refund Logic)
  */
