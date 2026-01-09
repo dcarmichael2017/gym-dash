@@ -146,8 +146,7 @@ const MemberProfileScreen = () => {
                 </div>
 
                 <MembershipSection 
-                    planName={myMembership?.planName}
-                    status={myMembership?.status}
+                    membership={myMembership}
                     onManageBilling={() => alert("Redirecting to Stripe...")}
                 />
 
