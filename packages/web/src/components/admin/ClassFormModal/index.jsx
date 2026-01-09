@@ -7,7 +7,7 @@ import { TabSchedule } from './TabSchedule';
 import { TabAccess } from './TabAccess';
 import { TabSettings } from './TabSettings';
 
-export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, membershipList = [], globalSettings, onSave, initialViewMode }) => {
+export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, membershipList = [], globalSettings, onSave, initialViewMode, onSessionClick }) => {
     const { confirm: showConfirm } = useConfirm();
     const [activeTab, setActiveTab] = useState('schedule');
     const [rankSystems, setRankSystems] = useState([]);
@@ -460,6 +460,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
 
                             {activeTab === 'sessions' && (
                                 <ClassSessionsList
+                                    gymId={gymId}
                                     classData={{ ...classData, ...formData }}
                                     onCancelSession={(dateStr, shouldCancel) => {
                                         setFormData(prev => {
@@ -471,6 +472,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                                             }
                                         });
                                     }}
+                                    onSessionClick={onSessionClick}
                                 />
                             )}
                         </form>

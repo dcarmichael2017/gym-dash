@@ -8,6 +8,7 @@ import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 import { useConfirm } from '../../context/ConfirmationContext';
 import { ClassFormModal } from '../../components/admin/ClassFormModal';
 import { SeriesRetirementModal } from '../../components/admin/SeriesRetirementModal';
+import { SessionDetailsModal } from '../../components/admin/SessionDetailsModal';
 
 const DashboardClassesScreen = () => {
   const [loading, setLoading] = useState(true);
@@ -25,6 +26,7 @@ const DashboardClassesScreen = () => {
   const [isClassModalOpen, setIsClassModalOpen] = useState(false);
   const [editingClass, setEditingClass] = useState(null);
   const [retirementModalState, setRetirementModalState] = useState({ isOpen: false, classData: null });
+  const [sessionModalState, setSessionModalState] = useState({ isOpen: false, classData: null, dateString: null });
   const { confirm } = useConfirm();
 
   // --- HELPERS ---
@@ -73,6 +75,11 @@ const DashboardClassesScreen = () => {
   const handleOpenEdit = (cls) => {
     setEditingClass(cls);
     setIsClassModalOpen(true);
+  };
+
+  const handleViewSessionRoster = (cls, dateStr) => {
+    setIsClassModalOpen(false); // Close the form modal first
+    setSessionModalState({ isOpen: true, classData: cls, dateString: dateStr });
   };
 
   const handleDeleteClass = async (e, cls) => {
@@ -317,6 +324,16 @@ const DashboardClassesScreen = () => {
         }}
       />
 
+      <SessionDetailsModal
+        isOpen={sessionModalState.isOpen}
+        onClose={() => setSessionModalState({ isOpen: false, classData: null, dateString: null })}
+        gymId={gymId}
+        classData={sessionModalState.classData}
+        dateString={sessionModalState.dateString}
+        staffList={staffList}
+        onRosterUpdate={refreshData}
+      />
+
       <ClassFormModal
         isOpen={isClassModalOpen}
         onClose={() => setIsClassModalOpen(false)}
@@ -327,6 +344,7 @@ const DashboardClassesScreen = () => {
         globalSettings={gymData?.booking}
         onSave={() => refreshData(gymId)}
         initialViewMode={viewMode}
+        onSessionClick={handleViewSessionRoster}
       />
     </div>
   );
