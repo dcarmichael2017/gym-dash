@@ -143,28 +143,36 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
     }
 
     const selectedPlan = tiers.find(t => t.id === formData.membershipId);
+    const finalPrice = customPrice !== '' ? Number(customPrice) : (selectedPlan ? Number(selectedPlan.price) : 0);
     let subscriptionStatus = null;
     let trialEndDate = null;
+    // If admin explicitly set a start date in the UI (add this field to formData if not present), use it.
+    // Otherwise, default to NOW.
+    let startDate = formData.startDate ? new Date(formData.startDate) : new Date();
 
     const isSamePlan = memberData && memberData.membershipId === formData.membershipId;
 
     // --- STATUS LOGIC ---
     if (!formData.membershipId) {
-      subscriptionStatus = 'prospect'; // Default to prospect if no plan
+      subscriptionStatus = 'prospect'; 
       trialEndDate = null;
+      startDate = null; 
     }
     else if (memberData && isSamePlan && memberData.status !== 'prospect') {
-      // Keep existing status if plan hasn't changed (preserves 'past_due' etc)
+      // Preserve existing status
       subscriptionStatus = memberData.subscriptionStatus || memberData.status;
-      trialEndDate = memberData.trialEndDate || null;
+      trialEndDate = memberData.trialEndDate ? new Date(memberData.trialEndDate) : null;
+      startDate = memberData.startDate ? new Date(memberData.startDate) : new Date();
     }
     else {
-      // New Plan or Activation
+      // New Plan Activation
       if (selectedPlan?.hasTrial && !skipTrial) {
         subscriptionStatus = 'trialing';
-        const date = new Date();
-        date.setDate(date.getDate() + (selectedPlan.trialDays || 7));
-        trialEndDate = date;
+        // Calculate Trial End Date
+        const trialDays = parseInt(selectedPlan.trialDays) || 0;
+        const tDate = new Date(startDate); // Start from the official start date
+        tDate.setDate(tDate.getDate() + trialDays);
+        trialEndDate = tDate;
       } else {
         subscriptionStatus = 'active';
         trialEndDate = null;
@@ -183,9 +191,14 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
       gymId: gymId,
       membershipId: formData.membershipId || null,
       membershipName: selectedPlan ? selectedPlan.name : null,
-      status: subscriptionStatus, // 'active', 'trialing', 'prospect'
-      price: Number(customPrice),
+      status: subscriptionStatus,
+      price: finalPrice,
+      interval: selectedPlan ? selectedPlan.interval : 'month', // ✅ Save Interval
+      
+      // ✅ Save Dates (ISO Strings are safer for Firestore)
+      startDate: startDate ? startDate.toISOString() : null,
       trialEndDate: trialEndDate ? trialEndDate.toISOString() : null,
+      
       updatedAt: new Date().toISOString()
     };
 
@@ -210,15 +223,17 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
       emergencyName: formData.emergencyName?.trim() || '',
       emergencyPhone: formData.emergencyPhone?.replace(/[^\d]/g, '') || '',
 
-      // We still keep these on root for easy indexing/display in tables
+      // Keep root level sync for easy access
       status: subscriptionStatus,
       membershipId: formData.membershipId,
       membershipName: selectedPlan ? selectedPlan.name : null,
+      
+      // ✅ Sync root level dates too (optional but helpful for some queries)
+      startDate: startDate ? startDate.toISOString() : null,
+      trialEndDate: trialEndDate ? trialEndDate.toISOString() : null,
 
-      // CRITICAL: Send the array
       memberships: currentMemberships,
 
-      // Rank data (handled by your other logic, ensured nulls here)
       programId: null, rankId: null, stripes: null, rankCredits: null
     };
 

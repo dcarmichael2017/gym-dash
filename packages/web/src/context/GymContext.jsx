@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore'; 
+// ✅ ADDED: collection, getDocs
+import { doc, getDoc, updateDoc, onSnapshot, collection, getDocs } from 'firebase/firestore'; 
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../../../../packages/shared/api/firebaseConfig';
 import { FullScreenLoader } from '../components/common/FullScreenLoader';
@@ -26,6 +27,27 @@ export const GymProvider = ({ children }) => {
       
       if (gymDoc.exists()) {
         const gymData = { id: gymDoc.id, ...gymDoc.data() };
+
+        // --- ✅ START FIX: Fetch Membership Tiers Subcollection ---
+        try {
+            const tiersRef = collection(db, 'gyms', gymId, 'membershipTiers');
+            const tiersSnap = await getDocs(tiersRef);
+            
+            // Map the subcollection documents into an array
+            const tiers = tiersSnap.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+
+            // Attach it to the gym object so components can access it
+            gymData.membershipTiers = tiers;
+            console.log("[GymContext] Loaded Tiers:", tiers.length);
+        } catch (tierError) {
+            console.error("[GymContext] Failed to load tiers:", tierError);
+            gymData.membershipTiers = []; // Fallback to empty array to prevent crashes
+        }
+        // --- ✅ END FIX ---
+
         currentGymIdRef.current = gymId;
         setCurrentGym(gymData);
         

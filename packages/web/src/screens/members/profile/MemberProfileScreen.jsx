@@ -19,19 +19,47 @@ const MemberProfileScreen = () => {
     
     // Find the user's membership for the current gym and enrich it with plan details
     const myMembership = useMemo(() => {
-        const rawMembership = memberships?.find(m => m.gymId === currentGym?.id);
-        if (!rawMembership) return null;
-
-        // If planName is already on the user's membership record, use it.
-        if (rawMembership.planName) return rawMembership;
-
-        // Otherwise, look it up from the gym's list of tiers (for legacy data)
-        const tierDetails = currentGym?.membershipTiers?.find(t => t.id === rawMembership.membershipId);
+        // --- LOGGING START ---
+        console.group("🔍 Debugging Membership Logic");
         
-        return {
-            ...tierDetails, // Provides name, price, interval from the tier definition
-            ...rawMembership, // Provides user-specific status, startDate, etc.
+        // 1. Get the raw record
+        const rawMembership = memberships?.find(m => m.gymId === currentGym?.id);
+        console.log("1. Raw User Record:", rawMembership);
+
+        if (!rawMembership) {
+            console.log("❌ No membership record found for this gym.");
+            console.groupEnd();
+            return null;
+        }
+
+        // 2. Find the reference tier
+        console.log("2. Available Gym Tiers:", currentGym?.membershipTiers);
+        
+        const tierDetails = currentGym?.membershipTiers?.find(t => t.id === rawMembership.membershipId);
+        console.log("3. Matched Tier Details:", tierDetails);
+
+        if (!tierDetails) {
+            console.warn("⚠️ Mismatch: User has membershipId", rawMembership.membershipId, "but it does not exist in gym tiers.");
+        }
+
+        // 3. Merge logic
+        const mergedData = {
+            // Base defaults
+            ...tierDetails, 
+            ...rawMembership,
+            
+            // Explicit Field Mapping 
+            planName: rawMembership.planName || tierDetails?.name || "Unknown Plan",
+            price: rawMembership.customPrice !== undefined ? rawMembership.customPrice : (tierDetails?.price || 0),
+            interval: rawMembership.interval || tierDetails?.interval || 'month',
+            id: rawMembership.membershipId || tierDetails?.id
         };
+
+        console.log("4. Final Merged Output:", mergedData);
+        console.groupEnd();
+        // --- LOGGING END ---
+
+        return mergedData;
     }, [memberships, currentGym]);
 
     const statusBadge = getStatusDisplay(myMembership?.status || 'guest');
