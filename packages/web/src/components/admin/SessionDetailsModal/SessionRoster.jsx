@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { User, Check, Trash2, CheckCircle, List, Plus, Search, AlertTriangle, Clock, History } from 'lucide-react';
-import { BOOKING_STATUS } from '../../../../../shared/constants/strings';
+import { BOOKING_STATUS } from '../../../../../shared/constants/strings.js';
 import { useConfirm } from '../../../context/ConfirmationContext.jsx';
 
 export const SessionRoster = ({

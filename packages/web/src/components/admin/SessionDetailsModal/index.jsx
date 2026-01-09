@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Edit2, Ban, CheckCircle, List, AlertCircle, Loader2 } from 'lucide-react';
 import { useConfirm } from '../../../context/ConfirmationContext.jsx';
-import { getClassRoster, bookMember, checkInMember, getGymMembers, cancelBooking, processWaitlist, getClassDetails, checkBookingEligibility } from '../../../../../shared/api/firestore';
-import { BOOKING_STATUS } from '../../../../../shared/constants/strings';
+import { getClassRoster, bookMember, checkInMember, getGymMembers, cancelBooking, processWaitlist, getClassDetails, checkBookingEligibility } from '../../../../../shared/api/firestore/index.js';
+import { BOOKING_STATUS } from '../../../../../shared/constants/strings.js';
 
-import { SessionHeader } from './SessionHeader';
-import { SessionStats } from './SessionStats';
-import { WaitlistBanner } from './WaitlistBanner';
-import { SessionRoster } from './SessionRoster';
+import { SessionHeader } from './SessionHeader.jsx';
+import { SessionStats } from './SessionStats.jsx';
+import { WaitlistBanner } from './WaitlistBanner.jsx';
+import { SessionRoster } from './SessionRoster.jsx';
 
 export const SessionDetailsModal = ({ isOpen, onClose, session, gymId, onEditSeries, onCancelSession, onRosterChange }) => {
     const dialog = useConfirm();
