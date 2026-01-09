@@ -70,3 +70,4 @@ node_modules/
 
 # Ignore environment-specific files
 .env.*
+.aider*
