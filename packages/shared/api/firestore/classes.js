@@ -47,6 +47,19 @@ export const updateClass = async (gymId, classId, classData) => {
   }
 };
 
+export const unarchiveClass = async (gymId, classId) => {
+  try {
+    const classRef = doc(db, "gyms", gymId, "classes", classId);
+    await updateDoc(classRef, {
+      recurrenceEndDate: null,
+      visibility: 'public'
+    });
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
 export const getClassDetails = async (gymId, classId) => {
   try {
     const docRef = doc(db, "gyms", gymId, "classes", classId);
@@ -67,9 +80,17 @@ export const getNextUpcomingClass = async (gymId) => {
   try {
     const classesRef = collection(db, "gyms", gymId, "classes");
     const snapshot = await getDocs(classesRef);
-    const classes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    let classes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
     if (classes.length === 0) return { success: true, nextClass: null };
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    
+    // Filter out archived ("zombie") classes
+    classes = classes.filter(cls => {
+        if (!cls.recurrenceEndDate) return true; // Always include classes that don't have an end date
+        return cls.recurrenceEndDate >= todayStr;
+    });
 
     const now = new Date();
     const currentDayIndex = now.getDay(); 
