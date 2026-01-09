@@ -28,17 +28,32 @@ export const MemberHistoryTab = ({ gymId, memberId, gym }) => {
 
     const filteredHistory = useMemo(() => {
         return history.filter(record => {
-            const programMatch = !selectedProgram || record.programId === selectedProgram;
+            let programMatch = true;
+            if (selectedProgram) {
+                if (selectedProgram === 'none') {
+                    programMatch = !record.programId;
+                } else {
+                    programMatch = record.programId === selectedProgram;
+                }
+            }
             const classMatch = !selectedClass || record.className === selectedClass;
             return programMatch && classMatch;
         });
     }, [history, selectedProgram, selectedClass]);
 
     const availableClasses = useMemo(() => {
-        const classNames = history
-            .filter(record => !selectedProgram || record.programId === selectedProgram)
-            .map(h => h.className);
-        return [...new Set(classNames)].sort();
+        const relevantHistory = history.filter(record => {
+            if (!selectedProgram) return true;
+            if (selectedProgram === 'none') return !record.programId;
+            return record.programId === selectedProgram;
+        });
+        const classCounts = relevantHistory.reduce((acc, record) => {
+            acc[record.className] = (acc[record.className] || 0) + 1;
+            return acc;
+        }, {});
+        return Object.entries(classCounts)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => a.name.localeCompare(b.name));
     }, [history, selectedProgram]);
 
     const totalAttended = filteredHistory.filter(h => h.status === 'attended').length;
@@ -79,6 +94,7 @@ export const MemberHistoryTab = ({ gymId, memberId, gym }) => {
                     >
                         <option value="">All Programs</option>
                         {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        <option value="none">No Program / One-Offs</option>
                     </select>
 
                     <select
@@ -88,7 +104,7 @@ export const MemberHistoryTab = ({ gymId, memberId, gym }) => {
                         disabled={loading || availableClasses.length === 0}
                     >
                         <option value="">All Classes</option>
-                        {availableClasses.map(c => <option key={c} value={c}>{c}</option>)}
+                        {availableClasses.map(c => <option key={c.name} value={c.name}>{c.name} ({c.count})</option>)}
                     </select>
 
                     <button
@@ -107,6 +123,7 @@ export const MemberHistoryTab = ({ gymId, memberId, gym }) => {
                         <tr>
                             <th className="px-4 py-3 font-medium">Date</th>
                             <th className="px-4 py-3 font-medium">Class</th>
+                            <th className="px-4 py-3 font-medium text-center">Source</th>
                             <th className="px-4 py-3 font-medium text-right">Status</th>
                         </tr>
                     </thead>
@@ -119,13 +136,31 @@ export const MemberHistoryTab = ({ gymId, memberId, gym }) => {
                             </tr>
                         ) : filteredHistory.length === 0 ? (
                             <tr>
-                                <td colSpan="3" className="px-4 py-8 text-center text-gray-400">
+                                <td colSpan="4" className="px-4 py-8 text-center text-gray-400">
                                     <Calendar className="h-8 w-8 mx-auto mb-2 text-gray-300" />
                                     <p>{isFiltered ? 'No records match your filters.' : 'No records found.'}</p>
                                 </td>
                             </tr>
                         ) : (
                             filteredHistory.map(record => {
+                                const getPaymentBadge = (record) => {
+                                    switch (record.bookingType) {
+                                        case 'membership':
+                                            return { text: 'Membership', style: 'bg-gray-100 text-gray-700 border-gray-200' };
+                                        case 'credit':
+                                            const credits = record.costUsed || 1;
+                                            return { text: `${credits} Credit${credits !== 1 ? 's' : ''}`, style: 'bg-purple-100 text-purple-800 border-purple-200' };
+                                        case 'comp':
+                                        case 'admin_comp':
+                                            return { text: 'Admin Comp', style: 'bg-yellow-100 text-yellow-800 border-yellow-200' };
+                                        case 'drop-in':
+                                            return { text: 'Drop-In', style: 'bg-teal-100 text-teal-800 border-teal-200' };
+                                        default:
+                                            return null;
+                                    }
+                                };
+                                const paymentBadge = getPaymentBadge(record);
+
                                 // --- Date Logic ---
                                 let dateObj = new Date();
                                 if (record.classTimestamp?.toDate) {
@@ -161,6 +196,13 @@ export const MemberHistoryTab = ({ gymId, memberId, gym }) => {
                                                 <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
                                                     <User size={10} /> {record.instructorName}
                                                 </div>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3 text-center">
+                                            {paymentBadge && (
+                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${paymentBadge.style}`}>
+                                                    {paymentBadge.text}
+                                                </span>
                                             )}
                                         </td>
                                         <td className="px-4 py-3 text-right">

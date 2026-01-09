@@ -51,17 +51,33 @@ const MemberProfileScreen = () => {
 
     const filteredHistory = useMemo(() => {
         return attendanceHistory.filter(record => {
-            const programMatch = !selectedProgram || record.programId === selectedProgram;
+            let programMatch = true;
+            if (selectedProgram) {
+                if (selectedProgram === 'none') {
+                    programMatch = !record.programId;
+                } else {
+                    programMatch = record.programId === selectedProgram;
+                }
+            }
             const classMatch = !selectedClass || record.className === selectedClass;
             return programMatch && classMatch;
         });
     }, [attendanceHistory, selectedProgram, selectedClass]);
 
     const availableClasses = useMemo(() => {
-        const classNames = attendanceHistory
-            .filter(record => !selectedProgram || record.programId === selectedProgram)
-            .map(h => h.className);
-        return [...new Set(classNames)].sort();
+        const relevantHistory = attendanceHistory.filter(record => {
+            if (!selectedProgram) return true;
+            if (selectedProgram === 'none') return !record.programId;
+            return record.programId === selectedProgram;
+        });
+        const classCounts = relevantHistory.reduce((acc, record) => {
+            acc[record.className] = (acc[record.className] || 0) + 1;
+            return acc;
+        }, {});
+
+        return Object.entries(classCounts)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => a.name.localeCompare(b.name));
     }, [attendanceHistory, selectedProgram]);
 
     const isFiltered = selectedProgram || selectedClass;
@@ -101,6 +117,7 @@ const MemberProfileScreen = () => {
                                 >
                                     <option value="">Filter by Program</option>
                                     {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                    <option value="none">Other Classes / Seminars</option>
                                 </select>
 
                                 <select
@@ -110,7 +127,7 @@ const MemberProfileScreen = () => {
                                     disabled={historyLoading || availableClasses.length === 0}
                                 >
                                     <option value="">Filter by Class</option>
-                                    {availableClasses.map(c => <option key={c} value={c}>{c}</option>)}
+                                    {availableClasses.map(c => <option key={c.name} value={c.name}>{c.name} ({c.count})</option>)}
                                 </select>
                             </div>
                             {isFiltered && (
@@ -134,6 +151,23 @@ const MemberProfileScreen = () => {
                             ) : (
                                 <ul className="space-y-2">
                                     {filteredHistory.map(record => {
+                                        const getPaymentBadge = (record) => {
+                                            switch (record.bookingType) {
+                                                case 'membership':
+                                                    return { text: 'Membership', style: 'bg-gray-100 text-gray-700 border-gray-200' };
+                                                case 'credit':
+                                                    const credits = record.costUsed || 1;
+                                                    return { text: `${credits} Credit${credits !== 1 ? 's' : ''}`, style: 'bg-purple-100 text-purple-800 border-purple-200' };
+                                                case 'comp':
+                                                case 'admin_comp':
+                                                    return { text: 'Admin Comp', style: 'bg-yellow-100 text-yellow-800 border-yellow-200' };
+                                                case 'drop-in':
+                                                    return { text: 'Drop-In', style: 'bg-teal-100 text-teal-800 border-teal-200' };
+                                                default:
+                                                    return null;
+                                            }
+                                        };
+                                        const paymentBadge = getPaymentBadge(record);
                                         const isAttended = record.status === 'attended';
                                         const isBooked = record.status === 'booked';
                                         const isCancelled = record.status === 'cancelled';
@@ -162,10 +196,15 @@ const MemberProfileScreen = () => {
                                                         {record.classTime && <div className="flex items-center justify-end gap-1 mt-0.5"><Clock size={10} /> {record.classTime}</div>}
                                                     </div>
                                                 </div>
-                                                <div className="mt-2">
+                                                <div className="mt-2 flex items-center gap-2 flex-wrap">
                                                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeStyle}`}>
                                                         {record.status ? record.status.toUpperCase() : 'UNKNOWN'}
                                                     </span>
+                                                    {paymentBadge && (
+                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${paymentBadge.style}`}>
+                                                            {paymentBadge.text}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </li>
                                         );
