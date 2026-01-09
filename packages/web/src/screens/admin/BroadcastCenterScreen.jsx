@@ -14,10 +14,10 @@ const StatCard = ({ title, value, change, icon: Icon, color }) => (
 
 const BroadcastCenterScreen = () => {
     return (
-        <div className="p-6 bg-gray-50 min-h-screen">
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-3xl font-bold text-gray-800">Broadcast Center</h1>
-                <button className="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-blue-700 shadow-sm">
+        <div className="p-4 md:p-6 bg-gray-50 min-h-screen">
+            <div className="flex flex-col md:flex-row justify-between md:items-center mb-6 gap-4">
+                <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Broadcast Center</h1>
+                <button className="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-blue-700 shadow-sm w-full md:w-auto">
                     <Plus size={18} /> New Campaign
                 </button>
             </div>
@@ -44,47 +44,49 @@ const BroadcastCenterScreen = () => {
             </div>
 
             {/* Recent Campaigns List */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
                 <div className="p-4 border-b">
                     <h2 className="text-lg font-bold text-gray-800">Recent Campaigns</h2>
                 </div>
-                <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-left">
-                        <tr>
-                            <th className="px-4 py-2 font-semibold text-gray-500 uppercase">Campaign</th>
-                            <th className="px-4 py-2 font-semibold text-gray-500 uppercase">Type</th>
-                            <th className="px-4 py-2 font-semibold text-gray-500 uppercase">Recipients</th>
-                            <th className="px-4 py-2 font-semibold text-gray-500 uppercase">Open / Click Rate</th>
-                            <th className="px-4 py-2 font-semibold text-gray-500 uppercase">Sent</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                        {/* Sample Row 1 */}
-                        <tr className="hover:bg-gray-50">
-                            <td className="px-4 py-3 font-medium text-gray-800">Holiday Schedule Update</td>
-                            <td className="px-4 py-3"><span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold">Email</span></td>
-                            <td className="px-4 py-3 text-gray-600">All Members (258)</td>
-                            <td className="px-4 py-3 text-gray-600">62% / 18%</td>
-                            <td className="px-4 py-3 text-gray-500">Dec 20, 2025</td>
-                        </tr>
-                        {/* Sample Row 2 */}
-                        <tr className="hover:bg-gray-50">
-                            <td className="px-4 py-3 font-medium text-gray-800">New Year's Promo</td>
-                            <td className="px-4 py-3"><span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold">SMS</span></td>
-                            <td className="px-4 py-3 text-gray-600">Past Members (72)</td>
-                            <td className="px-4 py-3 text-gray-600">- / 24%</td>
-                            <td className="px-4 py-3 text-gray-500">Dec 28, 2025</td>
-                        </tr>
-                        {/* Sample Row 3 */}
-                        <tr className="hover:bg-gray-50">
-                            <td className="px-4 py-3 font-medium text-gray-800">Competition Team Reminder</td>
-                            <td className="px-4 py-3"><span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold">SMS</span></td>
-                            <td className="px-4 py-3 text-gray-600">Comp Team (14)</td>
-                            <td className="px-4 py-3 text-gray-600">- / 45%</td>
-                            <td className="px-4 py-3 text-gray-500">Jan 05, 2026</td>
-                        </tr>
-                    </tbody>
-                </table>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead className="bg-gray-50 text-left">
+                            <tr>
+                                <th className="px-4 py-2 font-semibold text-gray-500 uppercase whitespace-nowrap">Campaign</th>
+                                <th className="px-4 py-2 font-semibold text-gray-500 uppercase whitespace-nowrap">Type</th>
+                                <th className="px-4 py-2 font-semibold text-gray-500 uppercase whitespace-nowrap">Recipients</th>
+                                <th className="px-4 py-2 font-semibold text-gray-500 uppercase whitespace-nowrap">Open / Click Rate</th>
+                                <th className="px-4 py-2 font-semibold text-gray-500 uppercase whitespace-nowrap">Sent</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {/* Sample Row 1 */}
+                            <tr className="hover:bg-gray-50">
+                                <td className="px-4 py-3 font-medium text-gray-800">Holiday Schedule Update</td>
+                                <td className="px-4 py-3"><span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold">Email</span></td>
+                                <td className="px-4 py-3 text-gray-600">All Members (258)</td>
+                                <td className="px-4 py-3 text-gray-600">62% / 18%</td>
+                                <td className="px-4 py-3 text-gray-500">Dec 20, 2025</td>
+                            </tr>
+                            {/* Sample Row 2 */}
+                            <tr className="hover:bg-gray-50">
+                                <td className="px-4 py-3 font-medium text-gray-800">New Year's Promo</td>
+                                <td className="px-4 py-3"><span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold">SMS</span></td>
+                                <td className="px-4 py-3 text-gray-600">Past Members (72)</td>
+                                <td className="px-4 py-3 text-gray-600">- / 24%</td>
+                                <td className="px-4 py-3 text-gray-500">Dec 28, 2025</td>
+                            </tr>
+                            {/* Sample Row 3 */}
+                            <tr className="hover:bg-gray-50">
+                                <td className="px-4 py-3 font-medium text-gray-800">Competition Team Reminder</td>
+                                <td className="px-4 py-3"><span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold">SMS</span></td>
+                                <td className="px-4 py-3 text-gray-600">Comp Team (14)</td>
+                                <td className="px-4 py-3 text-gray-600">- / 45%</td>
+                                <td className="px-4 py-3 text-gray-500">Jan 05, 2026</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     );
