@@ -8,7 +8,7 @@ import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 import { useConfirm } from '../../context/ConfirmationContext';
 import { ClassFormModal } from '../../components/admin/ClassFormModal';
 import { SeriesRetirementModal } from '../../components/admin/SeriesRetirementModal';
-import { SessionDetailsModal } from '../../components/admin/SessionFormModal';
+import { SessionDetailsModal } from '../../components/admin/SessionDetailsModal';
 
 const DashboardClassesScreen = () => {
   const [loading, setLoading] = useState(true);

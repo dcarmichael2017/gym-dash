@@ -1,7 +1,31 @@
-import React from 'react';
-import { Calendar, XCircle, CheckCircle, ArrowRight } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calendar, XCircle, CheckCircle, Users, Loader2 } from 'lucide-react';
+import { getFutureBookingsForClass } from '../../../../shared/api/firestore';
 
-export const ClassSessionsList = ({ classData, onCancelSession }) => {
+export const ClassSessionsList = ({ gymId, classData, onCancelSession, onSessionClick }) => {
+    const [bookingCounts, setBookingCounts] = useState({});
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (gymId && classData?.id) {
+            const fetchCounts = async () => {
+                setLoading(true);
+                const today = new Date().toISOString().split('T')[0];
+                const res = await getFutureBookingsForClass(gymId, classData.id, today);
+                if (res.success) {
+                    const counts = res.bookings.reduce((acc, booking) => {
+                        acc[booking.dateString] = (acc[booking.dateString] || 0) + 1;
+                        return acc;
+                    }, {});
+                    setBookingCounts(counts);
+                }
+                setLoading(false);
+            };
+            fetchCounts();
+        } else {
+            setLoading(false);
+        }
+    }, [gymId, classData?.id]);
     
     const generateUpcomingSessions = () => {
         if (classData.frequency === 'Single Event') {
@@ -86,39 +110,53 @@ export const ClassSessionsList = ({ classData, onCancelSession }) => {
                     </div>
                 ) : (
                     <div className="divide-y divide-gray-100">
-                        {sessions.map((session, idx) => (
-                            <div key={idx} className={`flex items-center justify-between p-3 ${session.isCancelled ? 'bg-gray-50 opacity-60' : 'bg-white'}`}>
-                                <div className="flex items-center gap-3">
-                                    <div className={`p-2 rounded-lg ${session.isCancelled ? 'bg-gray-200 text-gray-500' : 'bg-blue-50 text-blue-600'}`}>
-                                        <Calendar size={18} />
-                                    </div>
-                                    <div>
-                                        <p className={`text-sm font-bold ${session.isCancelled ? 'text-gray-500 line-through' : 'text-gray-800'}`}>
-                                            {session.dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                                        </p>
-                                        <p className="text-xs text-gray-500">
-                                            {classData.time} • {classData.duration} min
-                                        </p>
-                                    </div>
-                                </div>
+                        {sessions.map((session, idx) => {
+                            const count = bookingCounts[session.dateStr] || 0;
+                            const capacity = classData.maxCapacity || '∞';
 
-                                {session.isCancelled ? (
-                                    <button 
-                                        onClick={() => onCancelSession(session.dateStr, false)} // Restore
-                                        className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1"
-                                    >
-                                        <CheckCircle size={12} /> Restore
-                                    </button>
-                                ) : (
-                                    <button 
-                                        onClick={() => onCancelSession(session.dateStr, true)} // Cancel
-                                        className="text-xs font-bold text-red-600 hover:underline flex items-center gap-1"
-                                    >
-                                        <XCircle size={12} /> Cancel
-                                    </button>
-                                )}
+                            return (
+                            <div 
+                                key={idx} 
+                                className={`p-3 ${session.isCancelled ? 'bg-gray-50 opacity-60' : 'bg-white group transition-colors ' + (onSessionClick ? 'cursor-pointer hover:bg-gray-50' : '')}`}
+                                onClick={() => !session.isCancelled && onSessionClick && onSessionClick(classData, session.dateStr)}
+                            >
+                               <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`p-2 rounded-lg ${session.isCancelled ? 'bg-gray-200 text-gray-500' : 'bg-blue-50 text-blue-600'}`}>
+                                            <Calendar size={18} />
+                                        </div>
+                                        <div>
+                                            <p className={`text-sm font-bold ${session.isCancelled ? 'text-gray-500 line-through' : 'text-gray-800'}`}>
+                                                {session.dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                            </p>
+                                            <p className="text-xs text-gray-500 flex items-center divide-x divide-gray-300">
+                                                <span className="pr-2">{classData.time} • {classData.duration} min</span>
+                                                <span className="pl-2 flex items-center gap-1 font-medium text-gray-600 group-hover:text-blue-600">
+                                                    {loading ? <Loader2 size={12} className="animate-spin" /> : <Users size={12} />}
+                                                    <span>{loading ? '' : `${count} / ${capacity}`}</span>
+                                                </span>
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {session.isCancelled ? (
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); onCancelSession(session.dateStr, false); }} // Restore
+                                            className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1"
+                                        >
+                                            <CheckCircle size={12} /> Restore
+                                        </button>
+                                    ) : (
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); onCancelSession(session.dateStr, true); }} // Cancel
+                                            className="text-xs font-bold text-red-600 hover:underline flex items-center gap-1"
+                                        >
+                                            <XCircle size={12} /> Cancel
+                                        </button>
+                                    )}
+                               </div>
                             </div>
-                        ))}
+                        )})}
                     </div>
                 )}
             </div>
