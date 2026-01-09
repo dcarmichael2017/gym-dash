@@ -10,7 +10,9 @@ import {
   Mail, 
   Phone,
   Tag,
-  Camera
+  Camera,
+  DollarSign,
+  FileText
 } from 'lucide-react';
 
 import { auth, db } from '../../../../shared/api/firebaseConfig';
@@ -35,10 +37,11 @@ const DashboardStaffScreen = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [currentStaffId, setCurrentStaffId] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [modalTab, setModalTab] = useState('profile');
   
   // Form State (Expanded)
   const [formData, setFormData] = useState({
-    name: '', title: '', email: '', phone: '', bio: '', specialties: '', photoUrl: null 
+    name: '', title: '', email: '', phone: '', bio: '', specialties: '', photoUrl: null, hourlyRate: ''
   });
   const [photoFile, setPhotoFile] = useState(null);
 
@@ -65,9 +68,10 @@ const DashboardStaffScreen = () => {
   // --- Handlers ---
 
   const openAddModal = () => {
-    setFormData({ name: '', title: '', email: '', phone: '', bio: '', specialties: '', photoUrl: null });
+    setFormData({ name: '', title: '', email: '', phone: '', bio: '', specialties: '', photoUrl: null, hourlyRate: '' });
     setPhotoFile(null);
     setIsEditMode(false);
+    setModalTab('profile');
     setIsModalOpen(true);
   };
 
@@ -79,11 +83,13 @@ const DashboardStaffScreen = () => {
       phone: staff.phone || '',
       bio: staff.bio || '',
       specialties: staff.specialties ? staff.specialties.join(', ') : '',
-      photoUrl: staff.photoUrl || null
+      photoUrl: staff.photoUrl || null,
+      hourlyRate: staff.hourlyRate || ''
     });
     setPhotoFile(null);
     setCurrentStaffId(staff.id);
     setIsEditMode(true);
+    setModalTab('profile');
     setIsModalOpen(true);
   };
 
@@ -122,6 +128,7 @@ const DashboardStaffScreen = () => {
     const cleanData = {
       ...formData,
       photoUrl: finalPhotoUrl,
+      hourlyRate: formData.hourlyRate ? parseFloat(formData.hourlyRate) : 0,
       specialties: formData.specialties.split(',').map(s => s.trim()).filter(s => s !== '')
     };
 
@@ -272,107 +279,184 @@ const DashboardStaffScreen = () => {
       {/* --- EDIT/ADD MODAL --- */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-                <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                    <h3 className="font-bold text-lg text-gray-800">
-                        {isEditMode ? 'Edit Staff Member' : 'Add New Staff'}
-                    </h3>
-                    <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">
-                        <X className="h-5 w-5" />
-                    </button>
+            <div className="bg-white rounded-xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
+                <div>
+                    <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                        <h3 className="font-bold text-lg text-gray-800">
+                            {isEditMode ? 'Edit Staff Member' : 'Add New Staff'}
+                        </h3>
+                        <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                            <X className="h-5 w-5" />
+                        </button>
+                    </div>
+                    {isEditMode && (
+                        <div className="px-6 bg-gray-50 border-b border-gray-100 flex items-center gap-4">
+                            <button
+                                onClick={() => setModalTab('profile')}
+                                className={`py-2 text-sm font-semibold ${modalTab === 'profile' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                            >
+                                Profile
+                            </button>
+                            <button
+                                onClick={() => setModalTab('payroll')}
+                                className={`py-2 text-sm font-semibold ${modalTab === 'payroll' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                            >
+                                Payroll
+                            </button>
+                        </div>
+                    )}
                 </div>
                 
-                <form onSubmit={handleSave} className="p-6 space-y-5">
-                    
-                    {/* --- PHOTO UPLOAD SECTION --- */}
-                    <div className="flex flex-col items-center justify-center mb-6">
-                        <div className="relative group cursor-pointer">
-                            <div className="h-24 w-24 rounded-full bg-gray-100 overflow-hidden border-2 border-gray-200 flex items-center justify-center">
-                                {photoFile ? (
-                                    <img src={URL.createObjectURL(photoFile)} className="h-full w-full object-cover" />
-                                ) : formData.photoUrl ? (
-                                    <img src={formData.photoUrl} className="h-full w-full object-cover" />
-                                ) : (
-                                    <User className="h-10 w-10 text-gray-400" />
-                                )}
+                <form onSubmit={handleSave} className="flex-1 overflow-y-auto">
+                    {/* TABS CONTENT */}
+                    <div className="p-6 space-y-5">
+                        {modalTab === 'profile' || !isEditMode ? (
+                            <div className="space-y-5 animate-in fade-in">
+                                {/* --- PHOTO UPLOAD SECTION --- */}
+                                <div className="flex flex-col items-center justify-center mb-6">
+                                    <div className="relative group cursor-pointer">
+                                        <div className="h-24 w-24 rounded-full bg-gray-100 overflow-hidden border-2 border-gray-200 flex items-center justify-center">
+                                            {photoFile ? (
+                                                <img src={URL.createObjectURL(photoFile)} alt="New Staff" className="h-full w-full object-cover" />
+                                            ) : formData.photoUrl ? (
+                                                <img src={formData.photoUrl} alt={formData.name} className="h-full w-full object-cover" />
+                                            ) : (
+                                                <User className="h-10 w-10 text-gray-400" />
+                                            )}
+                                        </div>
+                                        <label className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-white">
+                                            <Camera className="h-6 w-6" />
+                                            <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
+                                        </label>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-2">Click to upload photo</p>
+                                </div>
+
+                                {/* Standard Fields */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Full Name *</label>
+                                        <input 
+                                            required
+                                            value={formData.name}
+                                            onChange={e => setFormData({...formData, name: e.target.value})}
+                                            className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Title / Role *</label>
+                                        <input 
+                                            required
+                                            value={formData.title}
+                                            onChange={e => setFormData({...formData, title: e.target.value})}
+                                            placeholder="e.g. Coach"
+                                            className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Email</label>
+                                        <input 
+                                            type="email"
+                                            value={formData.email}
+                                            onChange={e => setFormData({...formData, email: e.target.value})}
+                                            className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Phone</label>
+                                        <input 
+                                            type="tel"
+                                            value={formData.phone}
+                                            onChange={e => setFormData({...formData, phone: e.target.value})}
+                                            className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Bio</label>
+                                    <textarea 
+                                        rows="3"
+                                        value={formData.bio}
+                                        onChange={e => setFormData({...formData, bio: e.target.value})}
+                                        placeholder="Tell members about this instructor..."
+                                        className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Specialties</label>
+                                    <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 transition-all">
+                                        <div className="pl-3 text-gray-400"><Tag className="h-4 w-4" /></div>
+                                        <input 
+                                            value={formData.specialties}
+                                            onChange={e => setFormData({...formData, specialties: e.target.value})}
+                                            placeholder="BJJ, Wrestling, Kids (comma separated)"
+                                            className="w-full p-2.5 outline-none border-none"
+                                        />
+                                    </div>
+                                </div>
                             </div>
-                            <label className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-white">
-                                <Camera className="h-6 w-6" />
-                                <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
-                            </label>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-2">Click to upload photo</p>
-                    </div>
+                        ) : (
+                            <div className="space-y-6 animate-in fade-in">
+                                {/* Payroll Tally */}
+                                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                                    <h4 className="font-bold text-blue-900">Current Month's Pay (Sample)</h4>
+                                    <div className="mt-3 flex justify-around items-center text-center">
+                                        <div>
+                                            <p className="text-2xl font-bold text-blue-700">12</p>
+                                            <p className="text-xs text-blue-600 font-medium">Classes Taught</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-2xl font-bold text-blue-700">${((formData.hourlyRate || 0) * 12).toFixed(2)}</p>
+                                            <p className="text-xs text-blue-600 font-medium">Total Owed</p>
+                                        </div>
+                                    </div>
+                                </div>
 
-                    {/* Standard Fields */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Full Name *</label>
-                            <input 
-                                required
-                                value={formData.name}
-                                onChange={e => setFormData({...formData, name: e.target.value})}
-                                className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Title / Role *</label>
-                            <input 
-                                required
-                                value={formData.title}
-                                onChange={e => setFormData({...formData, title: e.target.value})}
-                                placeholder="e.g. Coach"
-                                className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                            />
-                        </div>
+                                {/* Hourly Rate Input */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Hourly Rate</label>
+                                    <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 transition-all">
+                                        <div className="pl-3 text-gray-400"><DollarSign className="h-4 w-4" /></div>
+                                        <input 
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={formData.hourlyRate}
+                                            onChange={e => setFormData({...formData, hourlyRate: e.target.value})}
+                                            placeholder="25.00"
+                                            className="w-full p-2.5 outline-none border-none"
+                                        />
+                                    </div>
+                                </div>
+                                
+                                {/* Payouts & Taxes Section */}
+                                <div className="space-y-3">
+                                    <h4 className="font-semibold text-gray-700 border-t border-gray-200 pt-4">Payouts & Taxes</h4>
+                                    <button type="button" className="w-full text-left p-3 bg-white border border-gray-200 rounded-lg flex items-center justify-between hover:bg-gray-50">
+                                        <span className="font-medium text-sm text-gray-800">Export 2025 Tax Form (1099)</span>
+                                        <FileText className="h-5 w-5 text-gray-400" />
+                                    </button>
+                                    <div className="p-3 bg-gray-100 border border-gray-200 rounded-lg">
+                                        <div className="flex justify-between items-center">
+                                            <p className="text-sm font-medium text-gray-800">Automatic Stripe Payouts</p>
+                                            <span className="text-xs font-bold bg-gray-300 text-gray-600 px-2 py-0.5 rounded-full">TODO</span>
+                                        </div>
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            This feature will automatically pay staff via Stripe at the end of each pay period.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Email</label>
-                            <input 
-                                type="email"
-                                value={formData.email}
-                                onChange={e => setFormData({...formData, email: e.target.value})}
-                                className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Phone</label>
-                            <input 
-                                type="tel"
-                                value={formData.phone}
-                                onChange={e => setFormData({...formData, phone: e.target.value})}
-                                className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                            />
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Bio</label>
-                        <textarea 
-                            rows="3"
-                            value={formData.bio}
-                            onChange={e => setFormData({...formData, bio: e.target.value})}
-                            placeholder="Tell members about this instructor..."
-                            className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Specialties</label>
-                        <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 transition-all">
-                            <div className="pl-3 text-gray-400"><Tag className="h-4 w-4" /></div>
-                            <input 
-                                value={formData.specialties}
-                                onChange={e => setFormData({...formData, specialties: e.target.value})}
-                                placeholder="BJJ, Wrestling, Kids (comma separated)"
-                                className="w-full p-2.5 outline-none border-none"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="pt-4 flex justify-end gap-3">
+                    
+                    {/* Footer */}
+                    <div className="p-6 pt-4 flex justify-end gap-3 border-t border-gray-100 bg-gray-50 sticky bottom-0">
                         <button 
                             type="button" 
                             onClick={() => setIsModalOpen(false)}
