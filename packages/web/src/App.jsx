@@ -46,8 +46,10 @@ import MemberProfileScreen from './screens/members/profile/MemberProfileScreen';
 import { StoreScreen } from './screens/members/store'; // The UI
 import { StoreProvider } from './screens/members/store/StoreContext'; // The Data Layer
 import BroadcastCenterScreen from './screens/admin/BroadcastCenterScreen';
-import CommunityFeedScreen from './screens/admin/CommunityFeedScreen';
-import GroupChatScreen from './screens/admin/GroupChatScreen';
+import AdminCommunityFeedScreen from './screens/admin/CommunityFeedScreen';
+import AdminGroupChatScreen from './screens/admin/GroupChatScreen';
+import MemberCommunityFeedScreen from './screens/members/community/CommunityFeedScreen';
+import MemberGroupChatScreen from './screens/members/chat/GroupChatScreen';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -123,8 +125,8 @@ function App() {
               <Route path="calendar" element={<DashboardCalendarScreen />} />
               <Route path="classes" element={<DashboardClassesScreen />} />
               <Route path="broadcast" element={<BroadcastCenterScreen />} />
-              <Route path="community" element={<CommunityFeedScreen viewMode="admin" />} />
-              <Route path="chat" element={<GroupChatScreen viewMode="admin" />} />
+              <Route path="community" element={<AdminCommunityFeedScreen />} />
+              <Route path="chat" element={<AdminGroupChatScreen />} />
               <Route path="memberships" element={<DashboardMembershipsScreen />} />
               <Route path="members" element={<DashboardMembersScreen />} />
               <Route path="staff" element={<DashboardStaffScreen />} />
@@ -144,8 +146,8 @@ function App() {
               <Route path="schedule" element={<MemberScheduleScreen />} />
               <Route path="profile" element={<MemberProfileScreen />} />
               
-              <Route path="community" element={<CommunityFeedScreen viewMode="member" />} />
-              <Route path="chat" element={<GroupChatScreen viewMode="member" />} />
+              <Route path="community" element={<MemberCommunityFeedScreen />} />
+              <Route path="chat" element={<MemberGroupChatScreen />} />
               <Route path="store" element={<StoreScreen />} />
               
               <Route index element={<Navigate to="home" replace />} />
