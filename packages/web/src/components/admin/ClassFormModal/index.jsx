@@ -455,6 +455,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                                     toggleRule={toggleRule}
                                     handleNumberChange={handleNumberChange}
                                     isReadOnly={isClassActive}
+                                    globalSettings={globalSettings}
                                 />
                             )}
 
