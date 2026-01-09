@@ -1,7 +1,7 @@
-import { doc, collection, getDoc, getDocs, updateDoc, query, where, limit, orderBy, increment, runTransaction, writeBatch } from "firebase/firestore";
+import { doc, collection, getDoc, getDocs, updateDoc, query, where, limit, orderBy, increment, runTransaction, writeBatch, addDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig"; // Adjust path as needed
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { deleteClass } from './classes';
+import { deleteClass, getClassDetails } from './classes';
 import { BOOKING_STATUS } from '../../constants/strings'; // Adjust path
 import { createCreditLog } from './credits'; // Import helper from credits module
 
@@ -239,6 +239,47 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
   } catch (error) {
     console.error("Booking failed:", error);
     return { success: false, error: typeof error === 'string' ? error : error.message };
+  }
+};
+
+export const convertSeriesToSingleEvent = async (gymId, classId, dateString) => {
+  try {
+    const originalClassDetails = await getClassDetails(gymId, classId);
+    if (!originalClassDetails.success) throw new Error("Original class not found.");
+
+    const batch = writeBatch(db);
+
+    // 1. Create a new class document for the single event
+    const newClassData = {
+      ...originalClassDetails.data,
+      frequency: 'Single Event',
+      startDate: dateString,
+      days: [], // Single events don't have recurring days
+      recurrenceEndDate: null,
+      originalSeriesId: classId, // For tracking
+      createdAt: new Date(),
+    };
+    const newClassRef = doc(collection(db, "gyms", gymId, "classes"));
+    batch.set(newClassRef, newClassData);
+
+    // 2. Find all bookings for the original class on that specific date
+    const bookingsQuery = query(
+      collection(db, "gyms", gymId, "attendance"),
+      where("classId", "==", classId),
+      where("dateString", "==", dateString)
+    );
+    const bookingsSnapshot = await getDocs(bookingsQuery);
+
+    // 3. Update each booking to point to the new class ID
+    bookingsSnapshot.forEach(doc => {
+      batch.update(doc.ref, { classId: newClassRef.id });
+    });
+
+    await batch.commit();
+    return { success: true, newClassId: newClassRef.id, movedBookings: bookingsSnapshot.size };
+  } catch (error) {
+    console.error("Error converting series to single event:", error);
+    return { success: false, error: error.message };
   }
 };
 

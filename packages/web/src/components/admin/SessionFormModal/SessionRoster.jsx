@@ -199,9 +199,9 @@ export const SessionRoster = ({
         const initial = displayName ? displayName.charAt(0) : '?';
         const isDropIn = record.bookingType === 'credit' || record.bookingType === 'drop-in';
         // (Simple check: compare cancel window)
-        const liveWindow = classData?.bookingRules?.cancelWindowHours || 2;
+        const liveWindow = classData?.bookingRules?.cancelWindowHours ?? 2;
         const snapWindow = record.bookingRulesSnapshot?.cancelWindowHours;
-        const hasLegacyRules = snapWindow !== undefined && parseFloat(snapWindow) !== parseFloat(liveWindow);
+        const hasLegacyRules = snapWindow !== undefined && Math.abs(parseFloat(snapWindow) - parseFloat(liveWindow)) > 0.1;
 
         return (
             <li key={record.id} className={`flex items-center justify-between p-2.5 rounded-lg transition-colors border group ${isWaitlistRow ? 'bg-orange-50 border-orange-100' : 'hover:bg-gray-50 border-transparent hover:border-gray-100'}`}>

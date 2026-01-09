@@ -7,6 +7,7 @@ import { getClasses, handleClassSeriesRetirement, getStaffList, getMembershipTie
 import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 import { useConfirm } from '../../context/ConfirmationContext';
 import { ClassFormModal } from '../../components/admin/ClassFormModal';
+import { SeriesRetirementModal } from '../../components/admin/SeriesRetirementModal';
 
 const DashboardClassesScreen = () => {
   const [loading, setLoading] = useState(true);
@@ -22,6 +23,7 @@ const DashboardClassesScreen = () => {
   // Modal
   const [isClassModalOpen, setIsClassModalOpen] = useState(false);
   const [editingClass, setEditingClass] = useState(null);
+  const [retirementModalState, setRetirementModalState] = useState({ isOpen: false, classData: null });
   const { confirm } = useConfirm();
 
   // --- HELPERS ---
@@ -72,49 +74,33 @@ const DashboardClassesScreen = () => {
     setIsClassModalOpen(true);
   };
 
-  const handleDeleteClass = async (e, classId) => {
+  const handleDeleteClass = async (e, cls) => {
     e.stopPropagation();
     const todayStr = new Date().toISOString().split('T')[0];
-    const futureBookingsRes = await getFutureBookingsForClass(gymId, classId, todayStr);
+    const futureBookingsRes = await getFutureBookingsForClass(gymId, cls.id, todayStr);
     const hasFutureBookings = futureBookingsRes.success && futureBookingsRes.bookings.length > 0;
     
-    let confirmed = false;
-    let refundPolicy = 'none';
-
     if (hasFutureBookings) {
-        const bookingCount = futureBookingsRes.bookings.length;
-        confirmed = await confirm({
-            title: "Impact Review",
-            message: `This series has ${bookingCount} upcoming booking(s). Archiving will cancel them.`,
-            confirmText: "Refund Credits & Archive",
-            cancelText: "Cancel",
-            type: 'danger'
-        });
-        if (confirmed) refundPolicy = 'refund';
-
+        setRetirementModalState({ isOpen: true, classData: cls });
     } else {
-        confirmed = await confirm({
+        const confirmed = await confirm({
             title: "Retire Class Series?",
             message: "No future bookings found. This will archive or delete the series based on its past history.",
             confirmText: "Yes, Retire",
             cancelText: "Cancel",
         });
-    }
 
-    if (confirmed) {
-        const result = await handleClassSeriesRetirement(gymId, classId, refundPolicy);
-        if (result.success) {
-            let title = "Success";
-            let message = "";
-            if (result.action === 'deleted') {
-                message = "The class series was permanently deleted.";
+        if (confirmed) {
+            const result = await handleClassSeriesRetirement(gymId, cls.id, 'none');
+            if (result.success) {
+                let message = result.action === 'deleted'
+                    ? "The class series was permanently deleted."
+                    : `The class series was archived.`;
+                await confirm({ title: "Success", message, confirmText: "OK", cancelText: null });
+                refreshData(gymId);
             } else {
-                message = `The class series was archived. ${result.refundedCount || 0} future booking(s) were refunded.`;
+                await confirm({ title: "Error", message: `Failed to retire series: ${result.error}`, confirmText: "OK", cancelText: null });
             }
-            await confirm({ title, message, confirmText: "OK", cancelText: null });
-            refreshData(gymId);
-        } else {
-            await confirm({ title: "Error", message: `Failed to retire series: ${result.error}`, confirmText: "OK", cancelText: null });
         }
     }
   };
@@ -286,7 +272,7 @@ const DashboardClassesScreen = () => {
                     </button>
                   ) : (
                     <button 
-                        onClick={(e) => handleDeleteClass(e, cls.id)} 
+                        onClick={(e) => handleDeleteClass(e, cls)} 
                         className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors z-10"
                         title="Retire Class Series"
                     >
@@ -298,6 +284,18 @@ const DashboardClassesScreen = () => {
             );
           })}
       </div>
+
+      <SeriesRetirementModal 
+        isOpen={retirementModalState.isOpen}
+        onClose={() => setRetirementModalState({ isOpen: false, classData: null })}
+        gymId={gymId}
+        classData={retirementModalState.classData}
+        onRetireComplete={() => {
+            setRetirementModalState({ isOpen: false, classData: null });
+            confirm({ title: "Success", message: "The class series has been retired.", confirmText: "OK" });
+            refreshData(gymId);
+        }}
+      />
 
       <ClassFormModal
         isOpen={isClassModalOpen}
