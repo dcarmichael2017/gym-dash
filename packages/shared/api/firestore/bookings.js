@@ -692,7 +692,6 @@ export const getMemberAttendanceHistory = async (gymId, memberId) => {
     const q = query(
       attRef,
       where("memberId", "==", memberId),
-      where("status", "in", ["attended", "checked-in"]),
       orderBy("classTimestamp", "desc")
     );
     const snapshot = await getDocs(q);

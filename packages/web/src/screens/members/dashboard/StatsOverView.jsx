@@ -12,7 +12,7 @@ const StatsOverView = ({ gymId, memberId }) => {
             const fetchHistory = async () => {
                 const res = await getMemberAttendanceHistory(gymId, memberId);
                 if (res.success) {
-                    setAttendedCount(res.history.length);
+                    setAttendedCount(res.history.filter(b => b.status === 'attended').length);
                 }
                 setLoading(false);
             };

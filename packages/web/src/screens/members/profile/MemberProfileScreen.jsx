@@ -26,6 +26,7 @@ const MemberProfileScreen = () => {
         setHistoryLoading(true);
         const res = await getMemberAttendanceHistory(currentGym.id, user.uid);
         if (res.success) {
+            console.log('Member History Data:', res.history);
             setAttendanceHistory(res.history);
         }
         setHistoryLoading(false);
@@ -67,24 +68,43 @@ const MemberProfileScreen = () => {
                                 </div>
                             ) : (
                                 <ul className="space-y-2">
-                                    {attendanceHistory.map(record => (
-                                        <li key={record.id} className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                                            <div className="flex justify-between items-start">
-                                                <div>
-                                                    <p className="font-semibold text-sm text-gray-900">{record.className}</p>
-                                                    {record.instructorName && (
-                                                        <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
-                                                            <User size={12} /> {record.instructorName}
-                                                        </p>
-                                                    )}
+                                    {attendanceHistory.map(record => {
+                                        const isAttended = record.status === 'attended';
+                                        const isBooked = record.status === 'booked';
+                                        const isCancelled = record.status === 'cancelled';
+                                        const isNoShow = record.status === 'no-show';
+                                        const isWaitlisted = record.status === 'waitlisted';
+
+                                        let badgeStyle = 'bg-gray-100 text-gray-600 border-gray-200';
+                                        if (isAttended) badgeStyle = 'bg-green-100 text-green-800 border-green-200';
+                                        if (isBooked) badgeStyle = 'bg-blue-100 text-blue-800 border-blue-200';
+                                        if (isCancelled || isNoShow) badgeStyle = 'bg-red-100 text-red-800 border-red-200';
+                                        if (isWaitlisted) badgeStyle = 'bg-yellow-100 text-yellow-800 border-yellow-200';
+                                        
+                                        return (
+                                            <li key={record.id} className={`bg-gray-50 p-3 rounded-lg border border-gray-200 ${isCancelled ? 'opacity-60' : ''}`}>
+                                                <div className="flex justify-between items-start">
+                                                    <div className="flex-1">
+                                                        <p className={`font-semibold text-sm text-gray-900 ${isCancelled ? 'line-through' : ''}`}>{record.className}</p>
+                                                        {record.instructorName && (
+                                                            <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                                                                <User size={12} /> {record.instructorName}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-right text-xs text-gray-500 shrink-0 ml-2">
+                                                        {record.classTimestamp?.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                        {record.classTime && <div className="flex items-center justify-end gap-1 mt-0.5"><Clock size={10} /> {record.classTime}</div>}
+                                                    </div>
                                                 </div>
-                                                <div className="text-right text-xs text-gray-500 shrink-0 ml-2">
-                                                    {record.classTimestamp?.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                                    {record.classTime && <div className="flex items-center justify-end gap-1 mt-0.5"><Clock size={10} /> {record.classTime}</div>}
+                                                <div className="mt-2">
+                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeStyle}`}>
+                                                        {record.status ? record.status.toUpperCase() : 'UNKNOWN'}
+                                                    </span>
                                                 </div>
-                                            </div>
-                                        </li>
-                                    ))}
+                                            </li>
+                                        );
+                                    })}
                                 </ul>
                             )}
                         </div>

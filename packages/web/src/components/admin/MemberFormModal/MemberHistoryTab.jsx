@@ -12,7 +12,10 @@ export const MemberHistoryTab = ({ gymId, memberId }) => {
             const fetchHistory = async () => {
                 setLoading(true);
                 const res = await getMemberAttendanceHistory(gymId, memberId);
-                if (res.success) setHistory(res.history);
+                if (res.success) {
+                    console.log('Admin History Data:', res.history);
+                    setHistory(res.history);
+                }
                 setLoading(false);
             };
             fetchHistory();
@@ -29,7 +32,7 @@ export const MemberHistoryTab = ({ gymId, memberId }) => {
                 {!loading && (
                     <div className="text-right">
                         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Attended</span>
-                        <p className="text-2xl font-bold text-gray-800">{history.length}</p>
+                        <p className="text-2xl font-bold text-gray-800">{history.filter(h => h.status === 'attended').length}</p>
                     </div>
                 )}
             </div>
@@ -76,7 +79,7 @@ export const MemberHistoryTab = ({ gymId, memberId }) => {
                                 const isNoShow = record.status === 'no-show';
 
                                 return (
-                                    <tr key={record.id} className="hover:bg-gray-50 transition-colors">
+                                    <tr key={record.id} className={`hover:bg-gray-50 transition-colors ${isCancelled ? 'line-through text-gray-500' : ''}`}>
                                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
                                             <div className="font-medium text-gray-900">
                                                 {dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -100,7 +103,7 @@ export const MemberHistoryTab = ({ gymId, memberId }) => {
                                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border
                                                 ${isAttended ? 'bg-green-100 text-green-800 border-green-200' : ''}
                                                 ${isBooked ? 'bg-blue-100 text-blue-800 border-blue-200' : ''}
-                                                ${isCancelled ? 'bg-gray-100 text-gray-600 border-gray-200' : ''}
+                                                ${isCancelled ? 'bg-red-100 text-red-800 border-red-200' : ''}
                                                 ${isNoShow ? 'bg-red-100 text-red-800 border-red-200' : ''}
                                             `}>
                                                 {isAttended && <CheckCircle size={10} className="mr-1" />}
