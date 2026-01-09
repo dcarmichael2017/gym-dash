@@ -1,5 +1,6 @@
-import { doc, collection, getDoc, getDocs, updateDoc, query, where, limit, orderBy, increment, runTransaction } from "firebase/firestore";
+import { doc, collection, getDoc, getDocs, updateDoc, query, where, limit, orderBy, increment, runTransaction, writeBatch } from "firebase/firestore";
 import { db } from "../firebaseConfig"; // Adjust path as needed
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { BOOKING_STATUS } from '../../constants/strings'; // Adjust path
 import { createCreditLog } from './credits'; // Import helper from credits module
 
@@ -41,6 +42,14 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
       const [Y, M, D] = classInfo.dateString.split('-').map(Number);
       const classStartObj = new Date(Y, M - 1, D, h, m);
       const now = new Date();
+
+      // If the class series has a recurrenceEndDate, and this booking is AFTER it, block it.
+      if (classData.recurrenceEndDate) {
+        // Compare date strings (YYYY-MM-DD)
+        if (classInfo.dateString > classData.recurrenceEndDate) {
+           throw "This class series has ended.";
+        }
+      }
 
       // A. Booking Window Check (Can I book this far in advance?)
       // ✅ NEW LOGIC
@@ -825,4 +834,23 @@ const getWeekRange = (dateString) => {
   };
 
   return { start: format(monday), end: format(sunday) };
+};
+
+const handleMigration = async () => {
+  const functions = getFunctions();
+  const migrateSeries = httpsCallable(functions, 'migrateClassSeries');
+  
+  try {
+    const result = await migrateSeries({
+      gymId: "currentGymId",
+      oldClassId: "class_123",
+      cutoffDateString: "2026-01-08",
+      newClassData: formState // or null if just deleting
+    });
+    
+    console.log("Refunded Users:", result.data.affectedUserIds);
+    // Show success modal...
+  } catch (error) {
+    console.error(error);
+  }
 };
