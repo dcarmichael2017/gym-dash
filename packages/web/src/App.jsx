@@ -45,6 +45,9 @@ import MemberProfileScreen from './screens/members/profile/MemberProfileScreen';
 // UPDATED IMPORTS FOR STORE
 import { StoreScreen } from './screens/members/store'; // The UI
 import { StoreProvider } from './screens/members/store/StoreContext'; // The Data Layer
+import BroadcastCenterScreen from './screens/admin/BroadcastCenterScreen';
+import CommunityFeedScreen from './screens/admin/CommunityFeedScreen';
+import GroupChatScreen from './screens/admin/GroupChatScreen';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -119,6 +122,9 @@ function App() {
               <Route path="analytics" element={<DashboardAnalyticsScreen />} />
               <Route path="calendar" element={<DashboardCalendarScreen />} />
               <Route path="classes" element={<DashboardClassesScreen />} />
+              <Route path="broadcast" element={<BroadcastCenterScreen />} />
+              <Route path="community" element={<CommunityFeedScreen viewMode="admin" />} />
+              <Route path="chat" element={<GroupChatScreen viewMode="admin" />} />
               <Route path="memberships" element={<DashboardMembershipsScreen />} />
               <Route path="members" element={<DashboardMembersScreen />} />
               <Route path="staff" element={<DashboardStaffScreen />} />
@@ -138,7 +144,8 @@ function App() {
               <Route path="schedule" element={<MemberScheduleScreen />} />
               <Route path="profile" element={<MemberProfileScreen />} />
               
-              {/* NEW STORE ROUTE */}
+              <Route path="community" element={<CommunityFeedScreen viewMode="member" />} />
+              <Route path="chat" element={<GroupChatScreen viewMode="member" />} />
               <Route path="store" element={<StoreScreen />} />
               
               <Route index element={<Navigate to="home" replace />} />
