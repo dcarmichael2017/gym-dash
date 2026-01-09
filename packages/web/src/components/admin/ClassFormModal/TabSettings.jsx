@@ -7,7 +7,8 @@ export const TabSettings = ({
     rankSystems,
     activeRules,
     toggleRule,
-    handleNumberChange
+    handleNumberChange,
+    isReadOnly = false
 }) => {
 
     // ... VisibilityOption component remains the same ...
@@ -34,10 +35,18 @@ export const TabSettings = ({
 
     return (
         <div className="space-y-6 animate-in slide-in-from-right-4 duration-200">
+            {isReadOnly && (
+                <div className="p-3 bg-yellow-50 text-yellow-800 border border-yellow-200 rounded-lg text-sm flex items-center gap-3 -mb-2">
+                    <AlertCircle size={18} className="shrink-0" />
+                    <div>
+                        <p className="font-bold">Class in Progress</p>
+                        <p className="text-xs">Editing is restricted while a session is active.</p>
+                    </div>
+                </div>
+            )}
 
-            {/* ... Visibility and Rank sections remain the same ... */}
-            
-            {/* 1. VISIBILITY SETTINGS */}
+            <div className={isReadOnly ? 'opacity-50 pointer-events-none' : ''}>
+                 {/* 1. VISIBILITY SETTINGS */}
             <div className="space-y-2">
                 <label className="text-sm font-bold text-gray-800 flex items-center gap-2">
                     <Eye className="h-4 w-4 text-gray-500" /> Class Visibility
@@ -209,6 +218,7 @@ export const TabSettings = ({
                         <div className="text-xs text-green-600 py-2">Until Class Ends</div>
                     )}
                 </div>
+            </div>
             </div>
         </div>
     );

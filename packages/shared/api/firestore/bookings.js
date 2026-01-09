@@ -202,7 +202,7 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
       const bookingRulesSnapshot = {
         cancelWindowHours: rules.cancelWindowHours !== undefined ? parseFloat(rules.cancelWindowHours) : 2,
         lateCancelFee: rules.lateCancelFee ? parseFloat(rules.lateCancelFee) : 0,
-        lateBookingMinutes: rules.lateBookingMinutes,
+        lateBookingMinutes: rules.lateBookingMinutes ?? null, // FIX: Ensure value is not undefined
         // ✅ Add cost snapshot for audit trails
         creditCost: baseCost 
       };
@@ -699,6 +699,24 @@ export const getMemberAttendanceHistory = async (gymId, memberId) => {
     return { success: true, history };
   } catch (error) {
     console.error("Attendance history fetch error:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const getFutureBookingsForClass = async (gymId, classId, fromDateString) => {
+  try {
+    const attRef = collection(db, "gyms", gymId, "attendance");
+    const q = query(
+      attRef,
+      where("classId", "==", classId),
+      where("dateString", ">=", fromDateString),
+      where("status", "in", ["booked", "waitlisted", "attended"])
+    );
+    const snapshot = await getDocs(q);
+    const bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    return { success: true, bookings };
+  } catch (error) {
+    console.error("Error fetching future bookings:", error);
     return { success: false, error: error.message };
   }
 };

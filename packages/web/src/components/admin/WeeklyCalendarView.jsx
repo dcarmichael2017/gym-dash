@@ -161,8 +161,11 @@ export const WeeklyCalendarView = ({
 
                       const lookupKey = `${c.id}_${currentDayDateStr}`;
                       const registeredCount = bookingCounts[lookupKey] || 0;
-                      if (c.visibility === 'admin' && registeredCount === 0) {
-                          return false; // Visibility Check: Hide empty admin-only slots.
+                      
+                      // FIX: A class should be visible unless it's a hidden admin class with no one booked.
+                      const isVisible = (c.visibility || 'public') !== 'admin' || registeredCount > 0;
+                      if (!isVisible) {
+                        return false;
                       }
                       
                       // 1. Handle One-Off Events

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, CalendarDays, CreditCard, Sliders, CalendarRange } from 'lucide-react';
-import { createClass, updateClass, getGymDetails } from '../../../../../shared/api/firestore';
+import { X, CalendarDays, CreditCard, Sliders, CalendarRange, Trash2, CheckCircle, Copy, AlertTriangle } from 'lucide-react';
+import { createClass, updateClass, getGymDetails, getFutureBookingsForClass, migrateClassSeries } from '../../../../../shared/api/firestore';
 import { ClassSessionsList } from '../ClassSessionsList';
 import { useConfirm } from '../../../context/ConfirmationContext';
 import { TabSchedule } from './TabSchedule';
@@ -12,6 +12,8 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
     const [activeTab, setActiveTab] = useState('schedule');
     const [rankSystems, setRankSystems] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [isClassActive, setIsClassActive] = useState(false);
+    const [migrationReport, setMigrationReport] = useState(null);
     const isExistingClass = classData && classData.id;
 
     // --- FORM STATE ---
@@ -58,6 +60,26 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
     useEffect(() => {
         if (isOpen) {
             setActiveTab('schedule');
+            setMigrationReport(null);
+
+            // Active Session Immunity Check
+            if (classData?.id && classData.days?.length > 0) {
+                const now = new Date();
+                const dayMap = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const todayName = dayMap[now.getDay()];
+
+                if (classData.days.includes(todayName)) {
+                    const [h, m] = classData.time.split(':').map(Number);
+                    const classStart = new Date(now);
+                    classStart.setHours(h, m, 0, 0);
+                    const classEnd = new Date(classStart.getTime() + (classData.duration || 60) * 60000);
+                    setIsClassActive(now >= classStart && now <= classEnd);
+                } else {
+                    setIsClassActive(false);
+                }
+            } else {
+                setIsClassActive(false);
+            }
 
             const getSetting = (key, hardDefault) => {
                 if (classData?.bookingRules && classData.bookingRules[key] !== undefined) return classData.bookingRules[key];
@@ -151,6 +173,11 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
     const handleSubmit = async (e) => {
         e.preventDefault();
 
+        if (isClassActive) {
+            await showConfirm({ title: "Cannot Save", message: "Settings cannot be changed while a class is in progress.", confirmText: "OK", cancelText: null });
+            return;
+        }
+
         if (!formData.name) {
             await showConfirm({
                 title: "Missing Name",
@@ -183,7 +210,10 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
             }
         }
 
-        setLoading(true);
+        const hasScheduleChanged = isExistingClass && formData.frequency !== 'Single Event' && (
+            formData.time !== classData.time ||
+            JSON.stringify((formData.days || []).sort()) !== JSON.stringify((classData.days || []).sort())
+        );
 
         const bookingRulesPayload = formData.useCustomRules ? {
             bookingWindowDays: activeRules.booking ? (parseInt(formData.bookingWindowDays) || 7) : null,
@@ -208,6 +238,36 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
             visibility: formData.visibility || 'public'
         };
 
+        if (hasScheduleChanged) {
+            const today = new Date().toISOString().split('T')[0];
+            const futureBookingsRes = await getFutureBookingsForClass(gymId, classData.id, today);
+
+            if (futureBookingsRes.success && futureBookingsRes.bookings.length > 0) {
+                const confirmed = await showConfirm({
+                    title: "Migrate Class Series?",
+                    message: `This schedule change will cancel ${futureBookingsRes.bookings.length} upcoming booking(s). Members will be refunded and the old series will be hidden. A new series with these settings will be created. Proceed?`,
+                    confirmText: "Yes, Migrate Series",
+                    cancelText: "Go Back",
+                    type: 'danger'
+                });
+
+                if (!confirmed) return;
+                
+                setLoading(true);
+                const result = await migrateClassSeries(gymId, { oldClassId: classData.id, cutoffDateString: today, newClassData: payload });
+
+                if (result.success) {
+                    setMigrationReport({ title: 'Migration Successful', count: result.refundedUserIds.length, list: result.refundedUserIds.join('\n') });
+                } else {
+                    await showConfirm({ title: "Error", message: `Migration failed: ${result.error}`, confirmText: "OK", cancelText: null });
+                }
+                setLoading(false);
+                return;
+            }
+        }
+
+        setLoading(true);
+
         let result;
         if (classData) {
             result = await updateClass(gymId, classData.id, payload);
@@ -227,6 +287,30 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                 confirmText: "OK",
                 cancelText: null
             });
+        }
+    };
+
+    const handleDeleteSeries = async () => {
+        if (!isExistingClass) return;
+
+        const today = new Date().toISOString().split('T')[0];
+        const futureBookingsRes = await getFutureBookingsForClass(gymId, classData.id, today);
+        let message = "This will end the class series from today onwards, hiding it from the public schedule. Are you sure?";
+        if (futureBookingsRes.success && futureBookingsRes.bookings.length > 0) {
+            message = `This will end the class series and cancel ${futureBookingsRes.bookings.length} upcoming booking(s). Members will be refunded. Are you sure?`;
+        }
+        
+        const confirmed = await showConfirm({ title: "End Class Series?", message, confirmText: "Yes, End Series", cancelText: "Cancel", type: 'danger' });
+
+        if (confirmed) {
+            setLoading(true);
+            const result = await migrateClassSeries(gymId, { oldClassId: classData.id, cutoffDateString: today, newClassData: null });
+            if (result.success) {
+                setMigrationReport({ title: 'Series Ended', count: result.refundedUserIds.length, list: result.refundedUserIds.join('\n') });
+            } else {
+                await showConfirm({ title: "Error", message: `Failed to end series: ${result.error}`, confirmText: "OK", cancelText: null });
+            }
+            setLoading(false);
         }
     };
 
@@ -301,62 +385,106 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
 
                 {/* Body */}
                 <div className="overflow-y-auto p-6 flex-1">
-                    <form id="classForm" onSubmit={handleSubmit} className="space-y-6">
-                        {activeTab === 'schedule' && (
-                            <TabSchedule
-                                formData={formData}
-                                setFormData={setFormData}
-                                staffList={staffList}
-                                toggleDay={toggleDay}
-                            />
-                        )}
+                    {migrationReport ? (
+                        <div className="text-center flex flex-col items-center justify-center h-full animate-in fade-in">
+                            <CheckCircle className="h-16 w-16 text-green-500 mb-4" />
+                            <h3 className="text-xl font-bold text-gray-800">{migrationReport.title}</h3>
+                            <p className="text-gray-500 mt-1">
+                                {migrationReport.count > 0 
+                                    ? `${migrationReport.count} member(s) with future bookings were refunded.` 
+                                    : "No members were affected."
+                                }
+                            </p>
+                            {migrationReport.count > 0 && (
+                                <div className="w-full max-w-xs mt-4">
+                                    <textarea readOnly value={migrationReport.list} rows={5} className="w-full text-xs p-2 border rounded-md bg-gray-50 text-gray-600" />
+                                    <button
+                                        onClick={() => navigator.clipboard.writeText(migrationReport.list)}
+                                        className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium text-sm transition-colors"
+                                    >
+                                        <Copy size={14} /> Copy List
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <form id="classForm" onSubmit={handleSubmit} className="space-y-6">
+                            {activeTab === 'schedule' && (
+                                <TabSchedule
+                                    formData={formData}
+                                    setFormData={setFormData}
+                                    staffList={staffList}
+                                    toggleDay={toggleDay}
+                                />
+                            )}
 
-                        {activeTab === 'access' && (
-                            <TabAccess
-                                formData={formData}
-                                setFormData={setFormData}
-                                membershipList={membershipList}
-                                toggleMembership={toggleMembership}
-                                toggleAllMemberships={toggleAllMemberships}
-                                handleNumberChange={handleNumberChange}
-                            />
-                        )}
+                            {activeTab === 'access' && (
+                                <TabAccess
+                                    formData={formData}
+                                    setFormData={setFormData}
+                                    membershipList={membershipList}
+                                    toggleMembership={toggleMembership}
+                                    toggleAllMemberships={toggleAllMemberships}
+                                    handleNumberChange={handleNumberChange}
+                                />
+                            )}
 
-                        {activeTab === 'settings' && (
-                            <TabSettings
-                                formData={formData}
-                                setFormData={setFormData}
-                                rankSystems={rankSystems}
-                                activeRules={activeRules}
-                                toggleRule={toggleRule}
-                                handleNumberChange={handleNumberChange}
-                            />
-                        )}
+                            {activeTab === 'settings' && (
+                                <TabSettings
+                                    formData={formData}
+                                    setFormData={setFormData}
+                                    rankSystems={rankSystems}
+                                    activeRules={activeRules}
+                                    toggleRule={toggleRule}
+                                    handleNumberChange={handleNumberChange}
+                                    isReadOnly={isClassActive}
+                                />
+                            )}
 
-                        {activeTab === 'sessions' && (
-                            <ClassSessionsList
-                                classData={{ ...classData, ...formData }}
-                                onCancelSession={(dateStr, shouldCancel) => {
-                                    setFormData(prev => {
-                                        const current = prev.cancelledDates || [];
-                                        if (shouldCancel) {
-                                            return { ...prev, cancelledDates: [...current, dateStr] };
-                                        } else {
-                                            return { ...prev, cancelledDates: current.filter(d => d !== dateStr) };
-                                        }
-                                    });
-                                }}
-                            />
-                        )}
-                    </form>
+                            {activeTab === 'sessions' && (
+                                <ClassSessionsList
+                                    classData={{ ...classData, ...formData }}
+                                    onCancelSession={(dateStr, shouldCancel) => {
+                                        setFormData(prev => {
+                                            const current = prev.cancelledDates || [];
+                                            if (shouldCancel) {
+                                                return { ...prev, cancelledDates: [...current, dateStr] };
+                                            } else {
+                                                return { ...prev, cancelledDates: current.filter(d => d !== dateStr) };
+                                            }
+                                        });
+                                    }}
+                                />
+                            )}
+                        </form>
+                    )}
                 </div>
 
                 {/* Footer */}
-                <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3 shrink-0">
-                    <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors">Cancel</button>
-                    <button type="submit" form="classForm" disabled={loading} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm disabled:opacity-50">
-                        {loading ? 'Saving...' : (classData ? 'Save Changes' : 'Create Class')}
-                    </button>
+                <div className={`px-6 py-4 border-t border-gray-100 bg-gray-50 flex ${isExistingClass && !migrationReport ? 'justify-between' : 'justify-end'} items-center gap-3 shrink-0`}>
+                    {isExistingClass && !migrationReport && (
+                        <button
+                            type="button"
+                            onClick={handleDeleteSeries}
+                            disabled={loading || isClassActive}
+                            className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg font-medium transition-colors text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                           <Trash2 size={14} /> End Series
+                        </button>
+                    )}
+
+                    {migrationReport ? (
+                        <button type="button" onClick={() => { onSave(); onClose(); }} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm">
+                            Done
+                        </button>
+                    ) : (
+                        <div className="flex justify-end gap-3">
+                            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors">Cancel</button>
+                            <button type="submit" form="classForm" disabled={loading || isClassActive} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm disabled:opacity-50">
+                                {loading ? 'Saving...' : (classData ? 'Save Changes' : 'Create Class')}
+                            </button>
+                        </div>
+                    )}
                 </div>
 
             </div>

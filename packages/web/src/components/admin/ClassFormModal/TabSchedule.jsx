@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, User, RefreshCw, Calendar } from 'lucide-react';
+import { Clock, User, RefreshCw, Calendar, Info } from 'lucide-react';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const FREQUENCIES = ["Weekly", "Bi-Weekly", "Every Three Weeks", "Once a Month", "Single Event"];
@@ -7,9 +7,19 @@ const FREQUENCIES = ["Weekly", "Bi-Weekly", "Every Three Weeks", "Once a Month",
 export const TabSchedule = ({ formData, setFormData, staffList, toggleDay }) => {
 
     const isSingleEvent = formData.frequency === 'Single Event';
+    const isEnded = !!formData.recurrenceEndDate;
 
     return (
         <div className="space-y-5 animate-in slide-in-from-right-4 duration-200">
+             {isEnded && (
+                <div className="p-3 bg-red-50 text-red-800 border border-red-200 rounded-lg text-sm flex items-center gap-3">
+                    <Info size={18} className="shrink-0" />
+                    <div>
+                        <p className="font-bold">This class series has ended.</p>
+                        <p className="text-xs">This is a historical record. To restart it, create a new class.</p>
+                    </div>
+                </div>
+            )}
             <div>
                 <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase">Class Name</label>
                 <input
