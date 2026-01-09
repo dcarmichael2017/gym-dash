@@ -14,6 +14,7 @@ const NextClassCard = ({ hasActiveMembership }) => {
 
   const [nextClass, setNextClass] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isBooked, setIsBooked] = useState(false);
   const [includedPlanNames, setIncludedPlanNames] = useState([]);
   const [instructorName, setInstructorName] = useState(null);
 
@@ -26,6 +27,7 @@ const NextClassCard = ({ hasActiveMembership }) => {
 
       setLoading(true);
       setNextClass(null);
+      setIsBooked(false);
       setInstructorName(null);
       setIncludedPlanNames([]);
 
@@ -53,6 +55,16 @@ const NextClassCard = ({ hasActiveMembership }) => {
 
         if (foundNextClass) {
           setNextClass(foundNextClass);
+
+          // Check if user is already booked for this specific class instance
+          if (auth.currentUser) {
+            const attendanceId = `${foundNextClass.id}_${foundNextClass.dateString}_${auth.currentUser.uid}`;
+            const attendanceRef = doc(db, 'gyms', currentGym.id, 'attendance', attendanceId);
+            const attendanceSnap = await getDoc(attendanceRef);
+            if (attendanceSnap.exists() && ['booked', 'waitlisted'].includes(attendanceSnap.data().status)) {
+              setIsBooked(true);
+            }
+          }
 
           // Handle Instructor Name
           if (foundNextClass.instructorId && !foundNextClass.instructorName) {
@@ -158,8 +170,8 @@ const NextClassCard = ({ hasActiveMembership }) => {
 
   // --- NAVIGATION LOGIC ---
   const handleAction = () => {
-      if (hasActiveMembership) {
-          // 1. ACTIVE MEMBER -> Go to Schedule to book immediately
+      if (isBooked || hasActiveMembership) {
+          // 1. ALREADY BOOKED OR ACTIVE MEMBER -> Go to Schedule
           navigate('/members/schedule');
       } else {
           // 2. PROSPECT -> Determine best store tab
@@ -227,7 +239,11 @@ const NextClassCard = ({ hasActiveMembership }) => {
 
             <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/20">
                 <div className="flex flex-col">
-                    {!hasActiveMembership ? (
+                    {isBooked ? (
+                        <span className="text-xs font-bold bg-white/20 px-2 py-1 rounded mb-1 w-fit">
+                            You're Booked!
+                        </span>
+                    ) : !hasActiveMembership ? (
                         <>
                             {nextClass.dropInEnabled ? (
                                 <>
@@ -257,7 +273,9 @@ const NextClassCard = ({ hasActiveMembership }) => {
                     className="bg-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1 hover:bg-blue-50 transition-colors shadow-sm"
                     style={{ color: theme.primaryColor }}
                 >
-                    {hasActiveMembership ? (
+                    {isBooked ? (
+                        <>View Schedule <ArrowRight size={14} /></>
+                    ) : hasActiveMembership ? (
                         <>Book <ArrowRight size={14} /></>
                     ) : (
                         // If no membership, check if drop-in is allowed to change text
