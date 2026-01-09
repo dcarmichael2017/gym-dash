@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Loader2, Calendar, User, AlertTriangle, ArrowRight } from 'lucide-react';
+import { X, Loader2, Calendar, User, AlertTriangle, ArrowRight, Trash2 } from 'lucide-react';
 import { getFutureBookingsForClass, handleClassSeriesRetirement, convertSeriesToSingleEvent } from '../../../../shared/api/firestore';
 import { useConfirm } from '../../context/ConfirmationContext';
 
