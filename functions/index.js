@@ -109,3 +109,92 @@ exports.detectWaitlistPromotion = onDocumentUpdated(
       return null;
     },
 );
+
+// --- FUNCTION 3: MIGRATE CLASS SERIES (v2) ---
+exports.migrateClassSeries = onCall(
+    {region: "us-central1"},
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, oldClassId, cutoffDateString, newClassData} = request.data;
+      if (!gymId || !oldClassId || !cutoffDateString) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Missing required arguments: gymId, oldClassId, cutoffDateString.",
+        );
+      }
+
+      const db = admin.firestore();
+      const batch = db.batch();
+      const refundedUserIds = new Set();
+
+      try {
+        // 1. Find all future bookings to be cancelled and refunded
+        const bookingsQuery = db.collection("gyms").doc(gymId).collection("attendance")
+            .where("classId", "==", oldClassId)
+            .where("dateString", ">=", cutoffDateString)
+            .where("status", "in", ["booked", "waitlisted"]);
+
+        const bookingsSnapshot = await bookingsQuery.get();
+
+        for (const doc of bookingsSnapshot.docs) {
+          const booking = doc.data();
+          const userRef = db.collection("users").doc(booking.memberId);
+
+          // 2. Refund credits if any were used
+          if (booking.costUsed > 0) {
+            batch.update(userRef, {
+              classCredits: admin.firestore.FieldValue.increment(booking.costUsed),
+            });
+
+            // 3. Create a credit log for the refund
+            const creditLogRef = db.collection("users").doc(booking.memberId).collection("creditLogs").doc();
+            batch.set(creditLogRef, {
+              amount: booking.costUsed,
+              changeType: "refund",
+              timestamp: admin.firestore.FieldValue.serverTimestamp(),
+              reason: `Admin migration: ${booking.className}`,
+              source: "admin_migration",
+            });
+          }
+
+          // 4. Mark the booking as cancelled
+          batch.update(doc.ref, {
+            status: "cancelled",
+            cancelledAt: new Date(),
+            refunded: true,
+            refundAmount: booking.costUsed || 0,
+          });
+
+          refundedUserIds.add(booking.memberName || booking.memberId);
+        }
+
+        // 5. "Ghost" the old class series by setting its end date
+        const oldClassRef = db.collection("gyms").doc(gymId).collection("classes").doc(oldClassId);
+        batch.update(oldClassRef, {
+          recurrenceEndDate: cutoffDateString,
+          visibility: "admin", // Hide from public view
+        });
+
+        // 6. "Spawn" a new class series if new data is provided
+        if (newClassData) {
+          const newClassRef = db.collection("gyms").doc(gymId).collection("classes").doc();
+          batch.set(newClassRef, {
+            ...newClassData,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            recurrenceEndDate: null, // Ensure new series has no end date
+            attendanceCount: 0,
+          });
+        }
+
+        await batch.commit();
+
+        return {success: true, refundedUserIds: Array.from(refundedUserIds)};
+      } catch (error) {
+        console.error("Error migrating class series:", error);
+        throw new HttpsError("internal", "An unexpected error occurred during migration.");
+      }
+    },
+);

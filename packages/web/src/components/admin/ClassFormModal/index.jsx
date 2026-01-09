@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, CalendarDays, CreditCard, Sliders, CalendarRange, Trash2, CheckCircle, Copy, AlertTriangle } from 'lucide-react';
-import { createClass, updateClass, getGymDetails, getFutureBookingsForClass, migrateClassSeries } from '../../../../../shared/api/firestore';
+import { createClass, updateClass, getGymDetails, getFutureBookingsForClass, migrateClassSeries, getAllBookingsForClass, deleteClass } from '../../../../../shared/api/firestore';
 import { ClassSessionsList } from '../ClassSessionsList';
 import { useConfirm } from '../../../context/ConfirmationContext';
 import { TabSchedule } from './TabSchedule';
@@ -293,24 +293,51 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
     const handleDeleteSeries = async () => {
         if (!isExistingClass) return;
 
-        const today = new Date().toISOString().split('T')[0];
-        const futureBookingsRes = await getFutureBookingsForClass(gymId, classData.id, today);
-        let message = "This will end the class series from today onwards, hiding it from the public schedule. Are you sure?";
-        if (futureBookingsRes.success && futureBookingsRes.bookings.length > 0) {
-            message = `This will end the class series and cancel ${futureBookingsRes.bookings.length} upcoming booking(s). Members will be refunded. Are you sure?`;
-        }
-        
-        const confirmed = await showConfirm({ title: "End Class Series?", message, confirmText: "Yes, End Series", cancelText: "Cancel", type: 'danger' });
+        setLoading(true);
+        const historyCheck = await getAllBookingsForClass(gymId, classData.id);
+        setLoading(false);
 
-        if (confirmed) {
-            setLoading(true);
-            const result = await migrateClassSeries(gymId, { oldClassId: classData.id, cutoffDateString: today, newClassData: null });
-            if (result.success) {
-                setMigrationReport({ title: 'Series Ended', count: result.refundedUserIds.length, list: result.refundedUserIds.join('\n') });
-            } else {
-                await showConfirm({ title: "Error", message: `Failed to end series: ${result.error}`, confirmText: "OK", cancelText: null });
+        if (historyCheck.success && historyCheck.bookings.length === 0) {
+            // CASE A: No history, safe to hard delete.
+            const confirmed = await showConfirm({
+                title: "Permanently Delete Class?",
+                message: "This class has no booking history and can be safely deleted. This action cannot be undone.",
+                confirmText: "Yes, Delete Permanently",
+                cancelText: "Cancel",
+                type: 'danger'
+            });
+            if (confirmed) {
+                setLoading(true);
+                const result = await deleteClass(gymId, classData.id);
+                setLoading(false);
+                if (result.success) {
+                    onSave();
+                    onClose();
+                } else {
+                    await showConfirm({ title: "Error", message: `Failed to delete: ${result.error}`, confirmText: "OK", cancelText: null });
+                }
             }
-            setLoading(false);
+        } else {
+            // CASE B: History exists, must ghost the series.
+            const today = new Date().toISOString().split('T')[0];
+            const futureBookingsRes = await getFutureBookingsForClass(gymId, classData.id, today);
+            let message = "This will end the class series from today onwards, hiding it from the public schedule. All historical records will be preserved. Are you sure?";
+            if (futureBookingsRes.success && futureBookingsRes.bookings.length > 0) {
+                message = `This will end the class series and cancel ${futureBookingsRes.bookings.length} upcoming booking(s). Members will be refunded, and historical records will be preserved. Are you sure?`;
+            }
+            
+            const confirmed = await showConfirm({ title: "End Class Series?", message, confirmText: "Yes, End Series", cancelText: "Cancel", type: 'danger' });
+
+            if (confirmed) {
+                setLoading(true);
+                const result = await migrateClassSeries(gymId, { oldClassId: classData.id, cutoffDateString: today, newClassData: null });
+                if (result.success) {
+                    setMigrationReport({ title: 'Series Ended', count: result.refundedUserIds.length, list: result.refundedUserIds.join('\n') });
+                } else {
+                    await showConfirm({ title: "Error", message: `Failed to end series: ${result.error}`, confirmText: "OK", cancelText: null });
+                }
+                setLoading(false);
+            }
         }
     };
 
