@@ -3,7 +3,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { Plus, Trash2, Clock, Calendar as CalendarIcon, User, CalendarDays, Layers, RotateCcw, Archive } from 'lucide-react';
 
 import { auth, db } from '../../../../shared/api/firebaseConfig';
-import { getClasses, handleClassSeriesRetirement, getStaffList, getMembershipTiers, getGymDetails, unarchiveClass } from '../../../../shared/api/firestore';
+import { getClasses, handleClassSeriesRetirement, getStaffList, getMembershipTiers, getGymDetails, unarchiveClass, getFutureBookingsForClass } from '../../../../shared/api/firestore';
 import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 import { useConfirm } from '../../context/ConfirmationContext';
 import { ClassFormModal } from '../../components/admin/ClassFormModal';
@@ -74,15 +74,35 @@ const DashboardClassesScreen = () => {
 
   const handleDeleteClass = async (e, classId) => {
     e.stopPropagation();
-    const confirmed = await confirm({
-        title: "Retire Class Series?",
-        message: "This will check for booking history. If none exists, the class will be deleted. If history exists, it will be archived to preserve records.",
-        confirmText: "Yes, Retire",
-        type: 'danger'
-    });
+    const todayStr = new Date().toISOString().split('T')[0];
+    const futureBookingsRes = await getFutureBookingsForClass(gymId, classId, todayStr);
+    const hasFutureBookings = futureBookingsRes.success && futureBookingsRes.bookings.length > 0;
+    
+    let confirmed = false;
+    let refundPolicy = 'none';
+
+    if (hasFutureBookings) {
+        const bookingCount = futureBookingsRes.bookings.length;
+        confirmed = await confirm({
+            title: "Impact Review",
+            message: `This series has ${bookingCount} upcoming booking(s). Archiving will cancel them.`,
+            confirmText: "Refund Credits & Archive",
+            cancelText: "Cancel",
+            type: 'danger'
+        });
+        if (confirmed) refundPolicy = 'refund';
+
+    } else {
+        confirmed = await confirm({
+            title: "Retire Class Series?",
+            message: "No future bookings found. This will archive or delete the series based on its past history.",
+            confirmText: "Yes, Retire",
+            cancelText: "Cancel",
+        });
+    }
 
     if (confirmed) {
-        const result = await handleClassSeriesRetirement(gymId, classId);
+        const result = await handleClassSeriesRetirement(gymId, classId, refundPolicy);
         if (result.success) {
             let title = "Success";
             let message = "";
@@ -189,7 +209,8 @@ const DashboardClassesScreen = () => {
           })
           .map((cls) => {
             const todayStr = new Date().toISOString().split('T')[0];
-            const isArchived = cls.recurrenceEndDate && cls.recurrenceEndDate < todayStr;
+            const isArchived = cls.recurrenceEndDate && cls.recurrenceEndDate <= todayStr;
+            console.log(`Class: ${cls.name}, EndDate: ${cls.recurrenceEndDate}, Today: ${todayStr}, IsArchived: ${isArchived}`);
 
             return (
               <div 

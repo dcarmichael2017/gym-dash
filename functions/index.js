@@ -118,7 +118,7 @@ exports.migrateClassSeries = onCall(
         throw new HttpsError("unauthenticated", "You must be logged in.");
       }
 
-      const {gymId, oldClassId, cutoffDateString, newClassData} = request.data;
+      const {gymId, oldClassId, cutoffDateString, newClassData, refundPolicy = 'refund'} = request.data;
       if (!gymId || !oldClassId || !cutoffDateString) {
         throw new HttpsError(
             "invalid-argument",
@@ -143,8 +143,8 @@ exports.migrateClassSeries = onCall(
           const booking = doc.data();
           const userRef = db.collection("users").doc(booking.memberId);
 
-          // 2. Refund credits if any were used
-          if (booking.costUsed > 0) {
+          // 2. Refund credits if any were used, based on the policy
+          if (refundPolicy === 'refund' && booking.costUsed > 0) {
             batch.update(userRef, {
               classCredits: admin.firestore.FieldValue.increment(booking.costUsed),
             });

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, CalendarDays, CreditCard, Sliders, CalendarRange, Trash2, CheckCircle, Copy, AlertTriangle } from 'lucide-react';
-import { createClass, updateClass, getGymDetails, getFutureBookingsForClass, migrateClassSeries, getAllBookingsForClass, deleteClass } from '../../../../../shared/api/firestore';
+import { createClass, updateClass, getGymDetails, getFutureBookingsForClass, migrateClassSeries, getAllBookingsForClass, deleteClass, handleClassSeriesRetirement } from '../../../../../shared/api/firestore';
 import { ClassSessionsList } from '../ClassSessionsList';
 import { useConfirm } from '../../../context/ConfirmationContext';
 import { TabSchedule } from './TabSchedule';
@@ -289,53 +289,45 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
         if (!isExistingClass) return;
 
         setLoading(true);
-        const historyCheck = await getAllBookingsForClass(gymId, classData.id);
+        const today = new Date().toISOString().split('T')[0];
+        const futureBookingsRes = await getFutureBookingsForClass(gymId, classData.id, today);
         setLoading(false);
 
-        if (historyCheck.success && historyCheck.bookings.length === 0) {
-            // CASE A: No history, safe to hard delete.
-            const confirmed = await showConfirm({
-                title: "Permanently Delete Class?",
-                message: "This class has no booking history and can be safely deleted. This action cannot be undone.",
-                confirmText: "Yes, Delete Permanently",
+        const hasFutureBookings = futureBookingsRes.success && futureBookingsRes.bookings.length > 0;
+        let confirmed = false;
+        let refundPolicy = 'none';
+
+        if (hasFutureBookings) {
+            const bookingCount = futureBookingsRes.bookings.length;
+            confirmed = await showConfirm({
+                title: "Impact Review",
+                message: `This series has ${bookingCount} upcoming booking(s) that will be cancelled.`,
+                confirmText: "Refund Credits & Archive",
                 cancelText: "Cancel",
                 type: 'danger'
             });
             if (confirmed) {
-                setLoading(true);
-                const result = await deleteClass(gymId, classData.id);
-                setLoading(false);
-                if (result.success) {
-                    onSave();
-                    onClose();
-                } else {
-                    await showConfirm({ title: "Error", message: `Failed to delete: ${result.error}`, confirmText: "OK", cancelText: null });
-                }
+                refundPolicy = 'refund';
             }
         } else {
-            // CASE B: History exists, must ghost the series.
-            const today = new Date().toISOString().split('T')[0];
-            const futureBookingsRes = await getFutureBookingsForClass(gymId, classData.id, today);
-            let message = "This will end the class series from today onwards, hiding it from the public schedule. All historical records will be preserved. Are you sure?";
-            
-            if (isClassActive) {
-                message = "This class is currently in progress. Ending the series will keep the current session active but remove all future occurrences from tomorrow onwards.";
-            } else if (futureBookingsRes.success && futureBookingsRes.bookings.length > 0) {
-                message = `This will end the class series and cancel ${futureBookingsRes.bookings.length} upcoming booking(s). Members will be refunded, and historical records will be preserved. Are you sure?`;
+             confirmed = await showConfirm({
+                title: "End Class Series?",
+                message: "No future bookings found. This will archive or delete the series based on its past history.",
+                confirmText: "Yes, End Series",
+                cancelText: "Cancel"
+            });
+        }
+        
+        if (confirmed) {
+            setLoading(true);
+            const result = await handleClassSeriesRetirement(gymId, classData.id, refundPolicy);
+            if (result.success) {
+                let reportTitle = result.action === 'deleted' ? 'Series Deleted' : 'Series Ended';
+                setMigrationReport({ title: reportTitle, count: result.refundedCount || 0, list: result.refundedUserIds?.join('\n') || '' });
+            } else {
+                await showConfirm({ title: "Error", message: `Failed to end series: ${result.error}`, confirmText: "OK", cancelText: null });
             }
-            
-            const confirmed = await showConfirm({ title: "End Class Series?", message, confirmText: "Yes, End Series", cancelText: "Cancel", type: 'danger' });
-
-            if (confirmed) {
-                setLoading(true);
-                const result = await migrateClassSeries(gymId, { oldClassId: classData.id, cutoffDateString: today, newClassData: null });
-                if (result.success) {
-                    setMigrationReport({ title: 'Series Ended', count: result.refundedUserIds.length, list: result.refundedUserIds.join('\n') });
-                } else {
-                    await showConfirm({ title: "Error", message: `Failed to end series: ${result.error}`, confirmText: "OK", cancelText: null });
-                }
-                setLoading(false);
-            }
+            setLoading(false);
         }
     };
 

@@ -242,7 +242,7 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
   }
 };
 
-export const handleClassSeriesRetirement = async (gymId, classId) => {
+export const handleClassSeriesRetirement = async (gymId, classId, refundPolicy = 'refund') => {
     try {
         const historyCheck = await getAllBookingsForClass(gymId, classId);
 
@@ -257,7 +257,12 @@ export const handleClassSeriesRetirement = async (gymId, classId) => {
         } else if (historyCheck.success) {
             // Case B: History exists, must archive ("ghost").
             const today = new Date().toISOString().split('T')[0];
-            const result = await migrateClassSeries(gymId, { oldClassId: classId, cutoffDateString: today, newClassData: null });
+            const result = await migrateClassSeries(gymId, { 
+                oldClassId: classId, 
+                cutoffDateString: today, 
+                newClassData: null,
+                refundPolicy 
+            });
              if (result.success) {
                 return { success: true, action: 'archived', refundedCount: result.refundedUserIds.length };
             } else {
@@ -915,7 +920,7 @@ const getWeekRange = (dateString) => {
   return { start: format(monday), end: format(sunday) };
 };
 
-export const migrateClassSeries = async (gymId, { oldClassId, cutoffDateString, newClassData }) => {
+export const migrateClassSeries = async (gymId, { oldClassId, cutoffDateString, newClassData, refundPolicy = 'refund' }) => {
   const functions = getFunctions();
   const migrate = httpsCallable(functions, 'migrateClassSeries');
   
@@ -924,7 +929,8 @@ export const migrateClassSeries = async (gymId, { oldClassId, cutoffDateString, 
       gymId,
       oldClassId,
       cutoffDateString,
-      newClassData // This can be null if just ghosting
+      newClassData, // This can be null if just ghosting
+      refundPolicy
     });
     
     // As requested, return the list of refunded users.
