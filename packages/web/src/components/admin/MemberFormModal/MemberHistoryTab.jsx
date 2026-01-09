@@ -1,7 +1,7 @@
 // src/features/members/components/MemberFormModal/MemberHistoryTab.jsx
 import React, { useState, useEffect } from 'react';
 import { History, Calendar, Clock, CheckCircle, User } from 'lucide-react'; // Added User icon
-import { getMemberAttendance } from '../../../../../shared/api/firestore';
+import { getMemberAttendanceHistory } from '../../../../../shared/api/firestore';
 
 export const MemberHistoryTab = ({ gymId, memberId }) => {
     const [history, setHistory] = useState([]);
@@ -11,7 +11,7 @@ export const MemberHistoryTab = ({ gymId, memberId }) => {
         if (memberId) {
             const fetchHistory = async () => {
                 setLoading(true);
-                const res = await getMemberAttendance(gymId, memberId);
+                const res = await getMemberAttendanceHistory(gymId, memberId);
                 if (res.success) setHistory(res.history);
                 setLoading(false);
             };
@@ -23,9 +23,15 @@ export const MemberHistoryTab = ({ gymId, memberId }) => {
         <div className="space-y-4 animate-in slide-in-from-right-4 duration-200">
             <div className="flex items-center justify-between">
                 <div>
-                    <h4 className="font-bold text-gray-800">Class History</h4>
-                    <p className="text-xs text-gray-500">Recent attendance & bookings</p>
+                    <h4 className="font-bold text-gray-800">Attendance History</h4>
+                    <p className="text-xs text-gray-500">Showing confirmed attendance records.</p>
                 </div>
+                {!loading && (
+                    <div className="text-right">
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Attended</span>
+                        <p className="text-2xl font-bold text-gray-800">{history.length}</p>
+                    </div>
+                )}
             </div>
 
             <div className="border border-gray-200 rounded-lg overflow-hidden">

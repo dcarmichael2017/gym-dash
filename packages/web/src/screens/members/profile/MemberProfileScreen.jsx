@@ -1,10 +1,11 @@
-import React from 'react';
-import { User, Mail, Phone, LogOut, Edit2, Check, X, Loader2, ShieldAlert } from 'lucide-react';
+import React, { useState } from 'react';
+import { User, Mail, Phone, LogOut, Edit2, Check, X, Loader2, ShieldAlert, History, XCircle, Calendar, Clock } from 'lucide-react';
 import { useMemberProfile } from './useMemberProfile';
 import { ProfileField } from './ProfileFields';
 import { MembershipSection } from './MembershipSection';
 import { LegalSection } from './LegalSection';
 import WaiverModal from '../dashboard/WaiverModal';
+import { getMemberAttendanceHistory } from '../../../../../shared/api/firestore/bookings';
 import { auth } from '../../../../../../packages/shared/api/firebaseConfig';
 
 const MemberProfileScreen = () => {
@@ -14,6 +15,21 @@ const MemberProfileScreen = () => {
         handleUpdateProfile, handleCancel, handleWaiverSign, formatPhoneNumber,
         getStatusDisplay, currentGym, memberships, showSuccess
     } = useMemberProfile();
+
+    const [showHistoryModal, setShowHistoryModal] = useState(false);
+    const [attendanceHistory, setAttendanceHistory] = useState([]);
+    const [historyLoading, setHistoryLoading] = useState(true);
+
+    const handleOpenHistory = async () => {
+        if (!currentGym?.id || !user?.uid) return;
+        setShowHistoryModal(true);
+        setHistoryLoading(true);
+        const res = await getMemberAttendanceHistory(currentGym.id, user.uid);
+        if (res.success) {
+            setAttendanceHistory(res.history);
+        }
+        setHistoryLoading(false);
+    };
 
     const theme = currentGym?.theme || { primaryColor: '#2563eb' };
     const myMembership = memberships?.find(m => m.gymId === currentGym?.id);
@@ -25,6 +41,57 @@ const MemberProfileScreen = () => {
 
     return (
         <div className="pb-32 bg-gray-50 min-h-screen relative">
+            {/* ATTENDANCE HISTORY MODAL */}
+            {showHistoryModal && (
+                <div className="fixed inset-0 bg-black/60 z-[120] flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-white rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col shadow-xl">
+                        <div className="p-4 border-b flex justify-between items-center shrink-0">
+                            <div className="flex items-center gap-2">
+                                <History size={18} className="text-gray-500" />
+                                <h3 className="font-bold text-lg text-gray-800">Attendance History</h3>
+                            </div>
+                            <button onClick={() => setShowHistoryModal(false)} className="text-gray-400 hover:text-gray-800 transition-colors">
+                                <XCircle size={22}/>
+                            </button>
+                        </div>
+                        <div className="p-2 sm:p-4 overflow-y-auto">
+                            {historyLoading ? (
+                                <div className="text-center py-16 text-gray-500">
+                                    <Loader2 className="animate-spin inline-block mb-2" />
+                                    <p>Loading history...</p>
+                                </div>
+                            ) : attendanceHistory.length === 0 ? (
+                                <div className="text-center py-16 text-gray-500">
+                                    <Calendar className="inline-block mb-2" />
+                                    <p>No attendance records found.</p>
+                                </div>
+                            ) : (
+                                <ul className="space-y-2">
+                                    {attendanceHistory.map(record => (
+                                        <li key={record.id} className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <p className="font-semibold text-sm text-gray-900">{record.className}</p>
+                                                    {record.instructorName && (
+                                                        <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                                                            <User size={12} /> {record.instructorName}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                <div className="text-right text-xs text-gray-500 shrink-0 ml-2">
+                                                    {record.classTimestamp?.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                    {record.classTime && <div className="flex items-center justify-end gap-1 mt-0.5"><Clock size={10} /> {record.classTime}</div>}
+                                                </div>
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* SUCCESS TOAST */}
             {showSuccess && (
                 <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[110] animate-in fade-in slide-in-from-top-4 duration-300">
@@ -158,6 +225,13 @@ const MemberProfileScreen = () => {
                         onOpenWaiver={() => setShowWaiverModal(true)}
                     />
                 )}
+
+                <button
+                    onClick={handleOpenHistory}
+                    className="w-full py-4 rounded-2xl bg-white text-gray-700 font-bold text-sm border border-gray-200 shadow-sm active:scale-95 transition-transform flex items-center justify-center gap-2"
+                >
+                    <History size={18} /> View Attendance History
+                </button>
 
                 <button 
                     onClick={() => auth.signOut()} 

@@ -686,6 +686,24 @@ export const getMemberAttendance = async (gymId, memberId) => {
   }
 };
 
+export const getMemberAttendanceHistory = async (gymId, memberId) => {
+  try {
+    const attRef = collection(db, "gyms", gymId, "attendance");
+    const q = query(
+      attRef,
+      where("memberId", "==", memberId),
+      where("status", "in", ["attended", "checked-in"]),
+      orderBy("classTimestamp", "desc")
+    );
+    const snapshot = await getDocs(q);
+    const history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    return { success: true, history };
+  } catch (error) {
+    console.error("Attendance history fetch error:", error);
+    return { success: false, error: error.message };
+  }
+};
+
 export const getClassRoster = async (gymId, classId, dateString) => {
   try {
     const attRef = collection(db, "gyms", gymId, "attendance");
