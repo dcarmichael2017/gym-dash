@@ -328,10 +328,33 @@ const DashboardClassesScreen = () => {
         isOpen={sessionModalState.isOpen}
         onClose={() => setSessionModalState({ isOpen: false, classData: null, dateString: null })}
         gymId={gymId}
-        classData={sessionModalState.classData}
-        dateString={sessionModalState.dateString}
+        
+        // --- THE FIX STARTS HERE ---
+        // We construct the 'session' object the child component expects 
+        // by merging classData and the specific date string.
+        session={sessionModalState.classData ? {
+            ...sessionModalState.classData, // Keeps duration, maxCapacity, programId, etc.
+            classId: sessionModalState.classData.id, 
+            className: sessionModalState.classData.name,
+            dateStr: sessionModalState.dateString, // vital: map dateString to dateStr
+            instructorName: getInstructorName(sessionModalState.classData.instructorId)
+        } : null}
+        // --- THE FIX ENDS HERE ---
+
         staffList={staffList}
-        onRosterUpdate={refreshData}
+        onEditSeries={(classId) => {
+            // Optional: Handle reopening the class edit modal if needed
+            setSessionModalState({ isOpen: false, classData: null, dateString: null });
+            const cls = classes.find(c => c.id === classId);
+            if (cls) handleOpenEdit(cls);
+        }}
+        onCancelSession={async (classId, dateStr, roster, isRestore) => {
+             // Pass this through if you have specific logic, or rely on the modal's internal handlers
+             // Based on your code, SessionDetailsModal handles the API call internally via handleCancelSession
+             // but you might want to refresh the dashboard data after:
+             refreshData(gymId);
+        }}
+        onRosterChange={() => refreshData(gymId)}
       />
 
       <ClassFormModal
