@@ -154,15 +154,18 @@ export const WeeklyCalendarView = ({
                 {/* Render Classes (The Floating Cards) */}
                 {classes
                   .filter(c => {
-                      // --- GHOST & VISIBILITY LOGIC ---
-                      if (c.recurrenceEndDate && currentDayDateStr > c.recurrenceEndDate) {
-                          return false; // Ghost Clause: Do not render instances past the end date.
-                      }
-
                       const lookupKey = `${c.id}_${currentDayDateStr}`;
                       const registeredCount = bookingCounts[lookupKey] || 0;
-                      
-                      // FIX: A class should be visible unless it's a hidden admin class with no one booked.
+
+                      // --- GHOST & VISIBILITY LOGIC ---
+                      // This is the core of historical retention.
+                      // HIDE if: The series has ended, this date is AFTER the end, AND there are no bookings for this specific instance.
+                      // SHOW if: It's a past, archived class that had bookings.
+                      if (c.recurrenceEndDate && currentDayDateStr > c.recurrenceEndDate && registeredCount === 0) {
+                          return false;
+                      }
+
+                      // Standard visibility check for all other cases.
                       const isVisible = (c.visibility || 'public') !== 'admin' || registeredCount > 0;
                       if (!isVisible) {
                         return false;

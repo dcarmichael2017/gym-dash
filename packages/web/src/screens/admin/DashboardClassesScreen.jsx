@@ -3,8 +3,9 @@ import { doc, getDoc } from 'firebase/firestore';
 import { Plus, Trash2, Clock, Calendar as CalendarIcon, User, CalendarDays, Layers } from 'lucide-react';
 
 import { auth, db } from '../../../../shared/api/firebaseConfig';
-import { getClasses, deleteClass, getStaffList, getMembershipTiers, getGymDetails } from '../../../../shared/api/firestore';
+import { getClasses, handleClassSeriesRetirement, getStaffList, getMembershipTiers, getGymDetails } from '../../../../shared/api/firestore';
 import { FullScreenLoader } from '../../components/common/FullScreenLoader';
+import { useConfirm } from '../../context/ConfirmationContext';
 import { ClassFormModal } from '../../components/admin/ClassFormModal';
 
 const DashboardClassesScreen = () => {
@@ -21,6 +22,7 @@ const DashboardClassesScreen = () => {
   // Modal
   const [isClassModalOpen, setIsClassModalOpen] = useState(false);
   const [editingClass, setEditingClass] = useState(null);
+  const { showConfirm } = useConfirm();
 
   // --- HELPERS ---
   const getInstructorName = (id) => {
@@ -72,10 +74,29 @@ const DashboardClassesScreen = () => {
 
   const handleDeleteClass = async (e, classId) => {
     e.stopPropagation();
-    if (!window.confirm("Delete this class schedule? This removes all future sessions.")) return;
-    setClasses(prev => prev.filter(c => c.id !== classId));
-    await deleteClass(gymId, classId);
-    refreshData(gymId);
+    const confirmed = await showConfirm({
+        title: "Retire Class Series?",
+        message: "This will check for booking history. If none exists, the class will be deleted. If history exists, it will be archived to preserve records.",
+        confirmText: "Yes, Retire",
+        type: 'danger'
+    });
+
+    if (confirmed) {
+        const result = await handleClassSeriesRetirement(gymId, classId);
+        if (result.success) {
+            let title = "Success";
+            let message = "";
+            if (result.action === 'deleted') {
+                message = "The class series was permanently deleted.";
+            } else {
+                message = `The class series was archived. ${result.refundedCount || 0} future booking(s) were refunded.`;
+            }
+            await showConfirm({ title, message, confirmText: "OK", cancelText: null });
+            refreshData(gymId);
+        } else {
+            await showConfirm({ title: "Error", message: `Failed to retire series: ${result.error}`, confirmText: "OK", cancelText: null });
+        }
+    }
   };
 
   // Filter Logic

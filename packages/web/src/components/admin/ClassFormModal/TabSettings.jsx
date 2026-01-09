@@ -36,16 +36,16 @@ export const TabSettings = ({
     return (
         <div className="space-y-6 animate-in slide-in-from-right-4 duration-200">
             {isReadOnly && (
-                <div className="p-3 bg-yellow-50 text-yellow-800 border border-yellow-200 rounded-lg text-sm flex items-center gap-3 -mb-2">
-                    <AlertCircle size={18} className="shrink-0" />
+                <div className="p-3 bg-blue-50 text-blue-800 border border-blue-200 rounded-lg text-sm flex items-center gap-3 -mb-2">
+                    <Info size={18} className="shrink-0" />
                     <div>
                         <p className="font-bold">Class in Progress</p>
-                        <p className="text-xs">Editing is restricted while a session is active.</p>
+                        <p className="text-xs">Edits will apply to future sessions only.</p>
                     </div>
                 </div>
             )}
 
-            <div className={isReadOnly ? 'opacity-50 pointer-events-none' : ''}>
+            <div>
                  {/* 1. VISIBILITY SETTINGS */}
             <div className="space-y-2">
                 <label className="text-sm font-bold text-gray-800 flex items-center gap-2">

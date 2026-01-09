@@ -1,6 +1,7 @@
 import { doc, collection, getDoc, getDocs, updateDoc, query, where, limit, orderBy, increment, runTransaction, writeBatch } from "firebase/firestore";
 import { db } from "../firebaseConfig"; // Adjust path as needed
 import { getFunctions, httpsCallable } from "firebase/functions";
+import { deleteClass } from './classes';
 import { BOOKING_STATUS } from '../../constants/strings'; // Adjust path
 import { createCreditLog } from './credits'; // Import helper from credits module
 

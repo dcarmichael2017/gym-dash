@@ -173,11 +173,6 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        if (isClassActive) {
-            await showConfirm({ title: "Cannot Save", message: "Settings cannot be changed while a class is in progress.", confirmText: "OK", cancelText: null });
-            return;
-        }
-
         if (!formData.name) {
             await showConfirm({
                 title: "Missing Name",
