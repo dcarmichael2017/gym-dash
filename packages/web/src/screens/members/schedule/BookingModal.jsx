@@ -28,24 +28,37 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
 
   // --- Extract Rules for Display ---
 
-  // 🔍 DEBUG: Check if we have the snapshot
-  console.log("Modal Instance Data:", classInstance);
-
-  // If the user is booked, we MUST use the snapshot attached to their booking.
-  // Otherwise, we use the current live class rules.
-  const rules = (classInstance.userStatus === 'booked' && classInstance.bookingRulesSnapshot)
+  const classSpecificRules = (classInstance.userStatus === 'booked' && classInstance.bookingRulesSnapshot)
     ? classInstance.bookingRulesSnapshot
     : (classInstance.bookingRules || {});
 
-  // Default to 2 hours if undefined, but respect 0
-  const cancelHours = rules.cancelWindowHours !== undefined ? parseFloat(rules.cancelWindowHours) : 2;
-  const lateFee = rules.lateCancelFee ? parseFloat(rules.lateCancelFee) : 0;
+  // B. Get the Gym's Global Defaults (Fallback)
+  const gymDefaults = currentGym?.booking || {};
 
-  // 👇 ADD THESE TWO LINES 👇
+  // C. Merge: Class Rules > Gym Defaults > Hardcoded System Defaults
+  const cancelHours = classSpecificRules.cancelWindowHours !== undefined
+    ? parseFloat(classSpecificRules.cancelWindowHours)
+    : (gymDefaults.cancelWindowHours !== undefined ? parseFloat(gymDefaults.cancelWindowHours) : 2);
+
+  const lateFee = classSpecificRules.lateCancelFee !== undefined
+    ? parseFloat(classSpecificRules.lateCancelFee)
+    : (gymDefaults.lateCancelFee ? parseFloat(gymDefaults.lateCancelFee) : 0);
+
   const duration = parseInt(classInstance.duration) || 60;
-  const lateBookingMinutes = rules.lateBookingMinutes !== undefined ? parseInt(rules.lateBookingMinutes) : duration;
 
-  // --- ✅ FIX: Handle Auto-Close with Cleanup ---
+  const lateBookingMinutes = classSpecificRules.lateBookingMinutes !== undefined
+    ? parseInt(classSpecificRules.lateBookingMinutes)
+    : (gymDefaults.lateBookingMinutes !== undefined ? parseInt(gymDefaults.lateBookingMinutes) : duration);
+
+  //HELPER: Formats the time nicely (e.g., "30 mins" instead of "0.5h")
+  const formatCancelDisplay = (val) => {
+    if (val < 1) {
+      return `${Math.round(val * 60)} mins`;
+    }
+    // Handles 1 hour vs 2 hours pluralization
+    return `${val} hour${val === 1 ? '' : 's'}`;
+  };
+
   useEffect(() => {
     let timer;
     if (status === 'success') {
@@ -254,7 +267,7 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
 
   const renderWeeklySchedule = () => {
     if (!weeklyUsage || !weeklyUsage.classes || weeklyUsage.classes.length === 0) return null;
-    
+
     return (
       <div className="mt-3 bg-gray-50 rounded-lg border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-top-2">
         <div className="px-3 py-2 bg-gray-100/50 border-b border-gray-200 flex justify-between items-center">
@@ -268,7 +281,7 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
             const [y, m, d] = cls.dateString.split('-').map(Number);
             const dateObj = new Date(y, m - 1, d);
             const dayStr = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-            
+
             // Check if this specific item is a Late Cancel
             const isLateCancel = cls.status === 'cancelled' && cls.lateCancel;
 
@@ -279,7 +292,7 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                     <span className={`font-semibold truncate ${isLateCancel ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
                       {cls.className}
                     </span>
-                    
+
                     {/* VISUAL INDICATOR FOR LATE CANCEL */}
                     {isLateCancel && (
                       <span className="flex items-center gap-0.5 text-[9px] font-bold text-red-600 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded">
@@ -289,7 +302,7 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                   </div>
                   <span className="text-gray-400 text-[10px]">{dayStr}</span>
                 </div>
-                
+
                 <div className={`whitespace-nowrap font-medium px-1.5 py-0.5 rounded border ${isLateCancel ? 'bg-gray-100 text-gray-400 border-gray-200' : 'bg-white text-gray-600 border-gray-200'}`}>
                   {cls.classTime}
                 </div>
@@ -404,7 +417,7 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                         </div>
                         <p className="text-[10px] text-gray-500 leading-tight">
                           {cancelHours > 0
-                            ? `Free cancel up to ${cancelHours}h before start.`
+                            ? `Free cancel up to ${formatCancelDisplay(cancelHours)} before start.`
                             : "Cancel freely until class starts."
                           }
                           {lateFee > 0 && <span className="text-red-600 font-semibold block mt-0.5">Late Fee: ${lateFee.toFixed(2)}</span>}

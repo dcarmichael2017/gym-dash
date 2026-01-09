@@ -6,7 +6,7 @@ import { auth, db } from '../../../../shared/api/firebaseConfig';
 import { getClasses, getStaffList, getGymDetails, getWeeklyAttendanceCounts, updateClass } from '../../../../shared/api/firestore';
 import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 import { WeeklyCalendarView } from '../../components/admin/WeeklyCalendarView';
-import { SessionDetailsModal } from '../../components/admin/SessionFormModal';
+import { SessionDetailsModal } from '../../components/admin/SessionDetailsModal';
 
 const DashboardCalendarScreen = () => {
   const [loading, setLoading] = useState(true);

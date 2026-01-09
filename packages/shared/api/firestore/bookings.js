@@ -19,11 +19,13 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
       const attendanceRef = doc(db, "gyms", gymId, "attendance", bookingId);
       const classDocRef = doc(db, "gyms", gymId, "classes", classInfo.id);
       const userDocRef = doc(db, "users", member.id);
+      const gymDocRef = doc(db, "gyms", gymId);
 
       const [classSnap, userSnap, bookingSnap] = await Promise.all([
         transaction.get(classDocRef),
         transaction.get(userDocRef),
-        transaction.get(attendanceRef)
+        transaction.get(attendanceRef),
+        transaction.get(gymDocRef)
       ]);
 
       if (!classSnap.exists()) throw "Class does not exist.";
@@ -31,7 +33,29 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
 
       const classData = classSnap.data();
       const userData = userSnap.data();
-      const rules = classData.bookingRules || {}; // ✅ Access the new rules object
+      const gymData = gymSnap.exists() ? gymSnap.data() : {};
+      const classRules = classData.bookingRules || {};
+      // 2. Gym Default Rules
+      const gymRules = gymData.booking || {};
+
+      // 3. Merged Active Rules (Class Overrides Gym > Gym Overrides System)
+      const activeRules = {
+          cancelWindowHours: classRules.cancelWindowHours !== undefined 
+              ? classRules.cancelWindowHours 
+              : (gymRules.cancelWindowHours !== undefined ? gymRules.cancelWindowHours : 2),
+          
+          lateCancelFee: classRules.lateCancelFee !== undefined 
+              ? classRules.lateCancelFee 
+              : (gymRules.lateCancelFee !== undefined ? gymRules.lateCancelFee : 0),
+          
+          lateBookingMinutes: classRules.lateBookingMinutes !== undefined 
+              ? classRules.lateBookingMinutes 
+              : (gymRules.lateBookingMinutes !== undefined ? gymRules.lateBookingMinutes : null),
+          
+          bookingWindowDays: classRules.bookingWindowDays !== undefined
+              ? classRules.bookingWindowDays
+              : (gymRules.bookingWindowDays !== undefined ? gymRules.bookingWindowDays : null)
+      };
 
       // Check Duplicates
       if (bookingSnap.exists() && bookingSnap.data().status !== BOOKING_STATUS.CANCELLED) {
@@ -48,23 +72,23 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
       if (classData.recurrenceEndDate) {
         // Compare date strings (YYYY-MM-DD)
         if (classInfo.dateString > classData.recurrenceEndDate) {
-           throw "This class series has ended.";
+          throw "This class series has ended.";
         }
       }
 
       // A. Booking Window Check (Can I book this far in advance?)
       // ✅ NEW LOGIC
-      if (!options.isStaff && !options.force && rules.bookingWindowDays) {
-        const windowDays = parseInt(rules.bookingWindowDays);
+      if (!options.isStaff && !options.force && activeRules.bookingWindowDays) {
+        const windowDays = parseInt(activeRules.bookingWindowDays);
         const maxBookingDate = new Date();
         maxBookingDate.setDate(maxBookingDate.getDate() + windowDays);
         // Set to end of that day to be generous
         maxBookingDate.setHours(23, 59, 59, 999);
 
         if (classStartObj > maxBookingDate) {
-           const openDate = new Date(classStartObj);
-           openDate.setDate(openDate.getDate() - windowDays);
-           throw `Booking for this class opens on ${openDate.toLocaleDateString()}.`;
+          const openDate = new Date(classStartObj);
+          openDate.setDate(openDate.getDate() - windowDays);
+          throw `Booking for this class opens on ${openDate.toLocaleDateString()}.`;
         }
       }
 
@@ -74,10 +98,10 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
       const isRetroactive = now > classEndTime;
 
       // ✅ UPDATED LOGIC: Use lateBookingMinutes from rules, default to class duration if not set
-      let lateMinutes = rules.lateBookingMinutes != null 
-        ? parseInt(rules.lateBookingMinutes) 
-        : duration; 
-      
+      let lateMinutes = activeRules.lateBookingMinutes != null
+        ? parseInt(activeRules.lateBookingMinutes)
+        : duration;
+
       const cutoffTime = new Date(classStartObj.getTime() + lateMinutes * 60000);
       const isAllowedLate = options.force || options.isStaff;
 
@@ -201,10 +225,9 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
 
       // ✅ NEW: Create a clean snapshot of the rules at this moment
       const bookingRulesSnapshot = {
-        cancelWindowHours: rules.cancelWindowHours !== undefined ? parseFloat(rules.cancelWindowHours) : 2,
-        lateCancelFee: rules.lateCancelFee ? parseFloat(rules.lateCancelFee) : 0,
-        lateBookingMinutes: rules.lateBookingMinutes ?? null, // FIX: Ensure value is not undefined
-        // ✅ Add cost snapshot for audit trails
+        cancelWindowHours: parseFloat(activeRules.cancelWindowHours),
+        lateCancelFee: parseFloat(activeRules.lateCancelFee),
+        lateBookingMinutes: activeRules.lateBookingMinutes,
         creditCost: baseCost 
       };
       const payload = {
@@ -223,9 +246,9 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
         costUsed: costUsed,       // Defined in Cost logic
         programId: programId,     // Defined in Progression logic
         checkedInAt: status === BOOKING_STATUS.ATTENDED ? classStartObj : null,
-        
+
         // ✅ SAVE THE SNAPSHOT
-        bookingRulesSnapshot: bookingRulesSnapshot 
+        bookingRulesSnapshot: bookingRulesSnapshot
       };
 
       if (bookingSnap.exists()) {
@@ -284,38 +307,38 @@ export const convertSeriesToSingleEvent = async (gymId, classId, dateString) => 
 };
 
 export const handleClassSeriesRetirement = async (gymId, classId, refundPolicy = 'refund') => {
-    try {
-        const historyCheck = await getAllBookingsForClass(gymId, classId);
+  try {
+    const historyCheck = await getAllBookingsForClass(gymId, classId);
 
-        if (historyCheck.success && historyCheck.bookings.length === 0) {
-            // Case A: No history, safe to hard delete.
-            const result = await deleteClass(gymId, classId);
-            if (result.success) {
-                return { success: true, action: 'deleted' };
-            } else {
-                throw new Error(result.error);
-            }
-        } else if (historyCheck.success) {
-            // Case B: History exists, must archive ("ghost").
-            const today = new Date().toISOString().split('T')[0];
-            const result = await migrateClassSeries(gymId, { 
-                oldClassId: classId, 
-                cutoffDateString: today, 
-                newClassData: null,
-                refundPolicy 
-            });
-             if (result.success) {
-                return { success: true, action: 'archived', refundedCount: result.refundedUserIds.length };
-            } else {
-                throw new Error(result.error);
-            }
-        } else {
-             throw new Error(historyCheck.error);
-        }
-    } catch (error) {
-        console.error("Class series retirement failed:", error);
-        return { success: false, error: error.message };
+    if (historyCheck.success && historyCheck.bookings.length === 0) {
+      // Case A: No history, safe to hard delete.
+      const result = await deleteClass(gymId, classId);
+      if (result.success) {
+        return { success: true, action: 'deleted' };
+      } else {
+        throw new Error(result.error);
+      }
+    } else if (historyCheck.success) {
+      // Case B: History exists, must archive ("ghost").
+      const today = new Date().toISOString().split('T')[0];
+      const result = await migrateClassSeries(gymId, {
+        oldClassId: classId,
+        cutoffDateString: today,
+        newClassData: null,
+        refundPolicy
+      });
+      if (result.success) {
+        return { success: true, action: 'archived', refundedCount: result.refundedUserIds.length };
+      } else {
+        throw new Error(result.error);
+      }
+    } else {
+      throw new Error(historyCheck.error);
     }
+  } catch (error) {
+    console.error("Class series retirement failed:", error);
+    return { success: false, error: error.message };
+  }
 };
 
 /**
@@ -333,24 +356,42 @@ export const cancelBooking = async (gymId, attendanceId, options = {}) => {
       // --- 1. DETERMINE REFUND POLICY ---
       let shouldRefund = false;
       const classRef = doc(db, "gyms", gymId, "classes", data.classId);
-      const classSnap = await transaction.get(classRef);
-      // We need classData available for fee calculation later if snapshot is missing
-      const classData = classSnap.exists() ? classSnap.data() : {}; 
+
+      // ✅ Fetch the GYM SETTINGS as well to handle defaults
+      const gymRef = doc(db, "gyms", gymId);
+      const [classSnap, gymSnap] = await Promise.all([
+        transaction.get(classRef),
+        transaction.get(gymRef)
+      ]);
+
+      const classData = classSnap.exists() ? classSnap.data() : {};
+      const gymData = gymSnap.exists() ? gymSnap.data() : {};
+      const gymDefaults = gymData.booking || {}; // Access global defaults
 
       if (options.refundPolicy) {
         shouldRefund = options.refundPolicy === 'refund';
       } else {
-        // Prefer Snapshot, Fallback to Live Class Data
+        // HIERARCHY: Snapshot > Class Rules > Gym Defaults > Hardcoded 2hrs
         let cancelHours;
-        
+
+        // 1. Check Snapshot (User booked under these rules)
         if (data.bookingRulesSnapshot && data.bookingRulesSnapshot.cancelWindowHours !== undefined) {
-            cancelHours = parseFloat(data.bookingRulesSnapshot.cancelWindowHours);
-        } else {
-            const rules = classData.bookingRules || {};
-            cancelHours = rules.cancelWindowHours !== undefined ? parseFloat(rules.cancelWindowHours) : 2;
+          cancelHours = parseFloat(data.bookingRulesSnapshot.cancelWindowHours);
         }
-            
-        const cancelWindowMin = cancelHours * 60; 
+        // 2. Check Live Class Rules (Overrides)
+        else if (classData.bookingRules && classData.bookingRules.cancelWindowHours !== undefined) {
+          cancelHours = parseFloat(classData.bookingRules.cancelWindowHours);
+        }
+        // 3. Check Gym Defaults
+        else if (gymDefaults.cancelWindowHours !== undefined) {
+          cancelHours = parseFloat(gymDefaults.cancelWindowHours);
+        }
+        // 4. Hard Fallback
+        else {
+          cancelHours = 2;
+        }
+
+        const cancelWindowMin = cancelHours * 60;
 
         const now = new Date();
         const classTime = data.classTimestamp.toDate();
@@ -402,17 +443,19 @@ export const cancelBooking = async (gymId, attendanceId, options = {}) => {
       // --- 4. UPDATE ATTENDANCE RECORD ---
       const wasTakingSpot = [BOOKING_STATUS.BOOKED, BOOKING_STATUS.ATTENDED].includes(data.status);
 
-      // ✅ FIX: Calculate these variables BEFORE using them in the update object
       const isLateCancel = !shouldRefund && !options.isStaff;
       
       let applicableFee = 0;
       if (isLateCancel) {
-          // Check snapshot first, then fallback to live data
+          // Same Hierarchy for Fees: Snapshot > Class > Gym > 0
           if (data.bookingRulesSnapshot && data.bookingRulesSnapshot.lateCancelFee !== undefined) {
               applicableFee = parseFloat(data.bookingRulesSnapshot.lateCancelFee);
+          } else if (classData.bookingRules && classData.bookingRules.lateCancelFee !== undefined) {
+              applicableFee = parseFloat(classData.bookingRules.lateCancelFee);
+          } else if (gymDefaults.lateCancelFee !== undefined) {
+              applicableFee = parseFloat(gymDefaults.lateCancelFee);
           } else {
-              const liveRules = classData.bookingRules || {};
-              applicableFee = liveRules.lateCancelFee ? parseFloat(liveRules.lateCancelFee) : 0;
+              applicableFee = 0;
           }
       }
 
@@ -422,8 +465,8 @@ export const cancelBooking = async (gymId, attendanceId, options = {}) => {
         updatedAt: new Date(),
         refunded: refundedAmount > 0,
         refundAmount: refundedAmount,
-        lateCancel: isLateCancel,       // ✅ Uses the variable defined above
-        lateCancelFeeApplied: applicableFee // ✅ Uses the variable defined above
+        lateCancel: isLateCancel,       
+        lateCancelFeeApplied: applicableFee 
       });
 
       // --- 5. PROMOTE WAITLIST ---
@@ -790,7 +833,7 @@ export const getAllBookingsForClass = async (gymId, classId) => {
 
     // If we found even one record, we have bookings. 
     // We shouldn't filter it out based on time if the goal is preserving history.
-    return { success: true, bookings: bookings }; 
+    return { success: true, bookings: bookings };
   } catch (error) {
     console.error("Error fetching all bookings for class:", error);
     return { success: false, error: error.message };
@@ -862,7 +905,7 @@ export const getWeeklyClassCount = async (gymId, userId, dateString) => {
     const { start, end } = getWeekRange(dateString);
 
     const attRef = collection(db, 'gyms', gymId, 'attendance');
-    
+
     // 1. Remove the 'status' filter from the query so we fetch CANCELLED bookings too
     const q = query(
       attRef,
@@ -873,17 +916,17 @@ export const getWeeklyClassCount = async (gymId, userId, dateString) => {
     );
 
     const snapshot = await getDocs(q);
-    
+
     // 2. Filter in memory to determine what counts against the limit
     const classes = [];
-    
+
     snapshot.forEach(doc => {
       const d = doc.data();
-      
+
       // LOGIC: It counts if it is Booked, Attended, OR (Cancelled AND Late Cancel)
-      const countsTowardsLimit = 
-        d.status === BOOKING_STATUS.BOOKED || 
-        d.status === BOOKING_STATUS.ATTENDED || 
+      const countsTowardsLimit =
+        d.status === BOOKING_STATUS.BOOKED ||
+        d.status === BOOKING_STATUS.ATTENDED ||
         (d.status === BOOKING_STATUS.CANCELLED && d.lateCancel === true);
 
       if (countsTowardsLimit) {
@@ -968,7 +1011,7 @@ const getWeekRange = (dateString) => {
 export const migrateClassSeries = async (gymId, { oldClassId, cutoffDateString, newClassData, refundPolicy = 'refund' }) => {
   const functions = getFunctions();
   const migrate = httpsCallable(functions, 'migrateClassSeries');
-  
+
   try {
     const result = await migrate({
       gymId,
@@ -977,7 +1020,7 @@ export const migrateClassSeries = async (gymId, { oldClassId, cutoffDateString, 
       newClassData, // This can be null if just ghosting
       refundPolicy
     });
-    
+
     // As requested, return the list of refunded users.
     return { success: true, refundedUserIds: result.data.refundedUserIds || [] };
   } catch (error) {
