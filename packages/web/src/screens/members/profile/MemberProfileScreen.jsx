@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { User, Mail, Phone, LogOut, Edit2, Check, X, Loader2, ShieldAlert, History, XCircle, Calendar, Clock } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { User, Mail, Phone, LogOut, Edit2, Check, X, Loader2, ShieldAlert, History, XCircle, Calendar, Clock, Filter } from 'lucide-react';
 import { useMemberProfile } from './useMemberProfile';
 import { ProfileField } from './ProfileFields';
 import { MembershipSection } from './MembershipSection';
@@ -20,10 +20,16 @@ const MemberProfileScreen = () => {
     const [attendanceHistory, setAttendanceHistory] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(true);
 
+    // Filters for attendance history modal
+    const [selectedProgram, setSelectedProgram] = useState('');
+    const [selectedClass, setSelectedClass] = useState('');
+
     const handleOpenHistory = async () => {
         if (!currentGym?.id || !user?.uid) return;
         setShowHistoryModal(true);
         setHistoryLoading(true);
+        setSelectedProgram(''); // Reset filters
+        setSelectedClass('');
         const res = await getMemberAttendanceHistory(currentGym.id, user.uid);
         if (res.success) {
             console.log('Member History Data:', res.history);
@@ -40,6 +46,31 @@ const MemberProfileScreen = () => {
     const userSignedVersion = myMembership?.waiverSignedVersion || 0;
     const isOutdated = hasWaiver && userSignedVersion < currentWaiverVersion;
 
+    // --- Filtering Logic for History Modal ---
+    const programs = currentGym?.grading?.programs || [];
+
+    const filteredHistory = useMemo(() => {
+        return attendanceHistory.filter(record => {
+            const programMatch = !selectedProgram || record.programId === selectedProgram;
+            const classMatch = !selectedClass || record.className === selectedClass;
+            return programMatch && classMatch;
+        });
+    }, [attendanceHistory, selectedProgram, selectedClass]);
+
+    const availableClasses = useMemo(() => {
+        const classNames = attendanceHistory
+            .filter(record => !selectedProgram || record.programId === selectedProgram)
+            .map(h => h.className);
+        return [...new Set(classNames)].sort();
+    }, [attendanceHistory, selectedProgram]);
+
+    const isFiltered = selectedProgram || selectedClass;
+    const clearFilters = () => {
+        setSelectedProgram('');
+        setSelectedClass('');
+    };
+    // --- End Filtering Logic ---
+
     return (
         <div className="pb-32 bg-gray-50 min-h-screen relative">
             {/* ATTENDANCE HISTORY MODAL */}
@@ -55,20 +86,54 @@ const MemberProfileScreen = () => {
                                 <XCircle size={22}/>
                             </button>
                         </div>
+
+                        {/* FILTERS */}
+                        <div className="p-3 bg-gray-50/70 border-b">
+                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <select
+                                    value={selectedProgram}
+                                    onChange={(e) => {
+                                        setSelectedProgram(e.target.value);
+                                        setSelectedClass('');
+                                    }}
+                                    className="w-full bg-white border border-gray-300 rounded-lg shadow-sm px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                                    disabled={historyLoading || programs.length === 0}
+                                >
+                                    <option value="">Filter by Program</option>
+                                    {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                </select>
+
+                                <select
+                                    value={selectedClass}
+                                    onChange={(e) => setSelectedClass(e.target.value)}
+                                    className="w-full bg-white border border-gray-300 rounded-lg shadow-sm px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                                    disabled={historyLoading || availableClasses.length === 0}
+                                >
+                                    <option value="">Filter by Class</option>
+                                    {availableClasses.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                            </div>
+                            {isFiltered && (
+                                <button onClick={clearFilters} className="text-xs text-blue-600 hover:underline font-semibold mt-2 text-center w-full">
+                                    Clear Filters
+                                </button>
+                            )}
+                        </div>
+                        
                         <div className="p-2 sm:p-4 overflow-y-auto">
                             {historyLoading ? (
                                 <div className="text-center py-16 text-gray-500">
                                     <Loader2 className="animate-spin inline-block mb-2" />
                                     <p>Loading history...</p>
                                 </div>
-                            ) : attendanceHistory.length === 0 ? (
+                            ) : filteredHistory.length === 0 ? (
                                 <div className="text-center py-16 text-gray-500">
                                     <Calendar className="inline-block mb-2" />
-                                    <p>No attendance records found.</p>
+                                    <p>{isFiltered ? 'No records match your filters.' : 'No attendance records found.'}</p>
                                 </div>
                             ) : (
                                 <ul className="space-y-2">
-                                    {attendanceHistory.map(record => {
+                                    {filteredHistory.map(record => {
                                         const isAttended = record.status === 'attended';
                                         const isBooked = record.status === 'booked';
                                         const isCancelled = record.status === 'cancelled';
