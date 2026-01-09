@@ -154,6 +154,17 @@ export const WeeklyCalendarView = ({
                 {/* Render Classes (The Floating Cards) */}
                 {classes
                   .filter(c => {
+                      // --- GHOST & VISIBILITY LOGIC ---
+                      if (c.recurrenceEndDate && currentDayDateStr > c.recurrenceEndDate) {
+                          return false; // Ghost Clause: Do not render instances past the end date.
+                      }
+
+                      const lookupKey = `${c.id}_${currentDayDateStr}`;
+                      const registeredCount = bookingCounts[lookupKey] || 0;
+                      if (c.visibility === 'admin' && registeredCount === 0) {
+                          return false; // Visibility Check: Hide empty admin-only slots.
+                      }
+                      
                       // 1. Handle One-Off Events
                       if (c.frequency === 'Single Event') {
                           return c.startDate === currentDayDateStr;

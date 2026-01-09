@@ -69,6 +69,19 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
       const dateString = `${year}-${month}-${day}`;
 
       classes.forEach(cls => {
+        // --- GHOST & VISIBILITY CHECKS ---
+        if (cls.recurrenceEndDate && dateString > cls.recurrenceEndDate) {
+          return; // Ghost Clause: Do not render past end date.
+        }
+        
+        const instanceId = `${cls.id}_${dateString}`;
+        const bookingData = userBookings[instanceId];
+        const userState = bookingData?.status || null;
+
+        if (cls.visibility === 'admin' && !userState) {
+          return; // Visibility Check: Hide empty admin-only slots from members.
+        }
+
         // --- LOGIC 1: Date Matching ---
         const isRecurringMatch = cls.days && cls.days.map(d => d.toLowerCase()).includes(dayName);
         const isNotCancelled = !cls.cancelledDates || !cls.cancelledDates.includes(dateString);
@@ -89,11 +102,8 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
           }
 
           // --- LOGIC 3: Data Mapping ---
-          const instanceId = `${cls.id}_${dateString}`;
           const currentCount = counts[instanceId] || 0;
           
-          const bookingData = userBookings[instanceId];
-          const userState = bookingData?.status || null; 
           const bookingType = bookingData?.bookingType || null;
           const checkedInAt = bookingData?.checkedInAt || null;
           

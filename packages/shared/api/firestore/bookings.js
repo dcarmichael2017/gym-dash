@@ -853,21 +853,22 @@ const getWeekRange = (dateString) => {
   return { start: format(monday), end: format(sunday) };
 };
 
-const handleMigration = async () => {
+export const migrateClassSeries = async (gymId, { oldClassId, cutoffDateString, newClassData }) => {
   const functions = getFunctions();
-  const migrateSeries = httpsCallable(functions, 'migrateClassSeries');
+  const migrate = httpsCallable(functions, 'migrateClassSeries');
   
   try {
-    const result = await migrateSeries({
-      gymId: "currentGymId",
-      oldClassId: "class_123",
-      cutoffDateString: "2026-01-08",
-      newClassData: formState // or null if just deleting
+    const result = await migrate({
+      gymId,
+      oldClassId,
+      cutoffDateString,
+      newClassData // This can be null if just ghosting
     });
     
-    console.log("Refunded Users:", result.data.affectedUserIds);
-    // Show success modal...
+    // As requested, return the list of refunded users.
+    return { success: true, refundedUserIds: result.data.refundedUserIds || [] };
   } catch (error) {
-    console.error(error);
+    console.error("Error migrating class series:", error);
+    return { success: false, error: error.message };
   }
 };
