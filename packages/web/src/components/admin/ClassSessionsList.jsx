@@ -35,6 +35,11 @@ export const ClassSessionsList = ({ classData, onCancelSession }) => {
             const date = new Date(checkDate);
             date.setDate(checkDate.getDate() + i);
             
+            const dateStr = date.toISOString().split('T')[0];
+            if (classData.recurrenceEndDate && dateStr > classData.recurrenceEndDate) {
+                break; // Stop generating sessions past the end date.
+            }
+            
             const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
             
             if (classData.days.includes(dayName)) {
@@ -50,7 +55,6 @@ export const ClassSessionsList = ({ classData, onCancelSession }) => {
                 // If the session start time is in the past, skip it.
                 if (sessionDateTime < now) continue;
 
-                const dateStr = date.toISOString().split('T')[0];
                 const isCancelled = classData.cancelledDates?.includes(dateStr);
 
                 sessions.push({
