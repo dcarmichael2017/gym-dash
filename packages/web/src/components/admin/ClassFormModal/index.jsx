@@ -290,7 +290,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
         }
     };
 
-    const handleDeleteSeries = async () => {
+    const handleClassSeriesRetirement = async () => {
         if (!isExistingClass) return;
 
         setLoading(true);
@@ -492,7 +492,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     {isExistingClass && !migrationReport && (
                         <button
                             type="button"
-                            onClick={handleDeleteSeries}
+                            onClick={handleClassSeriesRetirement}
                             disabled={loading || isClassActive}
                             className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg font-medium transition-colors text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         >

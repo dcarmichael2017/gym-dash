@@ -1,4 +1,4 @@
-import { doc, collection, getDoc, getDocs, updateDoc, query, where, limit, orderBy, increment, runTransaction, writeBatch, deleteDoc } from "firebase/firestore";
+import { doc, collection, getDoc, getDocs, updateDoc, query, where, limit, orderBy, increment, runTransaction, writeBatch } from "firebase/firestore";
 import { db } from "../firebaseConfig"; // Adjust path as needed
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { BOOKING_STATUS } from '../../constants/strings'; // Adjust path
@@ -699,17 +699,6 @@ export const getMemberAttendanceHistory = async (gymId, memberId) => {
     return { success: true, history };
   } catch (error) {
     console.error("Attendance history fetch error:", error);
-    return { success: false, error: error.message };
-  }
-};
-
-export const deleteClass = async (gymId, classId) => {
-  try {
-    const classRef = doc(db, "gyms", gymId, "classes", classId);
-    await deleteDoc(classRef);
-    return { success: true };
-  } catch (error) {
-    console.error("Error deleting class:", error);
     return { success: false, error: error.message };
   }
 };
