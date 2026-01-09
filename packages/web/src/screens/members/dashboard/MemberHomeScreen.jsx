@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { LogOut, Search, MapPin, ArrowRight, Loader2, ChevronLeft, ChevronDown, History, XCircle, Calendar, Clock, User } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { LogOut, Search, MapPin, ArrowRight, Loader2, ChevronLeft, ChevronDown, History, XCircle, Calendar, Clock, User, Users, MessageSquare } from 'lucide-react';
 import { auth, db } from '../../../../../../packages/shared/api/firebaseConfig';
 import { useGym } from '../../../context/GymContext';
 import { signWaiver, disconnectGym, getGymWaiver, getMemberAttendanceHistory } from '../../../../../../packages/shared/api/firestore';
@@ -358,6 +359,35 @@ const MemberHomeScreen = () => {
           loading={loading}
           onClick={() => setShowHistoryModal(true)}
       />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Community Feed Widget */}
+        <Link to="/members/community" className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-start gap-4 hover:bg-gray-50 transition-colors">
+          <div className="bg-orange-100 p-3 rounded-full">
+            <Users className="text-orange-600" size={20} />
+          </div>
+          <div>
+            <p className="font-bold text-gray-800">Community Feed</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Latest: Great job to everyone who competed this weekend!
+            </p>
+          </div>
+        </Link>
+        
+        {/* Group Chat Widget */}
+        <Link to="/members/chat" className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-start gap-4 hover:bg-gray-50 transition-colors">
+          <div className="bg-purple-100 p-3 rounded-full">
+            <MessageSquare className="text-purple-600" size={20} />
+          </div>
+          <div>
+            <p className="font-bold text-gray-800">Group Chat</p>
+            <p className="text-xs text-gray-500 mt-1 flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-red-500"></span>
+              1 unread message
+            </p>
+          </div>
+        </Link>
+      </div>
 
       {isFreeMember && (
           <MembershipOffers />

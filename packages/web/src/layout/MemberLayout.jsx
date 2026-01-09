@@ -133,18 +133,6 @@ const MemberLayout = () => {
                         label="Schedule" 
                         getStyle={styles.navItem} 
                     />
-                    <DesktopNavItem 
-                        to="/members/community" 
-                        icon={Users} 
-                        label="Community" 
-                        getStyle={styles.navItem} 
-                    />
-                     <DesktopNavItem 
-                        to="/members/chat" 
-                        icon={MessageSquare} 
-                        label="Messages" 
-                        getStyle={styles.navItem} 
-                    />
                     {/* UPDATED LINK */}
                     <DesktopNavItem 
                         to="/members/store" 
@@ -206,7 +194,6 @@ const MemberLayout = () => {
           {hasGyms && (
             <>
               <MobileNavItem to="/members/schedule" icon={<Calendar size={24} />} label="Book" theme={theme} />
-              <MobileNavItem to="/members/community" icon={<Users size={24} />} label="Feed" theme={theme} />
             </>
           )}
           
@@ -229,10 +216,7 @@ const MemberLayout = () => {
           )}
 
           {hasGyms && (
-            <>
-              <MobileNavItem to="/members/chat" icon={<MessageSquare size={24} />} label="Chat" theme={theme} />
               <MobileNavItem to="/members/store" icon={<ShoppingBag size={24} />} label="Store" theme={theme} />
-            </>
           )}
 
           <MobileNavItem to="/members/profile" icon={<User size={24} />} label="Profile" theme={theme} />
