@@ -780,6 +780,7 @@ export const getMemberAttendanceHistory = async (gymId, memberId) => {
   }
 };
 
+// Safer alternative for retirement checks
 export const getAllBookingsForClass = async (gymId, classId) => {
   try {
     const attRef = collection(db, "gyms", gymId, "attendance");
@@ -787,21 +788,9 @@ export const getAllBookingsForClass = async (gymId, classId) => {
     const snapshot = await getDocs(q);
     const bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-    // Post-process to filter out today's classes that have already ended
-    const now = new Date();
-    const futureOnlyBookings = bookings.filter(booking => {
-        if (booking.dateString === fromDateString) {
-            const classStart = booking.classTimestamp.toDate();
-            // Defaulting to 60 minutes as duration is not stored on the booking record.
-            // This is a safe assumption for retirement logic.
-            const durationMinutes = 60; 
-            const classEnd = new Date(classStart.getTime() + durationMinutes * 60000);
-            return now <= classEnd; // Keep if the class is in progress or hasn't started yet
-        }
-        return true; // Keep all bookings for dates after today
-    });
-
-    return { success: true, bookings: futureOnlyBookings };
+    // If we found even one record, we have bookings. 
+    // We shouldn't filter it out based on time if the goal is preserving history.
+    return { success: true, bookings: bookings }; 
   } catch (error) {
     console.error("Error fetching all bookings for class:", error);
     return { success: false, error: error.message };

@@ -196,7 +196,7 @@ const DashboardClassesScreen = () => {
           .map((cls) => {
             const todayStr = new Date().toISOString().split('T')[0];
             const isArchived = cls.recurrenceEndDate && cls.recurrenceEndDate <= todayStr;
-            console.log(`Class: ${cls.name}, EndDate: ${cls.recurrenceEndDate}, Today: ${todayStr}, IsArchived: ${isArchived}`);
+            // console.log(`Class: ${cls.name}, EndDate: ${cls.recurrenceEndDate}, Today: ${todayStr}, IsArchived: ${isArchived}`);
 
             return (
               <div 

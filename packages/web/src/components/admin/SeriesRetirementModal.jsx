@@ -15,9 +15,38 @@ export const SeriesRetirementModal = ({ isOpen, onClose, gymId, classData, onRet
             const fetchBookings = async () => {
                 setLoading(true);
                 const today = new Date().toISOString().split('T')[0];
+                
+                // DEBUG: Log System Time and Duration
+                // console.log("Current System Time:", new Date().toString());
+                // console.log("Class Data Duration:", classData.duration);
+
                 const res = await getFutureBookingsForClass(gymId, classData.id, today);
+                
                 if (res.success) {
-                    const groups = res.bookings.reduce((acc, booking) => {
+                    const now = new Date();
+                    
+                    // Filter: Remove bookings that have already finished today
+                    const validBookings = res.bookings.filter(booking => {
+                        if (booking.dateString === today) {
+                            // Parse Class Time (HH:MM)
+                            const [h, m] = booking.classTime.split(':').map(Number);
+                            const duration = parseInt(classData.duration) || 60;
+                            
+                            // Construct Class End Date object
+                            // Note: We use the local date parts to ensure we match the intended day
+                            const bookingDate = new Date(); // Start with today
+                            bookingDate.setHours(h, m + duration, 0, 0); // Set to end time
+
+                            const isPast = now > bookingDate;
+                            
+                            console.log(`Checking ${booking.classTime}... Ends ${bookingDate.toLocaleTimeString()}... Current ${now.toLocaleTimeString()}... PAST = ${isPast}`);
+                            
+                            return !isPast; // Keep only if NOT past
+                        }
+                        return true; // Keep all future dates
+                    });
+
+                    const groups = validBookings.reduce((acc, booking) => {
                         const date = booking.dateString;
                         if (!acc[date]) acc[date] = [];
                         acc[date].push(booking);
