@@ -4,7 +4,7 @@ import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { 
   LayoutDashboard, Calendar, Users, Settings, LogOut, Menu, 
-  Dumbbell, Briefcase, CreditCard, BarChart3, BookOpen // <--- 1. Added BookOpen icon
+  Dumbbell, Briefcase, CreditCard, BarChart3, BookOpen, Send, MessageSquare
 } from 'lucide-react';
 import { auth, db } from '../../../shared/api/firebaseConfig';
 
@@ -32,6 +32,11 @@ const DashboardLayout = () => {
     // Split Schedule into two:
     { name: 'Calendar', path: '/admin/calendar', icon: Calendar }, 
     { name: 'Classes', path: '/admin/classes', icon: BookOpen },
+
+    // Communication
+    { name: 'Broadcast', path: '/admin/broadcast', icon: Send },
+    { name: 'Community', path: '/admin/community', icon: Users },
+    { name: 'Chat', path: '/admin/chat', icon: MessageSquare },
     
     { name: 'Memberships', path: '/admin/memberships', icon: CreditCard },
     { name: 'Members', path: '/admin/members', icon: Users },
@@ -187,8 +192,11 @@ const DashboardLayout = () => {
             <h1 className="text-xl font-semibold">
               {loading ? '...' : 
                 location.pathname.includes('analytics') ? 'Reports' : 
+                location.pathname.includes('broadcast') ? 'Broadcast Center' :
                 location.pathname.includes('calendar') ? 'Calendar' : 
+                location.pathname.includes('chat') ? 'Group Chat' :
                 location.pathname.includes('classes') ? 'Classes' : 
+                location.pathname.includes('community') ? 'Community Feed' :
                 location.pathname.includes('settings') ? 'Settings' : 
                 location.pathname.includes('memberships') ? 'Memberships' : 
                 location.pathname.includes('members') ? 'Members' : 

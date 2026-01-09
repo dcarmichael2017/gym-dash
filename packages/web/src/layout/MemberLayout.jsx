@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Home, Calendar, User, QrCode, LogOut, Dumbbell, Link as LinkIcon, ShoppingBag } from 'lucide-react';
+import { Home, Calendar, User, QrCode, LogOut, Dumbbell, Link as LinkIcon, ShoppingBag, Users, MessageSquare } from 'lucide-react';
 import { auth } from '../../../../packages/shared/api/firebaseConfig';
 import { useGym } from '../context/GymContext';
 
@@ -133,6 +133,18 @@ const MemberLayout = () => {
                         label="Schedule" 
                         getStyle={styles.navItem} 
                     />
+                    <DesktopNavItem 
+                        to="/members/community" 
+                        icon={Users} 
+                        label="Community" 
+                        getStyle={styles.navItem} 
+                    />
+                     <DesktopNavItem 
+                        to="/members/chat" 
+                        icon={MessageSquare} 
+                        label="Messages" 
+                        getStyle={styles.navItem} 
+                    />
                     {/* UPDATED LINK */}
                     <DesktopNavItem 
                         to="/members/store" 
@@ -188,11 +200,14 @@ const MemberLayout = () => {
         {/* =========================================
             MOBILE BOTTOM NAV 
            ========================================= */}
-        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-6 py-3 pb-6 safe-bottom flex justify-between items-center z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-2 py-3 pb-6 safe-bottom flex justify-around items-center z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
           <MobileNavItem to="/members/home" icon={<Home size={24} />} label={hasGyms ? "Home" : "Search"} theme={theme} />
           
           {hasGyms && (
+            <>
               <MobileNavItem to="/members/schedule" icon={<Calendar size={24} />} label="Book" theme={theme} />
+              <MobileNavItem to="/members/community" icon={<Users size={24} />} label="Feed" theme={theme} />
+            </>
           )}
           
           {/* FAB (Check-in) */}
@@ -214,8 +229,10 @@ const MemberLayout = () => {
           )}
 
           {hasGyms && (
-              /* UPDATED LINK */
+            <>
+              <MobileNavItem to="/members/chat" icon={<MessageSquare size={24} />} label="Chat" theme={theme} />
               <MobileNavItem to="/members/store" icon={<ShoppingBag size={24} />} label="Store" theme={theme} />
+            </>
           )}
 
           <MobileNavItem to="/members/profile" icon={<User size={24} />} label="Profile" theme={theme} />
