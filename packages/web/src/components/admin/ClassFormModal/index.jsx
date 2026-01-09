@@ -8,7 +8,7 @@ import { TabAccess } from './TabAccess';
 import { TabSettings } from './TabSettings';
 
 export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, membershipList = [], globalSettings, onSave, initialViewMode }) => {
-    const { showConfirm } = useConfirm();
+    const { confirm: showConfirm } = useConfirm();
     const [activeTab, setActiveTab] = useState('schedule');
     const [rankSystems, setRankSystems] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -317,7 +317,10 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
             const today = new Date().toISOString().split('T')[0];
             const futureBookingsRes = await getFutureBookingsForClass(gymId, classData.id, today);
             let message = "This will end the class series from today onwards, hiding it from the public schedule. All historical records will be preserved. Are you sure?";
-            if (futureBookingsRes.success && futureBookingsRes.bookings.length > 0) {
+            
+            if (isClassActive) {
+                message = "This class is currently in progress. Ending the series will keep the current session active but remove all future occurrences from tomorrow onwards.";
+            } else if (futureBookingsRes.success && futureBookingsRes.bookings.length > 0) {
                 message = `This will end the class series and cancel ${futureBookingsRes.bookings.length} upcoming booking(s). Members will be refunded, and historical records will be preserved. Are you sure?`;
             }
             
@@ -488,7 +491,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                         <button
                             type="button"
                             onClick={handleClassSeriesRetirement}
-                            disabled={loading || isClassActive}
+                            disabled={loading}
                             className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg font-medium transition-colors text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                            <Trash2 size={14} /> End Series

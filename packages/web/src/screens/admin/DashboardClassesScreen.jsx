@@ -22,7 +22,7 @@ const DashboardClassesScreen = () => {
   // Modal
   const [isClassModalOpen, setIsClassModalOpen] = useState(false);
   const [editingClass, setEditingClass] = useState(null);
-  const { showConfirm } = useConfirm();
+  const { confirm } = useConfirm();
 
   // --- HELPERS ---
   const getInstructorName = (id) => {
@@ -74,7 +74,7 @@ const DashboardClassesScreen = () => {
 
   const handleDeleteClass = async (e, classId) => {
     e.stopPropagation();
-    const confirmed = await showConfirm({
+    const confirmed = await confirm({
         title: "Retire Class Series?",
         message: "This will check for booking history. If none exists, the class will be deleted. If history exists, it will be archived to preserve records.",
         confirmText: "Yes, Retire",
@@ -91,10 +91,10 @@ const DashboardClassesScreen = () => {
             } else {
                 message = `The class series was archived. ${result.refundedCount || 0} future booking(s) were refunded.`;
             }
-            await showConfirm({ title, message, confirmText: "OK", cancelText: null });
+            await confirm({ title, message, confirmText: "OK", cancelText: null });
             refreshData(gymId);
         } else {
-            await showConfirm({ title: "Error", message: `Failed to retire series: ${result.error}`, confirmText: "OK", cancelText: null });
+            await confirm({ title: "Error", message: `Failed to retire series: ${result.error}`, confirmText: "OK", cancelText: null });
         }
     }
   };
