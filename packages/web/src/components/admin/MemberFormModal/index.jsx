@@ -15,8 +15,10 @@ import {
   addManualMember,
   updateMemberProfile,
   getMembershipTiers,
-  getGymDetails
+  getGymDetails,
+  logMembershipHistory
 } from '../../../../../shared/api/firestore';
+import { auth } from '../../../../../shared/api/firebaseConfig';
 import { uploadStaffPhoto } from '../../../../../shared/api/storage';
 
 // --- SIDEBAR BUTTON COMPONENT ---
@@ -56,7 +58,7 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
 
   // --- UI STATE ---
   const [customPrice, setCustomPrice] = useState('');
-  const [skipTrial, setSkipTrial] = useState(false);
+  const [trialOverrideDays, setTrialOverrideDays] = useState('0');
   const [photoFile, setPhotoFile] = useState(null);
 
   // --- DATA LOADING STATE ---
@@ -108,7 +110,7 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
           ranks: initialRanks
         });
         setCustomPrice(memberData.assignedPrice || '');
-        setSkipTrial(false);
+        setTrialOverrideDays('0');
       } else {
         setFormData({
           firstName: '', lastName: '', email: '', phone: '', photoUrl: null,
@@ -117,7 +119,7 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
           membershipId: '', ranks: {}
         });
         setCustomPrice('');
-        setSkipTrial(false);
+        setTrialOverrideDays('0');
       }
       setPhotoFile(null);
       setActiveTab('profile');
@@ -157,20 +159,12 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
       subscriptionStatus = 'prospect'; 
       trialEndDate = null;
       startDate = null; 
-    }
-    else if (memberData && isSamePlan && memberData.status !== 'prospect') {
-      // Preserve existing status
-      subscriptionStatus = memberData.subscriptionStatus || memberData.status;
-      trialEndDate = memberData.trialEndDate ? new Date(memberData.trialEndDate) : null;
-      startDate = memberData.startDate ? new Date(memberData.startDate) : new Date();
-    }
-    else {
-      // New Plan Activation
-      if (selectedPlan?.hasTrial && !skipTrial) {
+    } else {
+      const trialDays = Number(trialOverrideDays) || 0;
+      if (selectedPlan?.hasTrial && trialDays > 0) {
         subscriptionStatus = 'trialing';
-        // Calculate Trial End Date
-        const trialDays = parseInt(selectedPlan.trialDays) || 0;
-        const tDate = new Date(startDate); // Start from the official start date
+        // Calculate Trial End Date based on the form's start date
+        const tDate = new Date(startDate);
         tDate.setDate(tDate.getDate() + trialDays);
         trialEndDate = tDate;
       } else {
@@ -180,6 +174,55 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
     }
 
     const fullName = `${formData.firstName.trim()} ${formData.lastName.trim()}`;
+
+    const changes = [];
+    const oldMembership = memberData ? (memberData.memberships || []).find(m => m.gymId === gymId) : null;
+    const isNewMember = !memberData;
+
+    if (isNewMember && formData.membershipId) {
+        changes.push(`Assigned '${selectedPlan?.name}' plan.`);
+    } else if (!isNewMember && formData.membershipId !== (oldMembership?.membershipId || null)) {
+        const newPlanName = selectedPlan?.name || 'No Plan';
+        if (!oldMembership?.membershipId) {
+            changes.push(`Assigned '${newPlanName}' plan.`);
+        } else {
+            const oldPlan = tiers.find(t => t.id === oldMembership.membershipId);
+            changes.push(`Plan changed from '${oldPlan?.name}' to '${newPlanName}'.`);
+        }
+    }
+
+    const finalPriceForLog = customPrice !== '' ? Number(customPrice) : (selectedPlan ? Number(selectedPlan.price) : 0);
+    if (!isNewMember && oldMembership && formData.membershipId === oldMembership.membershipId) {
+        const oldPrice = oldMembership.assignedPrice ?? oldMembership.price;
+        if (finalPriceForLog !== oldPrice) {
+            changes.push(`Price adjusted to $${finalPriceForLog.toFixed(2)}.`);
+        }
+    }
+    
+    if (subscriptionStatus === 'trialing') {
+        const trialDays = Number(trialOverrideDays);
+        if (isNewMember || oldMembership?.status !== 'trialing') {
+            if (changes.length > 0) {
+                changes.push(`with a ${trialDays}-day trial.`);
+            } else {
+                changes.push(`Started a ${trialDays}-day trial.`);
+            }
+        } else { // Already in trial, check if days changed
+            const oldTrialEnd = oldMembership.trialEndDate ? new Date(oldMembership.trialEndDate) : null;
+            if (oldTrialEnd) {
+                const today = new Date();
+                today.setHours(0,0,0,0);
+                if (oldTrialEnd >= today) {
+                    const diffTime = oldTrialEnd.getTime() - today.getTime();
+                    const oldRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    if (trialDays !== oldRemaining) {
+                        changes.push(`Trial period adjusted to ${trialDays} days remaining.`);
+                    }
+                }
+            }
+        }
+    }
+    const logDescription = changes.join(' ');
 
     // --- CRITICAL CHANGE: CONSTRUCT MEMBERSHIPS ARRAY ---
     // 1. Get existing memberships (to preserve other gyms)
@@ -248,6 +291,12 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
       result = await updateMemberProfile(memberData.id, payload);
     } else {
       result = await addManualMember(gymId, payload);
+    }
+
+    if (result.success && logDescription) {
+        const adminId = auth.currentUser?.uid;
+        const userId = memberData ? memberData.id : result.member.id;
+        await logMembershipHistory(userId, gymId, logDescription, adminId);
     }
 
     setLoading(false);
@@ -324,7 +373,7 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
               {activeTab === 'billing' && (
                 <MemberBillingTab
                   formData={formData} setFormData={setFormData} customPrice={customPrice} setCustomPrice={setCustomPrice}
-                  skipTrial={skipTrial} setSkipTrial={setSkipTrial} tiers={tiers} memberData={memberData}
+                  trialOverrideDays={trialOverrideDays} setTrialOverrideDays={setTrialOverrideDays} tiers={tiers} memberData={memberData}
                 />
               )}
 

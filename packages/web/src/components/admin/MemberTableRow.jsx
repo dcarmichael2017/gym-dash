@@ -8,6 +8,12 @@ import {
 
 export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
     
+    // --- Derived State ---
+    const currentMembership = (member.memberships || []).find(m => m.gymId === member.gymId);
+    const planName = currentMembership?.membershipName;
+    // Default to 'prospect' which shows as 'Free Member' if no specific gym membership is found.
+    const effectiveStatus = currentMembership?.status || 'prospect';
+
     // --- Helper: Find Payer ---
     const payer = member.payerId ? allMembers.find(m => m.id === member.payerId) : null;
 
@@ -18,7 +24,7 @@ export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
 
     // --- Helper: Status Badge ---
     const getStatusBadge = () => {
-        const status = (member.subscriptionStatus || member.status || 'inactive').toLowerCase();
+        const status = effectiveStatus.toLowerCase();
         
         switch(status) {
             case 'active': 
@@ -64,7 +70,7 @@ export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
 
             {/* 3. Plan Name */}
             <td className="px-6 py-4 text-sm text-gray-600">
-                {member.membershipName || <span className="text-gray-400 italic">None</span>}
+                {planName || <span className="text-gray-400 italic">Free Member</span>}
             </td>
 
             {/* 4. Family Status */}

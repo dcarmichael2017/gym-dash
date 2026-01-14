@@ -1,7 +1,40 @@
-import { doc, addDoc, collection, updateDoc, getDocs, deleteDoc, query, where, writeBatch, arrayUnion, arrayRemove } from "firebase/firestore";
+import { doc, addDoc, collection, updateDoc, getDocs, deleteDoc, query, where, writeBatch, arrayUnion, arrayRemove, getDoc, orderBy } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
 // --- MEMBER MANAGEMENT ---
+
+export const logMembershipHistory = async (userId, gymId, description, actorId = 'system') => {
+  try {
+    const logRef = collection(db, 'users', userId, 'membershipHistory');
+    await addDoc(logRef, {
+      gymId,
+      description,
+      actorId,
+      createdAt: new Date(),
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("Error logging membership history:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const getMembershipHistory = async (userId, gymId) => {
+    try {
+        const historyRef = collection(db, 'users', userId, 'membershipHistory');
+        const q = query(
+            historyRef,
+            where("gymId", "==", gymId),
+            orderBy("createdAt", "desc")
+        );
+        const snapshot = await getDocs(q);
+        const history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        return { success: true, history };
+    } catch (error) {
+        console.error("Error fetching membership history:", error);
+        return { success: false, error: error.message };
+    }
+}
 
 export const getGymMembers = async (gymId) => {
   try {
@@ -15,6 +48,85 @@ export const getGymMembers = async (gymId) => {
     const members = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     return { success: true, members };
   } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const cancelUserMembership = async (userId, gymId) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) {
+      throw new Error("User not found.");
+    }
+
+    const userData = userSnap.data();
+    const memberships = userData.memberships || [];
+    
+    let membershipUpdated = false;
+    const updatedMemberships = memberships.map(mem => {
+      // Find the membership for the current gym to cancel.
+      if (mem.gymId === gymId) {
+        membershipUpdated = true;
+        // Set the flag to indicate cancellation at period end.
+        return { ...mem, cancelAtPeriodEnd: true };
+      }
+      return mem;
+    });
+
+    if (!membershipUpdated) {
+        // This case should ideally not be hit if called from a valid context.
+        throw new Error("No active membership found for this gym.");
+    }
+    
+    // Update the entire memberships array on the user's document.
+    await updateDoc(userRef, { memberships: updatedMemberships });
+    
+    return { success: true };
+  } catch (error) {
+    console.error("Error cancelling membership:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const adminCancelUserMembership = async (userId, gymId, reason = "Cancelled by admin") => {
+  try {
+    const userRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) throw new Error("User not found.");
+
+    const userData = userSnap.data();
+    const memberships = userData.memberships || [];
+    
+    const updatedMemberships = memberships.map(mem => {
+      if (mem.gymId === gymId) {
+        return { 
+          ...mem, 
+          status: 'prospect',
+          membershipId: null,
+          membershipName: null,
+          price: 0,
+          assignedPrice: null,
+          cancelAtPeriodEnd: false,
+          cancellationReason: reason,
+          cancelledAt: new Date().toISOString()
+        };
+      }
+      return mem;
+    });
+
+    await updateDoc(userRef, { 
+        memberships: updatedMemberships,
+        status: 'prospect',
+        membershipId: null,
+        membershipName: null,
+    });
+    
+    return { success: true };
+  } catch (error) {
+    console.error("Error cancelling membership for admin:", error);
     return { success: false, error: error.message };
   }
 };

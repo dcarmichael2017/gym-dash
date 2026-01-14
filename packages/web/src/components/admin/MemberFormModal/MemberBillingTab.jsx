@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { CreditCard, Link as LinkIcon, DollarSign, Tag, Coins, Plus, Minus, History, Save, X, ArrowRight, Calendar, RefreshCw, AlertCircle } from 'lucide-react';
-import { auth } from '../../../../../shared/api/firebaseConfig';
-import { adjustUserCredits, getUserCreditHistory } from '../../../../../shared/api/firestore';
+import React, { useState, useEffect, useMemo } from 'react';
+import { CreditCard, Pencil, DollarSign, Tag, Coins, Plus, Minus, History, Save, X, ArrowRight, Calendar, RefreshCw, AlertCircle, XCircle } from 'lucide-react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { auth, db } from '../../../../../shared/api/firebaseConfig';
+import { adjustUserCredits, getUserCreditHistory, adminCancelUserMembership, cancelUserMembership, getMembershipHistory, logMembershipHistory } from '../../../../../shared/api/firestore';
 import { useConfirm } from '../../../context/ConfirmationContext'; 
 
 export const MemberBillingTab = ({
@@ -9,21 +10,73 @@ export const MemberBillingTab = ({
     setFormData,
     customPrice,
     setCustomPrice,
-    skipTrial,
-    setSkipTrial,
+    trialOverrideDays,
+    setTrialOverrideDays,
     tiers,
     memberData
 }) => {
     const { confirm } = useConfirm();
+    const [liveData, setLiveData] = useState(null);
+    const [isEditing, setIsEditing] = useState(false);
+
+    // --- Real-time Data Listener ---
+    useEffect(() => {
+        if (!memberData?.id) return;
+        const unsub = onSnapshot(doc(db, 'users', memberData.id), (doc) => {
+            setLiveData(doc.data());
+        });
+        return () => unsub();
+    }, [memberData?.id]);
+
+    // --- Derived State ---
+    const displayUser = liveData || memberData;
+    // Assuming the user's current membership is in the `memberships` array and scoped by their primary gymId
+    const currentMembership = (displayUser?.memberships || []).find(m => m.gymId === displayUser.gymId);
+    const hasMembership = !!(currentMembership && currentMembership.membershipId);
+    const currentTier = hasMembership ? tiers.find(t => t.id === currentMembership.membershipId) : null;
+    const displayPlanName = currentMembership?.planName || currentTier?.name;
+    const userPrice = currentMembership?.assignedPrice ?? currentMembership?.price;
+
+    useEffect(() => {
+        if (!hasMembership && !isEditing) {
+            setIsEditing(true);
+        }
+    }, [hasMembership, isEditing]);
     
     // --- Current State Analysis ---
     const selectedPlan = tiers.find(t => t.id === formData.membershipId);
-    const isSamePlan = memberData && memberData.membershipId === formData.membershipId;
-    const showTrialOption = selectedPlan?.hasTrial && !isSamePlan;
+    const isSamePlan = currentMembership && currentMembership.membershipId === formData.membershipId;
+    const showTrialOption = selectedPlan?.hasTrial && (!isSamePlan || currentMembership?.status === 'trialing');
 
     // Determine effective price for display/logic
     // If user is editing price, show that. If blank/new plan, show plan default.
     const displayPrice = customPrice !== '' ? customPrice : (selectedPlan?.price || '');
+
+    const remainingTrialDays = useMemo(() => {
+        if (currentMembership?.status !== 'trialing' || !currentMembership.trialEndDate) {
+            return null;
+        }
+        const trialEnd = currentMembership.trialEndDate.toDate ? currentMembership.trialEndDate.toDate() : new Date(currentMembership.trialEndDate);
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        if (trialEnd < today) return 0;
+        
+        const diffTime = trialEnd.getTime() - today.getTime();
+        return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    }, [currentMembership]);
+
+    useEffect(() => {
+        // This effect will run when the selected plan changes OR when the user's data loads.
+        if (isEditing) {
+            if (currentMembership?.status === 'trialing' && remainingTrialDays !== null) {
+                setTrialOverrideDays(String(remainingTrialDays));
+            } else if (selectedPlan?.hasTrial) {
+                setTrialOverrideDays(String(selectedPlan.trialDays || 0));
+            } else {
+                setTrialOverrideDays('0');
+            }
+        }
+    }, [isEditing, selectedPlan, currentMembership, remainingTrialDays, setTrialOverrideDays]);
 
     // --- Credits State (Existing) ---
     const [showCreditHistory, setShowCreditHistory] = useState(false);
@@ -31,24 +84,104 @@ export const MemberBillingTab = ({
     const [pendingChange, setPendingChange] = useState(0); 
     const [adjustReason, setAdjustReason] = useState('');
     const [loadingCredits, setLoadingCredits] = useState(false);
-    const [displayCredits, setDisplayCredits] = useState(memberData?.classCredits || 0);
+    const [displayCredits, setDisplayCredits] = useState(displayUser?.classCredits || 0);
+
+    // --- Membership History State (New) ---
+    const [showMembershipHistory, setShowMembershipHistory] = useState(false);
+    const [membershipHistory, setMembershipHistory] = useState([]);
+    const [loadingMembershipHistory, setLoadingMembershipHistory] = useState(false);
 
     useEffect(() => {
-        if (memberData?.classCredits !== undefined) {
-            setDisplayCredits(memberData.classCredits);
+        if (displayUser?.classCredits !== undefined) {
+            setDisplayCredits(displayUser.classCredits);
         }
-    }, [memberData?.classCredits]);
+    }, [displayUser?.classCredits]);
 
     const loadHistory = async () => {
-        if (memberData?.id) {
-            const res = await getUserCreditHistory(memberData.id);
+        if (displayUser?.id) {
+            const res = await getUserCreditHistory(displayUser.id);
             if (res.success) setCreditHistory(res.logs);
         }
     };
 
+    const loadMembershipHistory = async () => {
+        if (displayUser?.id && currentMembership?.gymId) {
+            setLoadingMembershipHistory(true);
+            const res = await getMembershipHistory(displayUser.id, currentMembership.gymId);
+            if (res.success) {
+                setMembershipHistory(res.history);
+            }
+            setLoadingMembershipHistory(false);
+        }
+    };
+
+    useEffect(() => {
+        if (showMembershipHistory) {
+            loadMembershipHistory();
+        }
+    }, [showMembershipHistory, displayUser?.id, currentMembership?.gymId]);
+
     useEffect(() => {
         if (showCreditHistory) loadHistory();
-    }, [showCreditHistory, memberData?.id]);
+    }, [showCreditHistory, displayUser?.id]);
+
+    const handleEditClick = () => {
+        if (!currentMembership) return;
+        const priceToEdit = currentMembership.assignedPrice ?? currentMembership.price;
+        setCustomPrice(priceToEdit !== undefined ? String(priceToEdit) : '');
+        // Sync form with current membership data
+        const currentTier = tiers.find(t => t.id === currentMembership.membershipId);
+        setFormData(prev => ({
+            ...prev,
+            membershipId: currentMembership.membershipId,
+            planName: currentMembership.planName || currentTier?.name,
+            startDate: currentMembership.startDate,
+        }));
+        setIsEditing(true);
+    };
+
+    const handleAdminCancel = async (immediate) => {
+        const adminId = auth.currentUser?.uid;
+        if (immediate) {
+            const isConfirmed = await confirm({
+                title: 'Cancel Membership Immediately?',
+                message: `This will immediately revoke the member's plan and set their status to inactive. This action cannot be undone.`,
+                confirmText: "Yes, Cancel Immediately",
+                type: 'danger'
+            });
+            if (!isConfirmed) return;
+
+            if (displayUser?.id && currentMembership?.gymId) {
+                const result = await adminCancelUserMembership(displayUser.id, currentMembership.gymId);
+                if (result.success) {
+                    await logMembershipHistory(displayUser.id, currentMembership.gymId, 'Membership cancelled immediately by admin.', adminId);
+                    if (showMembershipHistory) loadMembershipHistory();
+                    setIsEditing(false);
+                } else {
+                    alert(`Error: ${result.error}`);
+                }
+            }
+        } else {
+            const isConfirmed = await confirm({
+                title: 'Cancel at End of Period?',
+                message: `The member's plan will remain active until the end of the current billing period, then it will not renew.`,
+                confirmText: "Yes, Schedule Cancellation",
+                type: 'confirm'
+            });
+            if (!isConfirmed) return;
+
+            if (displayUser?.id && currentMembership?.gymId) {
+                const result = await cancelUserMembership(displayUser.id, currentMembership.gymId);
+                if (result.success) {
+                    await logMembershipHistory(displayUser.id, currentMembership.gymId, 'Membership scheduled to cancel at end of period by admin.', adminId);
+                    if (showMembershipHistory) loadMembershipHistory();
+                    setIsEditing(false);
+                } else {
+                    alert(`Error: ${result.error}`);
+                }
+            }
+        }
+    };
 
     const handlePlanChange = (e) => {
         const newPlanId = e.target.value;
@@ -92,9 +225,9 @@ export const MemberBillingTab = ({
         const adminId = auth.currentUser?.uid || 'admin';
         const defaultReason = pendingChange > 0 ? 'Admin added credits' : 'Admin deducted credits';
         const reason = adjustReason.trim() || defaultReason;
-        const result = await adjustUserCredits(memberData.id, pendingChange, reason, adminId);
+        const result = await adjustUserCredits(displayUser.id, pendingChange, reason, adminId);
         if (result.success) {
-            setDisplayCredits(finalBalance);
+            // Data will refresh via onSnapshot, just reset form state
             setPendingChange(0);
             setAdjustReason('');
             if (showCreditHistory) loadHistory();
@@ -107,25 +240,29 @@ export const MemberBillingTab = ({
     return (
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-200">
 
-            {/* --- 1. CURRENT SUBSCRIPTION SNAPSHOT (NEW) --- */}
-            {memberData?.membershipId && (
+            {/* --- 1. CURRENT SUBSCRIPTION SNAPSHOT --- */}
+            {hasMembership && !isEditing && (
                 <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl p-5 text-white shadow-md relative overflow-hidden">
                     {/* Background Pattern */}
                     <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 blur-2xl"></div>
                     
+                    <button onClick={handleEditClick} className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 p-2 rounded-full text-white transition-colors z-20">
+                        <Pencil size={16} />
+                    </button>
+
                     <div className="relative z-10 flex justify-between items-start mb-4">
                         <div>
                             <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Current Active Plan</p>
-                            <h3 className="text-2xl font-bold">{memberData.membershipName || 'Unknown Plan'}</h3>
+                            <h3 className="text-2xl font-bold">{displayPlanName || 'Unknown Plan'}</h3>
                             <div className="flex items-center gap-2 mt-1">
                                 <span className="bg-white/10 px-2 py-0.5 rounded text-xs font-medium text-white/90">
-                                    ${memberData.price}/{memberData.interval || 'mo'}
+                                    ${parseFloat(userPrice || 0).toFixed(2)}/{currentMembership.interval || 'mo'}
                                 </span>
                                 <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
-                                    memberData.status === 'active' ? 'bg-green-500 text-white' : 
-                                    memberData.status === 'trialing' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'
+                                    currentMembership.status === 'active' ? 'bg-green-500 text-white' : 
+                                    currentMembership.status === 'trialing' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'
                                 }`}>
-                                    {memberData.status}
+                                    {currentMembership.status}
                                 </span>
                             </div>
                         </div>
@@ -136,30 +273,43 @@ export const MemberBillingTab = ({
                             <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5 flex items-center gap-1">
                                 <Calendar size={10} /> Started
                             </p>
-                            <p className="text-sm font-medium">{formatDate(memberData.startDate)}</p>
+                            <p className="text-sm font-medium">{formatDate(currentMembership.startDate)}</p>
                         </div>
                         <div>
                             <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5 flex items-center gap-1">
-                                {memberData.status === 'trialing' ? <RefreshCw size={10} /> : <RefreshCw size={10} />} 
-                                {memberData.status === 'trialing' ? 'Trial Ends' : 'Renews'}
+                                {currentMembership.status === 'trialing' ? <RefreshCw size={10} /> : <RefreshCw size={10} />} 
+                                {currentMembership.status === 'trialing' ? 'Trial Ends' : 'Renews'}
                             </p>
                             <p className="text-sm font-medium">
-                                {memberData.status === 'trialing' 
-                                    ? formatDate(memberData.trialEndDate) 
+                                {currentMembership.status === 'trialing' 
+                                    ? formatDate(currentMembership.trialEndDate) 
                                     : 'Auto-Renew' // Or calculate next billing date if needed
                                 }
                             </p>
                         </div>
                     </div>
+                    {currentMembership.cancelAtPeriodEnd && (
+                        <div className="relative z-10 border-t border-white/10 mt-4 pt-4">
+                            <p className="text-xs font-semibold text-yellow-300 text-center">
+                                This membership is scheduled to cancel and will not renew.
+                            </p>
+                        </div>
+                    )}
                 </div>
             )}
 
             {/* --- 2. EDIT SUBSCRIPTION FORM --- */}
+            {(isEditing || !hasMembership) && (
             <div>
                 <div className="flex items-center justify-between mb-2">
                     <label className="block text-xs font-semibold text-gray-500 uppercase">
-                        {memberData?.membershipId ? 'Modify Subscription' : 'Assign Membership'}
+                        {hasMembership ? 'Modify Subscription' : 'Assign Membership'}
                     </label>
+                    {hasMembership && isEditing && (
+                        <button type="button" onClick={() => setIsEditing(false)} className="text-xs font-medium text-gray-500 hover:text-gray-800 underline">
+                            Cancel Edit
+                        </button>
+                    )}
                 </div>
                 
                 <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
@@ -218,37 +368,105 @@ export const MemberBillingTab = ({
                                 </div>
                             </div>
 
-                            {/* Trial Logic Visualization */}
-                            <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
-                                <div className="flex justify-between items-start">
+                            {/* Trial Override Input */}
+                            {showTrialOption && (
+                                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100">
                                     <div>
+                                        <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Trial Days</label>
+                                        <div className="relative">
+                                            <input
+                                                type="number"
+                                                value={trialOverrideDays}
+                                                onChange={e => setTrialOverrideDays(e.target.value)}
+                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-medium text-gray-900"
+                                                placeholder={selectedPlan?.trialDays || "0"}
+                                            />
+                                            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                                                <span className="text-gray-400 text-xs">days</span>
+                                            </div>
+                                        </div>
+                                        <p className="text-[10px] text-gray-400 mt-1">
+                                            Set to 0 for immediate activation.
+                                        </p>
+                                    </div>
+                                    <div className="bg-blue-50 rounded-lg p-3 border border-blue-100 h-full flex flex-col justify-center">
                                         <h4 className="text-sm font-bold text-blue-900">
-                                            {(skipTrial || !showTrialOption) ? 'Immediate Activation' : 'Start with Free Trial'}
+                                            {Number(trialOverrideDays) > 0 ? 'Starts with Free Trial' : 'Immediate Activation'}
                                         </h4>
                                         <p className="text-xs text-blue-700 mt-0.5">
-                                            {(skipTrial || !showTrialOption) 
-                                                ? `Billing will start on ${new Date().toLocaleDateString()}.`
-                                                : `${selectedPlan.trialDays}-day trial. Billing starts ${new Date(Date.now() + (selectedPlan.trialDays * 86400000)).toLocaleDateString()}.`
+                                            {Number(trialOverrideDays) > 0
+                                                ? `Billing starts ${new Date(Date.now() + (Number(trialOverrideDays) * 86400000)).toLocaleDateString()}.`
+                                                : `Billing will start on ${new Date().toLocaleDateString()}.`
                                             }
                                         </p>
                                     </div>
-                                    {showTrialOption && (
-                                        <div className="flex items-center gap-2">
-                                            <label htmlFor="skipTrial" className="text-xs font-bold text-blue-800 cursor-pointer">Skip Trial</label>
-                                            <input
-                                                type="checkbox"
-                                                id="skipTrial"
-                                                checked={skipTrial}
-                                                onChange={e => setSkipTrial(e.target.checked)}
-                                                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
-                                            />
-                                        </div>
-                                    )}
                                 </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Admin Cancellation Action */}
+                    {hasMembership && isEditing && (
+                        <div className="p-4 bg-red-50 border-t border-red-200">
+                            <label className="block text-xs font-semibold text-red-900 uppercase mb-2 text-center">Cancel Membership</label>
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => handleAdminCancel(false)}
+                                    className="w-full text-center p-2 rounded-lg text-xs font-bold transition-colors bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
+                                >
+                                    Cancel at End of Period
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleAdminCancel(true)}
+                                    className="w-full text-center p-2 rounded-lg text-xs font-bold transition-colors bg-red-100 text-red-700 hover:bg-red-200"
+                                >
+                                    Cancel Immediately
+                                </button>
                             </div>
                         </div>
                     )}
                 </div>
+            </div>
+            )}
+
+            {/* --- MEMBERSHIP HISTORY --- */}
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                    <div className="flex items-center gap-2 text-gray-800 font-bold">
+                        <History size={18} className="text-blue-500" />
+                        <span>Membership History</span>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setShowMembershipHistory(!showMembershipHistory)}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                        {showMembershipHistory ? 'Hide History' : 'View History'}
+                    </button>
+                </div>
+
+                {showMembershipHistory && (
+                    <div className="p-4 animate-in fade-in">
+                        <div className="max-h-48 overflow-y-auto space-y-2 custom-scrollbar pr-1">
+                            {loadingMembershipHistory ? (
+                                <p className="text-xs text-gray-400 italic text-center">Loading...</p>
+                            ) : membershipHistory.length === 0 ? (
+                                <p className="text-xs text-gray-400 italic p-2 text-center bg-gray-50 rounded">No history found.</p>
+                            ) : (
+                                membershipHistory.map((log) => (
+                                    <div key={log.id} className="text-xs p-2.5 rounded-lg bg-gray-50 border border-gray-100">
+                                        <p className="font-semibold text-gray-800">{log.description}</p>
+                                        <span className="text-[10px] text-gray-500">
+                                            {log.createdAt ? new Date(log.createdAt.toDate()).toLocaleString([], {dateStyle:'short', timeStyle:'short'}) : 'Unknown Date'}
+                                        </span>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* --- 3. CREDITS MANAGEMENT (Existing Code) --- */}
