@@ -5,7 +5,9 @@ import {
 } from 'lucide-react';
 
 import { auth, db } from '../../../../shared/api/firebaseConfig';
-import { getGymMembers, deleteMember, archiveMember, runPermissionDiagnostics } from '../../../../shared/api/firestore';
+import { getGymMembers, deleteMember, archiveMember, runPermissionDiagnostics, getMemberFutureBookings } from '../../../../shared/api/firestore';
+import { cancelBooking } from '../../../../shared/api/firestore/bookings';
+import { getClassDetails } from '../../../../shared/api/firestore/classes';
 import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 
 // --- UPDATE THIS IMPORT ---
@@ -29,12 +31,13 @@ const DashboardMembersScreen = () => {
   const [selectedMember, setSelectedMember] = useState(null);
   
   // Delete/Archive State
-  const [actionModal, setActionModal] = useState({ 
-      isOpen: false, 
+  const [actionModal, setActionModal] = useState({
+      isOpen: false,
       type: null, // 'delete', 'archive', or 'blocked'
       memberId: null,
       memberName: '',
-      dependents: [] 
+      dependents: [],
+      futureBookings: [] // New: store booking details
   });
 
   // --- ACTIONS ---
@@ -98,7 +101,7 @@ const DashboardMembersScreen = () => {
       setIsModalOpen(true);
   };
 
-  const handleDeleteClick = (member) => {
+  const handleDeleteClick = async (member) => {
       // 1. Check for dependents (Blocker)
       if (member.dependents && member.dependents.length > 0) {
           const dependentList = member.dependents.map(depId => {
@@ -114,19 +117,42 @@ const DashboardMembersScreen = () => {
               type: 'blocked',
               memberId: member.id,
               memberName: `${member.firstName} ${member.lastName}`,
-              dependents: dependentList
+              dependents: dependentList,
+              futureBookings: []
           });
-          return; 
+          return;
       }
 
       // 2. Determine Action (Delete vs Archive)
-      const isSafeToDelete = member.status === 'archived' || member.status === 'trialing' || !member.status || member.status === 'prospect';
-      
+      // ✅ FIX: Use per-gym membership status from subcollection
+      const membershipStatus = member.currentMembership?.status;
+      const isSafeToDelete = !membershipStatus || membershipStatus === 'prospect' || membershipStatus === 'trialing' || membershipStatus === 'inactive';
+
+      // 3. Fetch future bookings if archiving
+      let futureBookings = [];
+      if (!isSafeToDelete && gymId) {
+          const bookingsResult = await getMemberFutureBookings(gymId, member.id);
+          if (bookingsResult.success && bookingsResult.bookings.length > 0) {
+              // Fetch class details for each booking to show meaningful names
+              const enrichedBookings = await Promise.all(
+                  bookingsResult.bookings.map(async (booking) => {
+                      const classResult = await getClassDetails(gymId, booking.classId);
+                      return {
+                          ...booking,
+                          className: booking.className || (classResult.success ? classResult.data.name : 'Unknown Class')
+                      };
+                  })
+              );
+              futureBookings = enrichedBookings;
+          }
+      }
+
       setActionModal({
           isOpen: true,
           type: isSafeToDelete ? 'delete' : 'archive',
           memberId: member.id,
-          memberName: `${member.firstName} ${member.lastName}`
+          memberName: `${member.firstName} ${member.lastName}`,
+          futureBookings: futureBookings
       });
   };
 
@@ -136,11 +162,21 @@ const DashboardMembersScreen = () => {
       if (actionModal.type === 'delete') {
           await deleteMember(actionModal.memberId);
       } else if (actionModal.type === 'archive') {
-          await archiveMember(actionModal.memberId, "Admin Dashboard Action");
+          // ✅ Cancel all future bookings before archiving
+          if (actionModal.futureBookings && actionModal.futureBookings.length > 0) {
+              await Promise.all(
+                  actionModal.futureBookings.map(booking =>
+                      cancelBooking(gymId, booking.id, { isStaff: true, refundPolicy: 'refund' })
+                  )
+              );
+          }
+
+          // ✅ FIX: Pass gymId to archive per-gym membership
+          await archiveMember(actionModal.memberId, gymId, "Admin Dashboard Action");
       }
 
       await fetchMembers(gymId);
-      setActionModal({ isOpen: false, type: null, memberId: null, memberName: '' });
+      setActionModal({ isOpen: false, type: null, memberId: null, memberName: '', futureBookings: [] });
   };
 
   // --- EFFECTS ---
@@ -166,7 +202,8 @@ const DashboardMembersScreen = () => {
 
   useEffect(() => {
     let result = members;
-    if (!showArchived) result = result.filter(m => m.status !== 'archived');
+    // ✅ FIX: Filter by per-gym membership status instead of global status
+    if (!showArchived) result = result.filter(m => m.currentMembership?.status !== 'inactive');
     if (searchTerm) {
       const lowerTerm = searchTerm.toLowerCase();
       result = result.filter(m => 
@@ -274,19 +311,99 @@ const DashboardMembersScreen = () => {
       />
 
       {(actionModal.type === 'delete' || actionModal.type === 'archive') && actionModal.isOpen && (
-          <ConfirmationModal 
-            isOpen={actionModal.isOpen}
-            onClose={() => setActionModal({ ...actionModal, isOpen: false })}
-            onConfirm={executeAction}
-            title={actionModal.type === 'delete' ? "Delete Member?" : "Archive Member?"}
-            message={
-                actionModal.type === 'delete' 
-                ? `Are you sure you want to permanently delete ${actionModal.memberName}? This cannot be undone.` 
-                : `This active member will be moved to the archive. We will record the cancellation date for your analytics. Continue?`
-            }
-            confirmText={actionModal.type === 'delete' ? "Delete Forever" : "Archive Member"}
-            isDestructive={true}
-          />
+          actionModal.type === 'delete' ? (
+              <ConfirmationModal
+                  isOpen={actionModal.isOpen}
+                  onClose={() => setActionModal({ ...actionModal, isOpen: false })}
+                  onConfirm={executeAction}
+                  title="Delete Member?"
+                  message={`Are you sure you want to permanently delete ${actionModal.memberName}? This cannot be undone.`}
+                  confirmText="Delete Forever"
+                  isDestructive={true}
+              />
+          ) : (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+                  <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden transform transition-all scale-100">
+                      {/* Header */}
+                      <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                          <div className="flex items-center gap-3">
+                              <div className="bg-red-100 p-2 rounded-full">
+                                  <AlertTriangle className="h-5 w-5 text-red-600" />
+                              </div>
+                              <h3 className="font-bold text-lg text-gray-800">Archive Member?</h3>
+                          </div>
+                      </div>
+
+                      {/* Body */}
+                      <div className="p-6 max-h-96 overflow-y-auto">
+                          <p className="text-gray-600 text-sm leading-relaxed mb-4">
+                              Archiving <strong>{actionModal.memberName}</strong> will:
+                          </p>
+                          <ul className="text-sm text-gray-600 space-y-2 mb-4 ml-4">
+                              <li>• Set their membership status to 'inactive'</li>
+                              <li>• Revoke access to book classes and member features</li>
+                              <li>• Record cancellation date and reason for analytics</li>
+                              <li>• Keep their profile and history intact</li>
+                          </ul>
+
+                          {actionModal.futureBookings && actionModal.futureBookings.length > 0 && (
+                              <div className="mt-6 bg-orange-50 border border-orange-200 rounded-lg p-4">
+                                  <div className="flex items-start gap-2 mb-3">
+                                      <AlertTriangle size={16} className="text-orange-600 mt-0.5 shrink-0" />
+                                      <div>
+                                          <p className="text-sm font-bold text-orange-900">
+                                              {actionModal.futureBookings.length} upcoming {actionModal.futureBookings.length === 1 ? 'class' : 'classes'} will be cancelled
+                                          </p>
+                                          <p className="text-xs text-orange-700 mt-1">
+                                              Credits will be refunded for all cancelled bookings.
+                                          </p>
+                                      </div>
+                                  </div>
+                                  <div className="space-y-2 mt-3">
+                                      {actionModal.futureBookings.slice(0, 5).map((booking, idx) => (
+                                          <div key={booking.id} className="bg-white border border-orange-100 rounded-md p-3 text-xs">
+                                              <p className="font-bold text-gray-900">{booking.className}</p>
+                                              <p className="text-gray-600">
+                                                  {new Date(booking.dateString).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} at {booking.classTime}
+                                              </p>
+                                              <p className="text-orange-600 mt-1">
+                                                  Status: {booking.status === 'booked' ? 'Booked' : 'Waitlisted'}
+                                                  {booking.costUsed > 0 && ` • ${booking.costUsed} credit${booking.costUsed > 1 ? 's' : ''} will be refunded`}
+                                              </p>
+                                          </div>
+                                      ))}
+                                      {actionModal.futureBookings.length > 5 && (
+                                          <p className="text-xs text-orange-700 italic text-center mt-2">
+                                              + {actionModal.futureBookings.length - 5} more booking{actionModal.futureBookings.length - 5 > 1 ? 's' : ''}
+                                          </p>
+                                      )}
+                                  </div>
+                              </div>
+                          )}
+
+                          <p className="text-sm text-gray-500 mt-4 italic">
+                              You can re-activate their membership at any time from their profile.
+                          </p>
+                      </div>
+
+                      {/* Footer */}
+                      <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3 border-t border-gray-100">
+                          <button
+                              onClick={() => setActionModal({ ...actionModal, isOpen: false })}
+                              className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium transition-colors"
+                          >
+                              Cancel
+                          </button>
+                          <button
+                              onClick={executeAction}
+                              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium shadow-sm transition-all flex items-center"
+                          >
+                              Archive Member
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          )
       )}
 
       {actionModal.type === 'blocked' && actionModal.isOpen && (

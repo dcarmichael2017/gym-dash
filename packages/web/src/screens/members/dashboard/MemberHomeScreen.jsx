@@ -51,6 +51,8 @@ const MemberHomeScreen = () => {
     const isActiveMember = currentMembership?.status === 'active' ||
         currentMembership?.status === 'trialing';
 
+    const isInactiveMember = currentMembership?.status === 'inactive';
+
     // --- HELPERS FOR STATUS UI ---
     const getDisplayName = (status) => {
         const s = status?.toLowerCase();
@@ -383,42 +385,48 @@ const MemberHomeScreen = () => {
 
             <NextClassCard hasActiveMembership={isActiveMember} />
 
-            <StatsOverView
-                user={userDoc}
-                gym={currentGym}
-                attendanceHistory={attendanceHistory}
-                loading={loading}
-                onClick={() => setShowHistoryModal(true)}
-            />
+            {/* Hide StatsOverView for inactive members */}
+            {!isInactiveMember && (
+                <StatsOverView
+                    user={userDoc}
+                    gym={currentGym}
+                    attendanceHistory={attendanceHistory}
+                    loading={loading}
+                    onClick={() => setShowHistoryModal(true)}
+                />
+            )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Community Feed Widget */}
-                <Link to="/members/community" className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-start gap-4 hover:bg-gray-50 transition-colors">
-                    <div className="bg-orange-100 p-3 rounded-full">
-                        <Users className="text-orange-600" size={20} />
-                    </div>
-                    <div>
-                        <p className="font-bold text-gray-800">Community Feed</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                            Latest: Great job to everyone who competed this weekend!
-                        </p>
-                    </div>
-                </Link>
+            {/* Hide Community/Chat widgets for inactive members */}
+            {!isInactiveMember && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Community Feed Widget */}
+                    <Link to="/members/community" className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-start gap-4 hover:bg-gray-50 transition-colors">
+                        <div className="bg-orange-100 p-3 rounded-full">
+                            <Users className="text-orange-600" size={20} />
+                        </div>
+                        <div>
+                            <p className="font-bold text-gray-800">Community Feed</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                                Latest: Great job to everyone who competed this weekend!
+                            </p>
+                        </div>
+                    </Link>
 
-                {/* Group Chat Widget */}
-                <Link to="/members/chat" className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-start gap-4 hover:bg-gray-50 transition-colors">
-                    <div className="bg-purple-100 p-3 rounded-full">
-                        <MessageSquare className="text-purple-600" size={20} />
-                    </div>
-                    <div>
-                        <p className="font-bold text-gray-800">Group Chat</p>
-                        <p className="text-xs text-gray-500 mt-1 flex items-center gap-1.5">
-                            <span className="h-2 w-2 rounded-full bg-red-500"></span>
-                            1 unread message
-                        </p>
-                    </div>
-                </Link>
-            </div>
+                    {/* Group Chat Widget */}
+                    <Link to="/members/chat" className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-start gap-4 hover:bg-gray-50 transition-colors">
+                        <div className="bg-purple-100 p-3 rounded-full">
+                            <MessageSquare className="text-purple-600" size={20} />
+                        </div>
+                        <div>
+                            <p className="font-bold text-gray-800">Group Chat</p>
+                            <p className="text-xs text-gray-500 mt-1 flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full bg-red-500"></span>
+                                1 unread message
+                            </p>
+                        </div>
+                    </Link>
+                </div>
+            )}
 
             {isFreeMember && (
                 <MembershipOffers />

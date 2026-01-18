@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Clock, ArrowRight, Loader2, CalendarX, Sparkles, User, ShoppingBag } from 'lucide-react';
+import { Clock, ArrowRight, Loader2, CalendarX, Sparkles, User, ShoppingBag, XCircle, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore'; 
 import { db, auth } from '../../../../../../packages/shared/api/firebaseConfig'; 
@@ -11,6 +11,10 @@ const NextClassCard = ({ hasActiveMembership }) => {
   const { currentGym, memberships, credits } = useGym(); // ✅ Get credits from context
 
   const theme = currentGym?.theme || { primaryColor: '#2563eb' };
+
+  // Check if member is inactive
+  const currentMembership = memberships?.find(m => m.gymId === currentGym?.id);
+  const isInactive = currentMembership?.status === 'inactive';
 
   const [nextClass, setNextClass] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -231,6 +235,32 @@ const NextClassCard = ({ hasActiveMembership }) => {
            <CalendarX className="opacity-50 mb-2" size={32} />
            <h2 className="font-bold text-lg">No Upcoming Classes</h2>
            <p className="text-sm opacity-70">Check back later for schedule updates.</p>
+      </div>
+    );
+  }
+
+  // Show inactive member card instead of normal next class card
+  if (isInactive && nextClass) {
+    return (
+      <div className="bg-gradient-to-br from-red-600 to-red-700 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden h-48 flex flex-col justify-center">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rounded-full -mr-10 -mt-10 pointer-events-none"></div>
+        <div className="relative z-10 flex items-start gap-4">
+          <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+            <XCircle size={24} />
+          </div>
+          <div className="flex-1">
+            <h2 className="font-bold text-lg mb-2">Booking Unavailable</h2>
+            <p className="text-sm opacity-90 mb-3">
+              Your membership has been disabled by the gym administrator. You cannot book classes at this time.
+            </p>
+            <div className="bg-white/20 border border-white/30 rounded-lg p-3 flex items-start gap-2">
+              <AlertCircle size={14} className="shrink-0 mt-0.5" />
+              <p className="text-xs">
+                Please contact the gym owner or staff to restore access to your account.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }

@@ -691,7 +691,14 @@ export const canUserBook = async (classData, userId, targetGymId, transaction = 
   // --- Denial Messages ---
   let denialReason = "Membership required to book.";
   if (relevantMembership && allowedPlans.includes(relevantMembership.membershipId)) {
-    denialReason = `Your membership is currently ${relevantMembership.status}.`;
+    const memStatus = (relevantMembership.status || '').toLowerCase().trim();
+    if (memStatus === 'inactive') {
+      denialReason = "Your membership has been disabled by the gym administrator. Please contact the gym staff to restore access.";
+    } else {
+      denialReason = `Your membership is currently ${relevantMembership.status}.`;
+    }
+  } else if (relevantMembership && relevantMembership.status === 'inactive') {
+    denialReason = "Your membership has been disabled by the gym administrator. Please contact the gym staff to restore access.";
   } else if (creditCost > 0) {
     denialReason = `Insufficient Credits. (Requires ${creditCost}, you have ${credits})`;
   }

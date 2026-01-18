@@ -1,7 +1,7 @@
 import React from 'react';
 import { X, User, CheckCircle2, Clock, XCircle } from 'lucide-react';
 
-export const TierMembersModal = ({ isOpen, onClose, tierName, members }) => {
+export const TierMembersModal = ({ isOpen, onClose, tierName, members, onMemberClick }) => {
   if (!isOpen) return null;
 
   const getStatusBadge = (status) => {
@@ -37,9 +37,13 @@ export const TierMembersModal = ({ isOpen, onClose, tierName, members }) => {
           {members.length > 0 ? (
             <div className="divide-y divide-gray-100">
               {members.map((member) => (
-                <div key={member.id} className="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
+                <div
+                  key={member.id}
+                  onClick={() => onMemberClick?.(member)}
+                  className="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors cursor-pointer group"
+                >
                   <div className="flex items-center">
-                    <div className="h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold mr-3 overflow-hidden border border-blue-100">
+                    <div className="h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold mr-3 overflow-hidden border border-blue-100 group-hover:border-blue-300 transition-colors">
                       {member.photoUrl ? (
                         <img src={member.photoUrl} alt="" className="h-full w-full object-cover" />
                       ) : (
@@ -47,12 +51,12 @@ export const TierMembersModal = ({ isOpen, onClose, tierName, members }) => {
                       )}
                     </div>
                     <div>
-                      <p className="font-medium text-sm text-gray-900">{member.firstName} {member.lastName}</p>
+                      <p className="font-medium text-sm text-gray-900 group-hover:text-blue-600 transition-colors">{member.firstName} {member.lastName}</p>
                       <p className="text-xs text-gray-500">{member.email}</p>
                     </div>
                   </div>
                   <div>
-                    {getStatusBadge(member.subscriptionStatus || member.status)}
+                    {getStatusBadge(member.currentMembership?.status || member.status)}
                   </div>
                 </div>
               ))}

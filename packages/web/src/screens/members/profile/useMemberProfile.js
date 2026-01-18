@@ -170,11 +170,16 @@ export const useMemberProfile = () => {
 
     const getStatusDisplay = (status) => {
         const s = status?.toLowerCase();
-        if (s === 'active') return { label: 'Active Member', color: 'bg-green-100 text-green-700 border-green-200' };
-        if (s === 'trialing') return { label: 'Trial Period', color: 'bg-blue-100 text-blue-700 border-blue-200' };
-        if (s === 'past_due') return { label: 'Payment Failed', color: 'bg-red-100 text-red-700 border-red-200' };
-        if (s === 'expired' || s === 'cancelled' || s === 'inactive') return { label: 'Former Member', color: 'bg-orange-100 text-orange-700 border-orange-200' }; // Added 'inactive'
-        return { label: 'Free Member', color: 'bg-gray-100 text-gray-500 border-gray-200' };
+        if (s === 'active') return { label: 'Active Member', color: 'bg-green-100 text-green-700 border-green-200', tooltip: null };
+        if (s === 'trialing') return { label: 'Trial Period', color: 'bg-blue-100 text-blue-700 border-blue-200', tooltip: null };
+        if (s === 'past_due') return { label: 'Payment Failed', color: 'bg-red-100 text-red-700 border-red-200', tooltip: null };
+        if (s === 'expired' || s === 'cancelled') return { label: 'Former Member', color: 'bg-orange-100 text-orange-700 border-orange-200', tooltip: null };
+        if (s === 'inactive') return {
+            label: 'Membership Inactive',
+            color: 'bg-red-100 text-red-700 border-red-200',
+            tooltip: 'Your gym access has been disabled by the gym administrator. Please contact the gym owner or staff for assistance.'
+        };
+        return { label: 'Free Member', color: 'bg-gray-100 text-gray-500 border-gray-200', tooltip: null };
     };
 
     return {

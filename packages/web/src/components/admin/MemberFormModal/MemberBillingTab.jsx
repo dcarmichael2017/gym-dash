@@ -167,11 +167,17 @@ export const MemberBillingTab = ({
         const priceToEdit = currentMembership.assignedPrice ?? currentMembership.price;
         setCustomPrice(priceToEdit !== undefined ? String(priceToEdit) : '');
         const currentTier = tiers.find(t => t.id === currentMembership.membershipId);
+
+        // When reactivating an inactive membership, set start date to today
+        const startDateToUse = currentMembership.status === 'inactive'
+            ? new Date()
+            : currentMembership.startDate;
+
         setFormData(prev => ({
             ...prev,
             membershipId: currentMembership.membershipId,
             planName: currentMembership.planName || currentTier?.name,
-            startDate: currentMembership.startDate,
+            startDate: startDateToUse,
         }));
         setIsEditing(true);
     };
@@ -271,7 +277,7 @@ export const MemberBillingTab = ({
         <div className="space-y-8 animate-in slide-in-from-right-4 duration-200">
 
             {/* --- 1. CURRENT SUBSCRIPTION SNAPSHOT --- */}
-            {hasMembership && !isEditing && (
+            {hasMembership && !isEditing && currentMembership.status !== 'inactive' && (
                 <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl p-5 text-white shadow-md relative overflow-hidden">
                     {/* Background Pattern */}
                     <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 blur-2xl"></div>
@@ -324,6 +330,63 @@ export const MemberBillingTab = ({
                             </p>
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* --- INACTIVE MEMBERSHIP CARD --- */}
+            {hasMembership && !isEditing && currentMembership.status === 'inactive' && (
+                <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-5 shadow-md relative overflow-hidden border-2 border-red-200">
+                    <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
+                                <XCircle size={24} className="text-red-600" />
+                            </div>
+                            <div>
+                                <p className="text-xs text-red-600 font-bold uppercase tracking-wider mb-1">Membership Inactive</p>
+                                <h3 className="text-xl font-bold text-gray-900">{displayPlanName || 'Unknown Plan'}</h3>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-bold uppercase">
+                                        Cancelled
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white/60 rounded-lg p-4 mb-4">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5 flex items-center gap-1">
+                                    <Calendar size={10} /> Was Active
+                                </p>
+                                <p className="font-medium text-gray-900">
+                                    {formatDate(currentMembership.startDate)} - {formatDate(currentMembership.cancelledAt)}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Cancellation Reason</p>
+                                <p className="font-medium text-gray-900">{currentMembership.cancellationReason || 'Not specified'}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                        <div className="flex items-start gap-2">
+                            <AlertCircle size={16} className="text-blue-600 mt-0.5 shrink-0" />
+                            <div className="text-xs text-blue-900">
+                                <p className="font-bold mb-1">Member's access has been revoked</p>
+                                <p>This member can no longer book classes or access member-only features. To restore access, re-activate their membership below.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button
+                        onClick={handleEditClick}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold shadow-sm transition-colors flex items-center justify-center gap-2"
+                    >
+                        <RefreshCw size={16} />
+                        Re-activate Membership
+                    </button>
                 </div>
             )}
 

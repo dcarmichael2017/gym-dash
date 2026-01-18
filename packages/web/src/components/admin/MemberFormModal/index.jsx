@@ -230,6 +230,8 @@ const handleSubmit = async (e) => {
     startDate: startDate,
     trialEndDate: trialEndDate,
     cancelAtPeriodEnd: false,
+    cancelledAt: null, // Clear cancelled date when reactivating
+    cancellationReason: null, // Clear cancellation reason when reactivating
     updatedAt: new Date()
   };
 
