@@ -3,7 +3,7 @@ import { db } from "../firebaseConfig"; // Adjust path as needed
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { deleteClass, getClassDetails } from './classes';
 import { BOOKING_STATUS } from '../../constants/strings'; // Adjust path
-import { createCreditLog } from './credits'; // Import helper from credits module
+import { deductCredits, addCredits } from './credits'; // Import per-gym credit helpers
 
 // --- BOOKING ENGINE ---
 
@@ -143,13 +143,20 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
 
       // --- DEDUCT CREDITS ---
       if (costUsed > 0) {
-        const userCredits = parseInt(userData.classCredits) || 0;
+        // ✅ CHANGE: Fetch gym-specific credits from subcollection
+        const creditRef = doc(db, 'users', member.id, 'credits', gymId);
+        const creditSnap = await transaction.get(creditRef);
+        const userCredits = creditSnap.exists() ? (parseInt(creditSnap.data().balance) || 0) : 0;
+
         if (!options.force && userCredits < costUsed) throw "Insufficient credits.";
 
         if (userCredits >= costUsed) {
-          transaction.update(userDocRef, { classCredits: increment(-costUsed) });
-          createCreditLog(
-            transaction, member.id, -costUsed, 'booking',
+          // ✅ CHANGE: Use per-gym credit deduction
+          await deductCredits(
+            transaction,
+            member.id,
+            gymId,
+            costUsed,
             options.isStaff ? `Admin Booked: ${classInfo.name}` : `Booked: ${classInfo.name}`,
             options.force ? 'admin_forced' : 'system'
           );
@@ -399,18 +406,16 @@ export const cancelBooking = async (gymId, attendanceId, options = {}) => {
       // --- 2. HANDLE CREDIT REFUNDS ---
       let refundedAmount = 0;
       if (shouldRefund && data.costUsed > 0) {
-        const userRef = doc(db, "users", data.memberId);
-        transaction.update(userRef, { classCredits: increment(data.costUsed) });
-        refundedAmount = data.costUsed;
-
-        createCreditLog(
+        // ✅ CHANGE: Refund to gym-specific credits
+        await addCredits(
           transaction,
           data.memberId,
+          gymId,
           data.costUsed,
-          'refund',
           options.isStaff ? `Admin Refunded: ${data.className}` : `Refund: ${data.className}`,
           options.isStaff ? 'admin_cancel' : 'user_cancel'
         );
+        refundedAmount = data.costUsed;
       }
 
       // --- 3. REVERSE PROGRESSION ---
@@ -501,7 +506,8 @@ export const checkBookingEligibility = async (gymId, userId, classInstanceProp) 
     eligibility: null,
     activePlanName: '',
     weeklyUsage: null,
-    eligiblePublicPlans: []
+    eligiblePublicPlans: [],
+    gymCredits: 0 // ✅ NEW: Include gym-specific credits
   };
 
   try {
@@ -520,6 +526,11 @@ export const checkBookingEligibility = async (gymId, userId, classInstanceProp) 
 
     const userData = userSnap.data();
     result.userProfile = userData;
+
+    // ✅ NEW: Fetch gym-specific credits
+    const creditRef = doc(db, 'users', userId, 'credits', gymId);
+    const creditSnap = await getDoc(creditRef);
+    result.gymCredits = creditSnap.exists() ? (parseInt(creditSnap.data().balance) || 0) : 0;
 
     // 3. Initial Gatekeeper Check (Transaction = null, so uses getDoc internally)
     let baseEligibility = await canUserBook(classData, userId, gymId, null);
@@ -553,7 +564,11 @@ export const checkBookingEligibility = async (gymId, userId, classInstanceProp) 
               // --- LIMIT REACHED LOGIC ---
               if (usageRes.count >= limit) {
                 const creditCost = parseInt(classData.creditCost) || 1;
-                const userCredits = parseInt(userData.classCredits) || 0;
+
+                // ✅ CHANGE: Fetch gym-specific credits
+                const creditRef = doc(db, 'users', userId, 'credits', gymId);
+                const creditSnap = await getDoc(creditRef);
+                const userCredits = creditSnap.exists() ? (parseInt(creditSnap.data().balance) || 0) : 0;
 
                 if (classData.dropInEnabled && userCredits >= creditCost) {
                   baseEligibility = {
@@ -624,7 +639,17 @@ export const canUserBook = async (classData, userId, targetGymId, transaction = 
     return { allowed: false, reason: "User profile not found.", type: 'denied', cost: 0 };
   }
   const userData = userSnap.data();
-  let credits = parseInt(userData.classCredits) || 0;
+
+  // ✅ CHANGE: Fetch gym-specific credits from subcollection
+  const creditRef = doc(db, 'users', userId, 'credits', targetGymId);
+  const creditSnap = transaction
+    ? await transaction.get(creditRef)
+    : await getDoc(creditRef);
+
+  let credits = 0;
+  if (creditSnap.exists()) {
+    credits = parseInt(creditSnap.data().balance) || 0;
+  }
 
   // --- ✅ FIX: Fetch Membership from Subcollection (Transaction-Safe) ---
   const membershipRef = doc(db, 'users', userId, 'memberships', targetGymId);

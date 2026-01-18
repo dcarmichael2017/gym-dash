@@ -8,7 +8,7 @@ import { useConfirm } from '../../../context/ConfirmationContext';
 
 const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) => {
   const navigate = useNavigate();
-  const { currentGym, memberships } = useGym();
+  const { currentGym, memberships, credits } = useGym(); // ✅ Get credits from context
   const { confirm } = useConfirm();
 
   const [status, setStatus] = useState('loading_data');
@@ -523,7 +523,7 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                           <div className="flex justify-between items-center text-sm">
                             <span className="text-gray-600">Remaining Balance:</span>
                             <span className="font-bold text-green-600">
-                              {(userProfile?.classCredits || 0)} <ArrowRight size={12} className="inline mx-1" /> {(userProfile?.classCredits || 0) - bookingEligibility.cost}
+                              {credits} <ArrowRight size={12} className="inline mx-1" /> {credits - bookingEligibility.cost}
                             </span>
                           </div>
                         </div>
@@ -548,7 +548,7 @@ const BookingModal = ({ classInstance, onClose, onConfirm, onCancel, theme }) =>
                           </div>
                           <div className="flex justify-between items-center text-xs">
                             <span className="text-gray-600">Your Balance:</span>
-                            <span className="font-bold text-red-600">{userProfile?.classCredits || 0} Credits</span>
+                            <span className="font-bold text-red-600">{credits} Credits</span>
                           </div>
                         </div>
                       )}

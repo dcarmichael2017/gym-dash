@@ -12,8 +12,9 @@ export const useGym = () => useContext(GymContext);
 export const GymProvider = ({ children }) => {
   const [currentGym, setCurrentGym] = useState(null);
   const [memberships, setMemberships] = useState([]);
+  const [credits, setCredits] = useState(0); // ✅ NEW: Current gym credits
   const [loading, setLoading] = useState(true);
-  
+
   // Use a Ref to keep track of currentGymId without triggering effect loops
   const currentGymIdRef = useRef(null);
 
@@ -77,6 +78,31 @@ export const GymProvider = ({ children }) => {
       currentGymIdRef.current = null;
     }
   };
+
+  // ✅ NEW: Separate effect for listening to credits
+  useEffect(() => {
+    let creditsUnsubscribe = null;
+
+    if (currentGym?.id && auth.currentUser) {
+      const creditRef = doc(db, 'users', auth.currentUser.uid, 'credits', currentGym.id);
+      creditsUnsubscribe = onSnapshot(creditRef, (snap) => {
+        if (snap.exists()) {
+          setCredits(snap.data().balance || 0);
+        } else {
+          setCredits(0);
+        }
+      }, (error) => {
+        console.error("[GymContext] Credits snapshot error:", error);
+        setCredits(0);
+      });
+    } else {
+      setCredits(0); // Reset credits when no gym is selected
+    }
+
+    return () => {
+      if (creditsUnsubscribe) creditsUnsubscribe();
+    };
+  }, [currentGym?.id]);
 
   useEffect(() => {
     let profileUnsubscribe = null;
@@ -161,7 +187,7 @@ export const GymProvider = ({ children }) => {
   if (loading) return <FullScreenLoader />;
 
   return (
-    <GymContext.Provider value={{ currentGym, memberships, switchGym, isLoading: loading }}>
+    <GymContext.Provider value={{ currentGym, memberships, credits, switchGym, isLoading: loading }}>
       {children}
     </GymContext.Provider>
   );

@@ -1149,3 +1149,766 @@ useEffect(() => {
   return () => unsub();
 }, [userId, gymId]);
 ```
+
+COMPLETED IMPLEMENTATION: Per-Gym Credits
+
+# Implementation Status
+
+## ✅ Completed: Per-Gym Credits Refactor
+
+**Date Completed**: [Current Date]
+**Branch**: refactor/per-gym-credits
+
+### What Was Implemented:
+
+1. **Created credits.js API** (`packages/shared/api/firestore/credits.js`)
+   - `getGymCredits(userId, gymId)` - Fetch credit balance for specific gym
+   - `deductCredits(transaction, userId, gymId, amount, reason, source)` - Transaction-safe deduction
+   - `addCredits(transaction, userId, gymId, amount, reason, source)` - Transaction-safe addition
+   - `adjustUserCredits(userId, gymId, amount, reason, adminId)` - Admin adjustment wrapper
+   - `getUserCreditHistory(userId, gymId, limitCount)` - Fetch gym-specific credit logs
+   - `migrateGlobalCreditsToPerGym(userId)` - Migration helper for existing users
+
+2. **Updated bookings.js** to use per-gym credits:
+   - `canUserBook()` - Now fetches credits from `users/{userId}/credits/{gymId}` subcollection
+   - `bookMember()` - Uses `deductCredits()` instead of incrementing global field
+   - `cancelBooking()` - Uses `addCredits()` for refunds instead of global increment
+   - `checkBookingEligibility()` - Checks gym-specific credits for weekly limit fallback
+
+3. **Updated GymContext** (`packages/web/src/context/GymContext.jsx`):
+   - Added `credits` state to track current gym's credit balance
+   - Added real-time listener to `users/{userId}/credits/{currentGym.id}`
+   - Exposed `credits` in context provider value
+   - Credits automatically reset to 0 when gym is switched
+
+4. **Updated Firestore Security Rules** (`firestore.rules`):
+   - Added rules for `users/{userId}/credits/{gymId}` subcollection
+   - Users can read their own credits
+   - Users can create/update their own credits (for booking transactions with validation)
+   - Admins can read/write credits only for their gym (via `isStaffOrOwner(gymId)`)
+   - Users can create credit logs for their own bookings/cancellations
+   - Updated `creditLogs` rules to check `resource.data.gymId` for per-gym access
+
+5. **Updated UI Components**:
+   - **MemberBillingTab**: Now listens to gym-specific credits, adjusts per gym, loads gym-specific history
+   - **BookingModal** (Member Side): Now uses `credits` from GymContext instead of `userProfile.classCredits`
+   - Updated `getUserCreditHistory()` calls to include `gymId` parameter
+   - Updated `adjustUserCredits()` calls to include `gymId` parameter
+   - Updated `checkBookingEligibility()` to return gym-specific credits in result
+
+### Database Schema Changes:
+
+**NEW Subcollection:**
+```javascript
+users/{userId}/credits/{gymId} {
+  balance: number,
+  gymId: string,
+  createdAt: timestamp,
+  lastUpdated: timestamp
+}
+```
+
+**UPDATED Subcollection:**
+```javascript
+users/{userId}/creditLogs/{logId} {
+  gymId: string,           // ✅ NOW REQUIRED for per-gym filtering
+  amount: number,
+  balance: number,         // Balance after transaction
+  reason: string,
+  type: 'deduction' | 'addition' | 'migration',
+  source: 'system' | 'admin_forced' | 'admin_cancel' | 'user_cancel',
+  createdAt: timestamp,
+  actorId: string
+}
+```
+
+**DEPRECATED Field (kept at 0 for backward compatibility):**
+```javascript
+users/{userId} {
+  classCredits: 0  // ❌ No longer used, always 0
+}
+```
+
+### Migration Strategy:
+
+For existing users with `classCredits > 0`:
+1. Run `migrateGlobalCreditsToPerGym(userId)` helper
+2. Moves all credits to user's primary gym (lastActiveGymId or first gym)
+3. Creates migration log in creditLogs subcollection
+4. Sets global `classCredits` field to 0
+
+### Testing Checklist:
+
+Before merging to main:
+- [ ] New member signup initializes credits at 0 for gym
+- [ ] Booking a class deducts from gym-specific balance
+- [ ] Cancelling a booking refunds to gym-specific balance
+- [ ] Admin can adjust member's credits for their gym
+- [ ] Admin can view gym-specific credit history
+- [ ] Credits display correctly in MemberBillingTab
+- [ ] Credits update in real-time when admin makes changes
+- [ ] Switching gyms shows correct credit balance per gym
+- [ ] Credit logs are scoped per gym (no cross-gym visibility)
+- [ ] Firestore Rules prevent admin from accessing other gym's credits
+
+---
+
+NEXT PLAN OF ACTION:
+
+# Multi-Gym & Per-Gym Credits Analysis
+
+## Current State Assessment
+
+### ✅ What's Already Working for Multi-Gym
+
+Your recent subcollection refactor **accidentally prepared you perfectly** for multi-gym support:
+
+**Database is READY:**
+```javascript
+users/{userId} {
+  gymIds: { 
+    "gym_abc": true,
+    "gym_xyz": true  // ✅ User can belong to multiple gyms
+  },
+  lastActiveGymId: "gym_abc",  // ✅ Tracks which gym user is viewing
+  
+  // ❌ PROBLEM: This is global, not per-gym
+  classCredits: 100  
+}
+
+users/{userId}/memberships/{gymId} {
+  // ✅ PERFECT: Each gym has its own membership document
+  gymId: "gym_abc",
+  status: "active",
+  membershipId: "tier_123"
+}
+```
+
+**GymContext is READY:**
+- Already loads ALL memberships from subcollection
+- Already supports switching between gyms via `switchGym(gymId)`
+- Already filters memberships and picks active gym
+
+**UI is READY:**
+- GymContext provides `memberships` array with all gyms
+- Components already respect `currentGym.id` for scoping data
+
+### ❌ What's NOT Ready for Multi-Gym
+
+**1. Credits are Global**
+```javascript
+// Current (BAD for multi-gym):
+user.classCredits = 100  // Which gym are these for?
+
+// Should be (GOOD):
+users/{userId}/credits/{gymId} {
+  balance: 100,
+  lastUpdated: timestamp
+}
+```
+
+**2. Admin/Owner Role is Single-Gym**
+```javascript
+// Current (BAD):
+user.role = "owner"
+user.gymId = "gym_abc"  // ❌ Can only own ONE gym
+
+// Should be (GOOD):
+user.gymIds = {
+  "gym_abc": true,  // Member
+  "gym_xyz": true   // Member
+}
+user.roles = {
+  "gym_abc": "owner",   // ✅ Owner of gym A
+  "gym_xyz": "member"   // ✅ Member of gym B
+}
+```
+
+**3. No Gym Creation UI**
+- Currently no way for owner to create a second gym
+- No gym switcher UI for admins with multiple gyms
+
+---
+
+## 🎯 Recommended Next Steps (In Order)
+
+### Phase 1: Per-Gym Credits (PRIORITY - Blocks Multi-Gym)
+
+**Why First?**
+- Credits are the most broken part for multi-gym right now
+- Blocks testing multi-gym scenarios
+- Relatively simple migration (similar to memberships)
+
+**Create Branch:**
+```bash
+git checkout main
+git pull origin main
+git checkout -b refactor/per-gym-credits
+```
+
+**Implementation Tasks:**
+1. Create `users/{userId}/credits/{gymId}` subcollection
+2. Update `bookMember()` to deduct from gym-specific balance
+3. Update `cancelBooking()` to refund to gym-specific balance
+4. Update `addCredits()` to add to gym-specific balance
+5. Update all UI components to read from subcollection
+6. Add migration helper to split global credits across gyms
+7. Update Firestore Rules for credit subcollection
+
+**Expected Changes:**
+- `packages/shared/api/firestore/credits.js` - Create if doesn't exist
+- `packages/shared/api/firestore/bookings.js` - Update booking/cancel logic
+- `packages/web/src/components/members/MemberHomeScreen.jsx` - Update credit display
+- `packages/web/src/context/GymContext.jsx` - Add credits listener
+- `firestore.rules` - Add credits subcollection rules
+
+**Estimated Complexity:** Medium (Similar to membership refactor)
+
+---
+
+### Phase 2: Multi-Role Support (Enables Multi-Gym Admin)
+
+**Why Second?**
+- Unblocks owners/staff from managing multiple gyms
+- Enables proper permission scoping per gym
+- Required before building gym switcher UI
+
+**Create Branch:**
+```bash
+git checkout main
+git pull origin main
+git checkout -b feat/multi-gym-roles
+```
+
+**Implementation Tasks:**
+1. Add `roles` map field to user document: `{ gymId: role }`
+2. Update `isStaffOrOwner()` Firestore Rule to check `roles` map
+3. Update GymContext to expose user's role for current gym
+4. Update all permission checks in UI to use `roles[currentGym.id]`
+5. Create migration helper to convert `user.role` → `user.roles[gymId]`
+6. Update admin components to check per-gym role
+
+**Database Changes:**
+```javascript
+// BEFORE:
+users/{userId} {
+  role: "owner",
+  gymId: "gym_abc"
+}
+
+// AFTER:
+users/{userId} {
+  roles: {
+    "gym_abc": "owner",
+    "gym_xyz": "member",
+    "gym_123": "staff"
+  },
+  // Keep legacy fields for backward compatibility initially
+  role: "owner",      // Deprecated, but kept for transition
+  gymId: "gym_abc"    // Deprecated, but kept for transition
+}
+```
+
+**Firestore Rules Update:**
+```javascript
+// BEFORE:
+function isStaffOrOwner(gymId) {
+  let user = getRequesterData();
+  return user.gymId == gymId && 
+         (user.role == 'owner' || user.role == 'staff');
+}
+
+// AFTER:
+function isStaffOrOwner(gymId) {
+  let user = getRequesterData();
+  let userRole = user.roles[gymId];
+  return userRole == 'owner' || userRole == 'staff' || userRole == 'coach';
+}
+```
+
+**Expected Changes:**
+- `firestore.rules` - Update all permission checks
+- `packages/web/src/context/GymContext.jsx` - Expose current role
+- `packages/web/src/layouts/AdminLayout.jsx` - Use per-gym role checks
+- All admin screens - Update permission checks
+
+**Estimated Complexity:** High (Touches permissions everywhere)
+
+---
+
+### Phase 3: Gym Switcher UI (Makes Multi-Gym Usable)
+
+**Why Third?**
+- Depends on multi-role support being stable
+- Pure UI work, doesn't break existing functionality
+- Enables users to navigate between their gyms
+
+**Create Branch:**
+```bash
+git checkout main
+git pull origin main
+git checkout -b feat/gym-switcher-ui
+```
+
+**Implementation Tasks:**
+1. Add gym switcher dropdown to AdminLayout header
+2. Show user's role badge per gym in switcher
+3. Add gym switcher to MemberLayout for users with multiple memberships
+4. Update GymContext to persist selected gym in localStorage
+5. Show "Loading..." state when switching gyms
+6. Add gym icons/colors for visual differentiation
+
+**UI Components to Create:**
+- `GymSwitcher.jsx` - Dropdown component
+- `GymBadge.jsx` - Shows gym name/logo
+- `RoleBadge.jsx` - Shows user's role (Owner/Staff/Member)
+
+**Expected Changes:**
+- `packages/web/src/layouts/AdminLayout.jsx` - Add switcher to header
+- `packages/web/src/layouts/MemberLayout.jsx` - Add switcher if multiple gyms
+- `packages/web/src/context/GymContext.jsx` - Add localStorage persistence
+- `packages/web/src/components/gym/GymSwitcher.jsx` - New component
+
+**Estimated Complexity:** Medium (Mostly UI work)
+
+---
+
+### Phase 4: Gym Creation Flow (Enables True Multi-Gym)
+
+**Why Fourth?**
+- All infrastructure is in place by now
+- Purely additive feature
+- Doesn't affect existing single-gym users
+
+**Create Branch:**
+```bash
+git checkout main
+git pull origin main
+git checkout -b feat/create-additional-gym
+```
+
+**Implementation Tasks:**
+1. Add "Create New Gym" button in gym switcher dropdown
+2. Create `CreateGymModal.jsx` wizard component
+3. Update `createGym()` API function to add to existing user's gyms
+4. Set creator as owner in `roles` map
+5. Auto-switch to newly created gym
+6. Add gym setup wizard (name, address, logo, etc.)
+
+**Expected Changes:**
+- `packages/shared/api/firestore/gym.js` - Update createGym()
+- `packages/web/src/components/gym/CreateGymModal.jsx` - New component
+- `packages/web/src/components/gym/GymSwitcher.jsx` - Add "Create" button
+
+**Estimated Complexity:** Medium (Mostly form/wizard UI)
+
+---
+
+## 🔍 Technical Design: Per-Gym Credits
+
+Since this is your next priority, here's the detailed implementation plan:
+
+### Database Schema
+
+```javascript
+// NEW Subcollection
+users/{userId}/credits/{gymId} {
+  balance: 100,
+  gymId: "gym_abc",        // Redundant but useful for queries
+  gymName: "Stark MMA",
+  
+  // Metadata
+  lastUpdated: timestamp,
+  createdAt: timestamp
+}
+
+// NEW Subcollection (if doesn't exist already)
+users/{userId}/creditLogs/{logId} {
+  gymId: "gym_abc",         // ✅ CRITICAL: Must scope logs per gym
+  amount: -1,               // Negative for deductions, positive for additions
+  balance: 99,              // Balance after transaction
+  reason: "Booked: BJJ Fundamentals",
+  type: "booking" | "refund" | "purchase" | "admin_adjustment",
+  source: "system" | "admin_forced" | "stripe",
+  relatedBookingId: string | null,
+  
+  createdAt: timestamp,
+  actorId: string           // Who made the change (userId or admin)
+}
+```
+
+### API Functions to Update
+
+**File: `packages/shared/api/firestore/credits.js`** (Create if doesn't exist)
+
+```javascript
+import { doc, getDoc, updateDoc, collection, addDoc, query, where, orderBy, getDocs, increment, runTransaction } from "firebase/firestore";
+import { db } from "../firebaseConfig";
+
+// ✅ NEW: Get credit balance for specific gym
+export const getGymCredits = async (userId, gymId) => {
+  try {
+    const creditRef = doc(db, 'users', userId, 'credits', gymId);
+    const creditSnap = await getDoc(creditRef);
+    
+    if (creditSnap.exists()) {
+      return { success: true, balance: creditSnap.data().balance || 0 };
+    } else {
+      // Initialize with 0 credits if document doesn't exist
+      await setDoc(creditRef, {
+        balance: 0,
+        gymId: gymId,
+        createdAt: new Date(),
+        lastUpdated: new Date()
+      });
+      return { success: true, balance: 0 };
+    }
+  } catch (error) {
+    console.error("Error getting gym credits:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// ✅ NEW: Transaction-safe credit deduction
+export const deductCredits = async (transaction, userId, gymId, amount, reason, source = 'system') => {
+  const creditRef = doc(db, 'users', userId, 'credits', gymId);
+  const creditSnap = await transaction.get(creditRef);
+  
+  let currentBalance = 0;
+  if (creditSnap.exists()) {
+    currentBalance = creditSnap.data().balance || 0;
+  } else {
+    // Initialize if doesn't exist
+    transaction.set(creditRef, {
+      balance: 0,
+      gymId: gymId,
+      createdAt: new Date(),
+      lastUpdated: new Date()
+    });
+  }
+  
+  const newBalance = currentBalance - amount;
+  
+  // Update balance
+  transaction.update(creditRef, {
+    balance: newBalance,
+    lastUpdated: new Date()
+  });
+  
+  // Log transaction
+  const logRef = collection(db, 'users', userId, 'creditLogs');
+  transaction.set(doc(logRef), {
+    gymId: gymId,
+    amount: -amount,
+    balance: newBalance,
+    reason: reason,
+    type: 'deduction',
+    source: source,
+    createdAt: new Date(),
+    actorId: source === 'admin_forced' ? 'admin' : userId
+  });
+  
+  return newBalance;
+};
+
+// ✅ NEW: Transaction-safe credit addition
+export const addCredits = async (transaction, userId, gymId, amount, reason, source = 'system') => {
+  const creditRef = doc(db, 'users', userId, 'credits', gymId);
+  const creditSnap = await transaction.get(creditRef);
+  
+  let currentBalance = 0;
+  if (creditSnap.exists()) {
+    currentBalance = creditSnap.data().balance || 0;
+  } else {
+    transaction.set(creditRef, {
+      balance: 0,
+      gymId: gymId,
+      createdAt: new Date(),
+      lastUpdated: new Date()
+    });
+  }
+  
+  const newBalance = currentBalance + amount;
+  
+  transaction.update(creditRef, {
+    balance: newBalance,
+    lastUpdated: new Date()
+  });
+  
+  const logRef = collection(db, 'users', userId, 'creditLogs');
+  transaction.set(doc(logRef), {
+    gymId: gymId,
+    amount: amount,
+    balance: newBalance,
+    reason: reason,
+    type: 'addition',
+    source: source,
+    createdAt: new Date(),
+    actorId: source
+  });
+  
+  return newBalance;
+};
+
+// ✅ NEW: Get credit history for specific gym
+export const getCreditHistory = async (userId, gymId) => {
+  try {
+    const logsRef = collection(db, 'users', userId, 'creditLogs');
+    const q = query(
+      logsRef,
+      where('gymId', '==', gymId),
+      orderBy('createdAt', 'desc')
+    );
+    
+    const snapshot = await getDocs(q);
+    const history = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    
+    return { success: true, history };
+  } catch (error) {
+    console.error("Error fetching credit history:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// ✅ MIGRATION HELPER: Split global credits across gyms
+export const migrateGlobalCreditsToPerGym = async (userId) => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    const userSnap = await getDoc(userRef);
+    
+    if (!userSnap.exists()) {
+      return { success: false, error: "User not found" };
+    }
+    
+    const userData = userSnap.data();
+    const globalCredits = userData.classCredits || 0;
+    const gymIds = Object.keys(userData.gymIds || {});
+    
+    if (gymIds.length === 0) {
+      return { success: true, message: "No gyms to migrate credits to" };
+    }
+    
+    // Distribute credits evenly across gyms (or put all in primary gym)
+    const primaryGymId = userData.lastActiveGymId || gymIds[0];
+    
+    // Put all credits in primary gym
+    const creditRef = doc(db, 'users', userId, 'credits', primaryGymId);
+    await setDoc(creditRef, {
+      balance: globalCredits,
+      gymId: primaryGymId,
+      createdAt: new Date(),
+      lastUpdated: new Date()
+    });
+    
+    // Log the migration
+    await addDoc(collection(db, 'users', userId, 'creditLogs'), {
+      gymId: primaryGymId,
+      amount: globalCredits,
+      balance: globalCredits,
+      reason: 'Migrated from global credits',
+      type: 'migration',
+      source: 'system',
+      createdAt: new Date(),
+      actorId: 'system'
+    });
+    
+    // Clear global credits (keep field for backward compatibility initially)
+    await updateDoc(userRef, {
+      classCredits: 0
+    });
+    
+    return { success: true, migratedAmount: globalCredits, toGym: primaryGymId };
+  } catch (error) {
+    console.error("Migration error:", error);
+    return { success: false, error: error.message };
+  }
+};
+```
+
+### Update Booking Logic
+
+**File: `packages/shared/api/firestore/bookings.js`**
+
+```javascript
+// Update canUserBook to check gym-specific credits
+export const canUserBook = async (classData, userId, targetGymId, transaction = null) => {
+  // ... existing membership check code ...
+  
+  // ✅ CHANGE: Fetch gym-specific credits instead of global
+  const creditRef = doc(db, 'users', userId, 'credits', targetGymId);
+  const creditSnap = transaction 
+    ? await transaction.get(creditRef)
+    : await getDoc(creditRef);
+  
+  let credits = 0;
+  if (creditSnap.exists()) {
+    credits = parseInt(creditSnap.data().balance) || 0;
+  }
+  
+  // ... rest of logic uses 'credits' variable
+};
+
+// Update bookMember to deduct from gym-specific balance
+export const bookMember = async (gymId, classInfo, member, options = {}) => {
+  return await runTransaction(db, async (transaction) => {
+    // ... existing setup code ...
+    
+    // ✅ CHANGE: Deduct from gym-specific credits
+    if (costUsed > 0) {
+      const newBalance = await deductCredits(
+        transaction,
+        member.id,
+        gymId,
+        costUsed,
+        options.isStaff ? `Admin Booked: ${classInfo.name}` : `Booked: ${classInfo.name}`,
+        options.force ? 'admin_forced' : 'system'
+      );
+      
+      if (newBalance < 0 && !options.force) {
+        throw "Insufficient credits";
+      }
+    }
+    
+    // ... rest of booking logic
+  });
+};
+
+// Update cancelBooking to refund to gym-specific balance
+export const cancelBooking = async (gymId, attendanceId, options = {}) => {
+  await runTransaction(db, async (transaction) => {
+    // ... existing setup code ...
+    
+    // ✅ CHANGE: Refund to gym-specific credits
+    if (shouldRefund && data.costUsed > 0) {
+      await addCredits(
+        transaction,
+        data.memberId,
+        gymId,
+        data.costUsed,
+        options.isStaff ? `Admin Refunded: ${data.className}` : `Refund: ${data.className}`,
+        options.isStaff ? 'admin_cancel' : 'user_cancel'
+      );
+      refundedAmount = data.costUsed;
+    }
+    
+    // ... rest of cancellation logic
+  });
+};
+```
+
+### Update GymContext
+
+**File: `packages/web/src/context/GymContext.jsx`**
+
+```javascript
+export const GymProvider = ({ children }) => {
+  const [currentGym, setCurrentGym] = useState(null);
+  const [memberships, setMemberships] = useState([]);
+  const [credits, setCredits] = useState(0);  // ✅ NEW: Current gym credits
+  const [loading, setLoading] = useState(true);
+  
+  useEffect(() => {
+    // ... existing auth and membership listener code ...
+    
+    // ✅ NEW: Listen to credits for current gym
+    let creditsUnsubscribe = null;
+    
+    if (currentGym?.id && user) {
+      const creditRef = doc(db, 'users', user.uid, 'credits', currentGym.id);
+      creditsUnsubscribe = onSnapshot(creditRef, (snap) => {
+        if (snap.exists()) {
+          setCredits(snap.data().balance || 0);
+        } else {
+          setCredits(0);
+        }
+      });
+    }
+    
+    return () => {
+      if (creditsUnsubscribe) creditsUnsubscribe();
+    };
+  }, [currentGym?.id, user]);
+  
+  return (
+    <GymContext.Provider value={{ 
+      currentGym, 
+      memberships, 
+      credits,  // ✅ NEW: Expose credits
+      switchGym, 
+      isLoading: loading 
+    }}>
+      {children}
+    </GymContext.Provider>
+  );
+};
+```
+
+### Update Firestore Rules
+
+**File: `firestore.rules`**
+
+```javascript
+match /users/{userId} {
+  // ... existing rules ...
+  
+  // ✅ NEW: Credits subcollection
+  match /credits/{gymId} {
+    // User can read their own credits
+    allow read: if request.auth.uid == userId;
+    
+    // Admin can read/write credits for their gym only
+    allow read, write: if request.auth != null && isStaffOrOwner(gymId);
+  }
+  
+  // ✅ UPDATE: Credit logs should be scoped per gym
+  match /creditLogs/{logId} {
+    // User can read their own logs
+    allow read: if request.auth.uid == userId;
+    
+    // Admin can read logs for their gym
+    allow read: if request.auth != null && isStaffOrOwner(resource.data.gymId);
+    
+    // Admin can create logs for their gym
+    allow create: if request.auth != null && isStaffOrOwner(request.resource.data.gymId);
+  }
+}
+```
+
+---
+
+## 📊 Summary & Recommendations
+
+### ✅ Your Database IS Ready for Multi-Gym
+
+- Subcollection architecture supports unlimited gym associations
+- GymContext already handles gym switching
+- Permissions already scoped by gymId
+
+### ⚠️ But You Need These Changes First
+
+**Priority 1: Per-Gym Credits** (Next branch)
+- **Why:** Blocks all multi-gym testing
+- **Complexity:** Medium
+- **Timeline:** 1-2 days
+- **Impact:** HIGH - Enables multi-gym bookings
+
+**Priority 2: Multi-Role Support**
+- **Why:** Enables admins to manage multiple gyms
+- **Complexity:** High (touches permissions)
+- **Timeline:** 2-3 days
+- **Impact:** HIGH - Enables multi-gym admin
+
+**Priority 3: Gym Switcher UI**
+- **Why:** Makes multi-gym usable
+- **Complexity:** Medium (mostly UI)
+- **Timeline:** 1 day
+- **Impact:** Medium - UX improvement
+
+**Priority 4: Gym Creation Flow**
+- **Why:** Allows creating additional gyms
+- **Complexity:** Medium
+- **Timeline:** 1-2 days
+- **Impact:** Medium - New feature

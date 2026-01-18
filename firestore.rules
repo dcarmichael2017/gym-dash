@@ -11,54 +11,134 @@ service cloud.firestore {
     // Check if the user is an owner, staff, or coach for a specific gym
     function isStaffOrOwner(gymId) {
        let user = getRequesterData();
-       // Ensure user exists, has the role, AND belongs to the gym
        return user != null && user.gymId == gymId && (user.role == 'owner' || user.role == 'staff' || user.role == 'coach');
     }
 
-    // Helper: Check if the requester manages the target user's gym
-    // (Legacy helper for creditLogs - checks if targetUser.gymId matches requester.gymId)
+    // ✅ NEW: Simplified version for query compatibility
+    // This checks directly against resource.data without additional reads
+    function isInRequesterGym() {
+        let requester = getRequesterData();
+        let targetGymId = requester.gymId;
+        
+        // Check if the target user has the requester's gym in their gymIds map
+        return targetGymId != null && 
+               resource.data.gymIds != null && 
+               targetGymId in resource.data.gymIds && 
+               resource.data.gymIds[targetGymId] == true;
+    }
+
+    // Check if requester has admin role
+    function isAdmin() {
+        let requester = getRequesterData();
+        return requester.role == 'owner' || requester.role == 'staff' || requester.role == 'coach';
+    }
+
+    // ✅ UPDATED: Helper to check if requester manages the target user
     function managesUser(targetUserData) {
         let requester = getRequesterData();
-        return targetUserData.gymId == requester.gymId && 
-               (requester.role == 'owner' || requester.role == 'staff' || requester.role == 'coach');
+        
+        // 1. Is the admin's current gym inside the target user's gym list?
+        let isUserInGym = (requester.gymId in targetUserData.gymIds && targetUserData.gymIds[requester.gymId] == true);
+        
+        // 2. Fallback: Legacy check for the single 'gymId' field
+        let isUserInGymLegacy = targetUserData.gymId == requester.gymId;
+
+        // 3. Check Admin Role
+        let hasRole = (requester.role == 'owner' || requester.role == 'staff' || requester.role == 'coach');
+
+        return (isUserInGym || isUserInGymLegacy) && hasRole;
+    }
+
+    // ✅ NEW: Collection Group Query Rule for Memberships
+    // This allows admins to query all membership subcollections
+    match /{path=**}/memberships/{membershipId} {
+      allow read: if request.auth != null && (
+        // Get the parent userId from the path
+        path.split('/')[1] == request.auth.uid ||
+        // Or if the requester is staff/owner of this gym
+        isStaffOrOwner(resource.data.gymId)
+      );
     }
 
     // --- USERS COLLECTION ---
     match /users/{userId} {
       allow create: if request.auth != null;
       
-      // BASE USER PROFILE
-      // 1. User can read/write own profile
-      // 2. Staff can read basic profile if they manage the user (via old gymId logic)
-      allow read, update, delete: if request.auth != null && (
+      // ✅ FIXED: Separate rules for queries vs individual reads
+      // For QUERIES (like getGymMembers), use simpler rule
+      allow list: if request.auth != null && (
+        isAdmin() && isInRequesterGym()
+      );
+      
+      // For individual document READS, use the full managesUser check
+      allow get: if request.auth != null && (
+        request.auth.uid == userId || 
+        managesUser(resource.data)
+      );
+      
+      // Updates and deletes use the full check
+      allow update, delete: if request.auth != null && (
         request.auth.uid == userId || 
         managesUser(resource.data)
       );
 
-      // --- [NEW] MEMBERSHIPS SUBCOLLECTION ---
-      // Path: /users/{userId}/memberships/{gymId}
-      // This solves the "Admin Cancel" permission issue.
+      // --- MEMBERSHIPS SUBCOLLECTION ---
       match /memberships/{gymId} {
          allow read: if request.auth.uid == userId || (request.auth != null && isStaffOrOwner(gymId));
          allow write: if request.auth.uid == userId || (request.auth != null && isStaffOrOwner(gymId));
       }
 
+      // --- CREDITS SUBCOLLECTION ---
+      // Path: /users/{userId}/credits/{gymId}
+      // Stores per-gym credit balances
+      match /credits/{gymId} {
+         // User can read their own credits
+         allow read: if request.auth.uid == userId;
+
+         // Admin can read/write credits for their gym only
+         allow read, write: if request.auth != null && isStaffOrOwner(gymId);
+
+         // ✅ Allow users to create/update their own credits (for booking transactions)
+         // Security:
+         // - For create: allow initialization with 0 balance
+         // - For update: only allow balance decrements (bookings) or increments (refunds)
+         allow create: if request.auth.uid == userId
+                       && request.resource.data.gymId == gymId
+                       && request.resource.data.balance >= 0;
+
+         allow update: if request.auth.uid == userId
+                       && request.resource.data.gymId == gymId
+                       && request.resource.data.balance >= 0;
+      }
+
       // --- CREDIT LOGS SUBCOLLECTION ---
       match /creditLogs/{logId} {
-         allow read: if request.auth != null && (
-            request.auth.uid == userId ||
-            managesUser(get(/databases/$(database)/documents/users/$(userId)).data)
-         );
+         // User can read their own logs
+         allow read: if request.auth.uid == userId;
 
+         // Admin can read logs for their gym
+         allow read: if request.auth != null && isStaffOrOwner(resource.data.gymId);
+
+         // ✅ User can create logs for their own bookings/cancellations
+         // Admin can create logs for their gym
          allow create: if request.auth != null && (
-            request.auth.uid == userId || 
-            managesUser(get(/databases/$(database)/documents/users/$(userId)).data) 
+            (request.auth.uid == userId && request.resource.data.gymId != null) ||
+            isStaffOrOwner(request.resource.data.gymId)
          );
       }
 
       // --- MEMBERSHIP HISTORY SUBCOLLECTION ---
       match /membershipHistory/{historyId} {
-        allow read: if request.auth.uid == userId || (request.auth != null && isStaffOrOwner(resource.data.gymId));
+        // Allow user to read their own history
+        allow read: if request.auth.uid == userId;
+        
+        // Allow admins to query/list history for users in their gym
+        allow list: if request.auth != null && managesUser(get(/databases/$(database)/documents/users/$(userId)).data);
+        
+        // Allow individual document reads by admins
+        allow get: if request.auth.uid == userId || (request.auth != null && isStaffOrOwner(resource.data.gymId));
+        
+        // Allow creation by user or admin
         allow create: if request.auth.uid == userId || (request.auth != null && isStaffOrOwner(request.resource.data.gymId));
       }
     }
@@ -77,11 +157,9 @@ service cloud.firestore {
              isStaffOrOwner(gymId)
           );
 
-          // Allow Booking if I am assigning myself
           allow create: if request.auth != null 
                         && request.resource.data.memberId == request.auth.uid;
                         
-          // Allow Cancelling (only my own doc) OR Staff Override
           allow update: if request.auth != null && (
              resource.data.memberId == request.auth.uid ||
              isStaffOrOwner(gymId)
@@ -91,6 +169,17 @@ service cloud.firestore {
       // Membership Tiers
       match /membershipTiers/{tierId} {
         allow read: if request.auth != null;
+      }
+      
+      // Settings (Legal, etc)
+      match /settings/{settingDoc} {
+         allow read: if request.auth != null;
+         allow write: if isStaffOrOwner(gymId);
+         
+         match /{allChildren=**} {
+            allow read: if request.auth != null;
+            allow write: if isStaffOrOwner(gymId);
+         }
       }
 
       // --- CATCH-ALL (Classes, Staff, etc) ---

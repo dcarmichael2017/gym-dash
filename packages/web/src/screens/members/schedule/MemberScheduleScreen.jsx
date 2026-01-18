@@ -15,35 +15,19 @@ import MemberCalendarView from './MemberCalendarView';
 import BookingModal from './BookingModal';
 
 const MemberScheduleScreen = () => {
-  const { currentGym, memberships } = useGym();
+  const { currentGym, memberships, credits } = useGym(); // ✅ Get credits from context
   const theme = currentGym?.theme || { primaryColor: '#2563eb', secondaryColor: '#4f46e5' };
-  
+
   const [viewMode, setViewMode] = useState('list');
   const [loading, setLoading] = useState(true);
-  const [classes, setClasses] = useState([]); 
+  const [classes, setClasses] = useState([]);
   const [weekStart, setWeekStart] = useState(new Date());
-  
-  const [counts, setCounts] = useState({}); 
-  const [userBookings, setUserBookings] = useState({}); 
-  const [userCredits, setUserCredits] = useState(0); 
+
+  const [counts, setCounts] = useState({});
+  const [userBookings, setUserBookings] = useState({});
 
   const [selectedClass, setSelectedClass] = useState(null);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
-
-  // --- Real-time Credit Listener ---
-  useEffect(() => {
-    if (!auth.currentUser) return;
-    const userRef = doc(db, 'users', auth.currentUser.uid);
-    
-    const unsubscribe = onSnapshot(userRef, (docSnap) => {
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            setUserCredits(parseInt(data.classCredits) || 0);
-        }
-    });
-
-    return () => unsubscribe();
-  }, []);
 
   // --- DATA FETCHING ---
   const fetchData = useCallback(async () => {
@@ -181,10 +165,11 @@ const MemberScheduleScreen = () => {
           
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900">Schedule</h1>
-            {userCredits > 0 && (
+            {/* ✅ CHANGE: Use credits from context */}
+            {credits > 0 && (
                 <div className="flex items-center gap-1.5 px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-bold border border-purple-200 animate-in fade-in slide-in-from-left-2">
                     <Coins size={14} className="fill-purple-700/20" />
-                    <span>{userCredits} Credits</span>
+                    <span>{credits} Credit{credits !== 1 ? 's' : ''}</span>
                 </div>
             )}
           </div>
@@ -210,12 +195,14 @@ const MemberScheduleScreen = () => {
       {/* CONTENT */}
       <div className="p-4 bg-gray-50 min-h-[80vh]">
         {viewMode === 'list' ? (
-          <MemberScheduleList 
-            classes={classes} 
-            theme={theme} 
+          <MemberScheduleList
+            classes={classes}
+            theme={theme}
             onBook={handleClassClick}
             counts={counts}
             userBookings={userBookings}
+            userCredits={credits} // ✅ Pass credits
+            memberships={memberships} // ✅ Pass memberships
           />
         ) : (
           <MemberCalendarView 

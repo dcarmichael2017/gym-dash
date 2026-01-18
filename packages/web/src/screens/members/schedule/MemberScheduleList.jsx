@@ -1,10 +1,10 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Clock, User, CheckCircle, AlertCircle, Hourglass, CheckSquare, Search, Filter, X, Coins, ShieldCheck, Lock } from 'lucide-react'; // Added Lock
+import { Clock, User, CheckCircle, AlertCircle, Hourglass, CheckSquare, Search, Filter, X, Coins, ShieldCheck, Lock, Tag } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../../../../../packages/shared/api/firebaseConfig';
-import { useGym } from '../../../context/GymContext'; 
+import { useGym } from '../../../context/GymContext';
 
-const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings = {} }) => {
+const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings = {}, userCredits = 0, memberships = [] }) => {
   const { currentGym } = useGym();
   
   // --- STATE ---
@@ -238,9 +238,48 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
               // --- BADGE & STATE LOGIC ---
               let badge = null;
               let paymentBadge = null;
+              let requirementBadge = null; // ✅ NEW: Booking requirement badge
               let btnText = "Book";
               let btnStyle = { backgroundColor: theme.primaryColor, color: 'white' };
               let containerClass = "border-gray-100 hover:border-blue-200";
+
+              // ✅ NEW: Determine booking requirements (only if not already booked)
+              if (!session.userStatus) {
+                const myMembership = memberships.find(m => m.gymId === currentGym.id);
+                const userTierId = myMembership?.membershipId;
+                const creditCost = parseInt(session.creditCost) || 1;
+
+                // Check if class is credit-only
+                if (session.dropInEnabled && session.allowedMembershipIds?.length > 0) {
+                  const isMembershipIncluded = userTierId && session.allowedMembershipIds.includes(userTierId);
+
+                  if (!isMembershipIncluded) {
+                    // Credit-only class
+                    requirementBadge = (
+                      <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded flex items-center gap-1">
+                        <Coins size={10} /> {creditCost} Credit{creditCost !== 1 ? 's' : ''}
+                      </span>
+                    );
+                  }
+                } else if (session.dropInEnabled && (!session.allowedMembershipIds || session.allowedMembershipIds.length === 0)) {
+                  // Drop-in only class
+                  requirementBadge = (
+                    <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded flex items-center gap-1">
+                      <Coins size={10} /> {creditCost} Credit{creditCost !== 1 ? 's' : ''}
+                    </span>
+                  );
+                } else if (session.allowedMembershipIds && session.allowedMembershipIds.length > 0 && !session.dropInEnabled) {
+                  // Membership-only class
+                  const hasRequiredMembership = userTierId && session.allowedMembershipIds.includes(userTierId);
+                  if (!hasRequiredMembership) {
+                    requirementBadge = (
+                      <span className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded flex items-center gap-1">
+                        <ShieldCheck size={10} /> Membership Required
+                      </span>
+                    );
+                  }
+                }
+              }
 
               // 1. Status Badges
               if (session.userStatus === 'attended') {
@@ -302,6 +341,7 @@ const MemberScheduleList = ({ classes, theme, onBook, counts = {}, userBookings 
                             </h4>
                             {badge}
                             {paymentBadge}
+                            {requirementBadge} {/* ✅ Display requirement badge */}
                         </div>
                         
                         <div className="flex items-center gap-3">

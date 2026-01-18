@@ -5,6 +5,7 @@ import { doc, onSnapshot, collection, query, where, orderBy } from 'firebase/fir
 import { auth, db } from '../../../../../shared/api/firebaseConfig';
 import { adjustUserCredits, getUserCreditHistory, adminCancelUserMembership, cancelUserMembership, logMembershipHistory, getMembershipHistory } from '../../../../../shared/api/firestore';
 import { useConfirm } from '../../../context/ConfirmationContext';
+import { useGym } from '../../../context/GymContext'; // ✅ NEW: Import useGym hook
 
 export const MemberBillingTab = ({
     formData,
@@ -93,7 +94,7 @@ export const MemberBillingTab = ({
     const [pendingChange, setPendingChange] = useState(0);
     const [adjustReason, setAdjustReason] = useState('');
     const [loadingCredits, setLoadingCredits] = useState(false);
-    const [displayCredits, setDisplayCredits] = useState(displayUser?.classCredits || 0);
+    const [displayCredits, setDisplayCredits] = useState(0); // ✅ CHANGE: Initialize to 0
 
     // --- Membership History State ---
     const [showMembershipHistory, setShowMembershipHistory] = useState(false);
@@ -101,15 +102,29 @@ export const MemberBillingTab = ({
     const [loadingMembershipHistory, setLoadingMembershipHistory] = useState(false);
     const [debugInfo, setDebugInfo] = useState(null);
 
+    // ✅ CHANGE: Listen to gym-specific credits from subcollection
     useEffect(() => {
-        if (displayUser?.classCredits !== undefined) {
-            setDisplayCredits(displayUser.classCredits);
-        }
-    }, [displayUser?.classCredits]);
+        if (!memberData?.id || !gymId) return;
 
+        const creditRef = doc(db, 'users', memberData.id, 'credits', gymId);
+        const unsub = onSnapshot(creditRef, (snap) => {
+            if (snap.exists()) {
+                setDisplayCredits(snap.data().balance || 0);
+            } else {
+                setDisplayCredits(0);
+            }
+        }, (error) => {
+            console.error("Error fetching credits:", error);
+            setDisplayCredits(0);
+        });
+
+        return () => unsub();
+    }, [memberData?.id, gymId]);
+
+    // ✅ CHANGE: Load gym-specific credit history
     const loadHistory = async () => {
-        if (displayUser?.id) {
-            const res = await getUserCreditHistory(displayUser.id);
+        if (displayUser?.id && gymId) {
+            const res = await getUserCreditHistory(displayUser.id, gymId);
             if (res.success) setCreditHistory(res.logs);
         }
     };
@@ -145,7 +160,7 @@ export const MemberBillingTab = ({
 
     useEffect(() => {
         if (showCreditHistory) loadHistory();
-    }, [showCreditHistory, displayUser?.id]);
+    }, [showCreditHistory, displayUser?.id, gymId]); // ✅ CHANGE: Added gymId dependency
 
     const handleEditClick = () => {
         if (!currentMembership) return;
@@ -224,8 +239,9 @@ export const MemberBillingTab = ({
         return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
     };
 
+    // ✅ CHANGE: Adjust gym-specific credits
     const handleSaveCredits = async () => {
-        if (!memberData?.id || pendingChange === 0) return;
+        if (!memberData?.id || !gymId || pendingChange === 0) return;
         const finalBalance = displayCredits + pendingChange;
         const actionType = pendingChange > 0 ? "Add" : "Deduct";
         const isDanger = pendingChange < 0;
@@ -240,7 +256,7 @@ export const MemberBillingTab = ({
         const adminId = auth.currentUser?.uid || 'admin';
         const defaultReason = pendingChange > 0 ? 'Admin added credits' : 'Admin deducted credits';
         const reason = adjustReason.trim() || defaultReason;
-        const result = await adjustUserCredits(displayUser.id, pendingChange, reason, adminId);
+        const result = await adjustUserCredits(displayUser.id, gymId, pendingChange, reason, adminId);
         if (result.success) {
             setPendingChange(0);
             setAdjustReason('');
@@ -577,9 +593,9 @@ export const MemberBillingTab = ({
                                     creditHistory.map((log) => (
                                         <div key={log.id} className="group flex justify-between items-center text-xs p-2.5 rounded-lg hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-all">
                                             <div className="flex flex-col gap-0.5">
-                                                <span className="font-semibold text-gray-700">{log.description || log.type}</span>
+                                                <span className="font-semibold text-gray-700">{log.reason || log.description || log.type}</span>
                                                 <span className="text-[10px] text-gray-400">
-                                                    {log.date ? new Date(log.date.toDate()).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Unknown Date'}
+                                                    {log.date ? new Date(log.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Unknown Date'}
                                                 </span>
                                             </div>
                                             <div className={`font-mono font-bold px-2 py-1 rounded ${log.amount > 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'

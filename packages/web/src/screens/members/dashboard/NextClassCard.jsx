@@ -8,8 +8,8 @@ import { getMembershipTiers } from '../../../../../../packages/shared/api/firest
 
 const NextClassCard = ({ hasActiveMembership }) => {
   const navigate = useNavigate();
-  const { currentGym, memberships } = useGym();
-  
+  const { currentGym, memberships, credits } = useGym(); // ✅ Get credits from context
+
   const theme = currentGym?.theme || { primaryColor: '#2563eb' };
 
   const [nextClass, setNextClass] = useState(null);
@@ -17,6 +17,7 @@ const NextClassCard = ({ hasActiveMembership }) => {
   const [isBooked, setIsBooked] = useState(false);
   const [includedPlanNames, setIncludedPlanNames] = useState([]);
   const [instructorName, setInstructorName] = useState(null);
+  const [isCreditOnly, setIsCreditOnly] = useState(false); // ✅ Track if class is credit-only
 
   useEffect(() => {
     const fetchData = async () => {
@@ -30,6 +31,7 @@ const NextClassCard = ({ hasActiveMembership }) => {
       setIsBooked(false);
       setInstructorName(null);
       setIncludedPlanNames([]);
+      setIsCreditOnly(false); // ✅ Reset credit-only flag
 
       try {
         // 1. Fetch all class templates for this gym
@@ -82,21 +84,31 @@ const NextClassCard = ({ hasActiveMembership }) => {
           if (foundNextClass.allowedMembershipIds?.length > 0) {
             const tiersResult = await getMembershipTiers(currentGym.id);
             if (tiersResult.success) {
-              const names = tiersResult.tiers
-                .filter(t => {
+              const visibleTiers = tiersResult.tiers.filter(t => {
                    // A. Must be allowed for this class
                    if (!foundNextClass.allowedMembershipIds.includes(t.id)) return false;
-                   
+
                    // B. Must be visible to the current user
                    const level = t.visibility || 'public';
                    if (isOwner) return true;
                    if (isStaff) return level !== 'admin';
                    return level === 'public';
-                })
-                .map(t => t.name);
-              
+                });
+
+              const names = visibleTiers.map(t => t.name);
               setIncludedPlanNames(names);
+
+              // ✅ Determine if class is credit-only (no memberships include it)
+              const userMembership = myMembership;
+              const userTierId = userMembership?.membershipId;
+              const isMembershipIncluded = userTierId && foundNextClass.allowedMembershipIds.includes(userTierId);
+
+              // Credit-only if: class requires credits AND user's membership doesn't cover it
+              setIsCreditOnly(!isMembershipIncluded && foundNextClass.dropInEnabled);
             }
+          } else {
+            // ✅ If no allowed memberships, it's credit-only
+            setIsCreditOnly(foundNextClass.dropInEnabled);
           }
         }
       } catch (err) {
@@ -170,16 +182,33 @@ const NextClassCard = ({ hasActiveMembership }) => {
 
   // --- NAVIGATION LOGIC ---
   const handleAction = () => {
-      if (isBooked || hasActiveMembership) {
-          // 1. ALREADY BOOKED OR ACTIVE MEMBER -> Go to Schedule
+      const creditCost = nextClass?.creditCost !== undefined ? nextClass.creditCost : 0;
+
+      if (isBooked) {
+          // 1. ALREADY BOOKED -> Go to Schedule
+          navigate('/members/schedule');
+      } else if (isCreditOnly && hasActiveMembership) {
+          // 2. CREDIT-ONLY CLASS + HAS MEMBERSHIP
+          // If user has enough credits, go to schedule to book
+          // Otherwise, go to store to buy credits
+          if (credits >= creditCost) {
+              navigate('/members/schedule');
+          } else {
+              navigate('/members/store', { state: { category: 'packs' } });
+          }
+      } else if (hasActiveMembership) {
+          // 3. HAS MEMBERSHIP (class is included) -> Go to Schedule
           navigate('/members/schedule');
       } else {
-          // 2. PROSPECT -> Determine best store tab
-          if (nextClass?.dropInEnabled) {
-              // If drop-in allowed, send to Packs tab (likely has a "Single Class" pack)
+          // 4. NO MEMBERSHIP (prospect)
+          if (nextClass?.dropInEnabled && credits >= creditCost) {
+              // ✅ Has enough credits -> Go to Schedule to book
+              navigate('/members/schedule');
+          } else if (nextClass?.dropInEnabled) {
+              // Has drop-in but not enough credits -> Go to store
               navigate('/members/store', { state: { category: 'packs' } });
           } else {
-              // If membership required, send to Memberships tab
+              // Membership required -> Go to memberships tab
               navigate('/members/store', { state: { category: 'memberships' } });
           }
       }
@@ -246,24 +275,61 @@ const NextClassCard = ({ hasActiveMembership }) => {
                         <span className="text-xs font-bold bg-white/20 px-2 py-1 rounded mb-1 w-fit">
                             You're Booked!
                         </span>
+                    ) : isCreditOnly && hasActiveMembership ? (
+                        // ✅ CREDIT-ONLY CLASS (user has membership but class requires credits)
+                        <>
+                            <span className="text-[10px] uppercase opacity-75 font-bold">Credit Cost</span>
+                            {creditCost > 0 ? (
+                                <>
+                                    <span className="text-lg font-bold">
+                                        {creditCost} Credit{creditCost !== 1 ? 's' : ''}
+                                    </span>
+                                    {credits >= creditCost ? (
+                                        <span className="text-[10px] text-green-100 mt-1 flex items-center gap-1">
+                                            <Sparkles size={10} />
+                                            You have {credits} credit{credits !== 1 ? 's' : ''}
+                                        </span>
+                                    ) : (
+                                        <span className="text-[10px] text-orange-100 mt-1 flex items-center gap-1">
+                                            <ShoppingBag size={10} />
+                                            Need {creditCost - credits} more
+                                        </span>
+                                    )}
+                                </>
+                            ) : (
+                                <span className="text-lg font-bold">Free</span>
+                            )}
+                        </>
                     ) : !hasActiveMembership ? (
                         <>
                             {nextClass.dropInEnabled ? (
                                 <>
-                                    <span className="text-[10px] uppercase opacity-75 font-bold">Class Cost</span>
+                                    <span className="text-[10px] uppercase opacity-75 font-bold">Credit Cost</span>
                                     {creditCost > 0 ? (
-                                        <span className="text-lg font-bold">
-                                            {creditCost} Credit{creditCost !== 1 ? 's' : ''}
-                                        </span>
+                                        <>
+                                            <span className="text-lg font-bold">
+                                                {creditCost} Credit{creditCost !== 1 ? 's' : ''}
+                                            </span>
+                                            {/* ✅ Show credit balance for non-members too */}
+                                            {credits >= creditCost ? (
+                                                <span className="text-[10px] text-green-100 mt-1 flex items-center gap-1">
+                                                    <Sparkles size={10} />
+                                                    You have {credits} credit{credits !== 1 ? 's' : ''}
+                                                </span>
+                                            ) : credits > 0 ? (
+                                                <span className="text-[10px] text-orange-100 mt-1 flex items-center gap-1">
+                                                    <ShoppingBag size={10} />
+                                                    Need {creditCost - credits} more
+                                                </span>
+                                            ) : includedPlanNames.length > 0 ? (
+                                                <span className="text-[10px] text-blue-100 mt-1 flex items-center gap-1">
+                                                    <Sparkles size={10} />
+                                                    Free with {includedPlanNames[0]}
+                                                </span>
+                                            ) : null}
+                                        </>
                                     ) : (
                                         <span className="text-lg font-bold">Free</span>
-                                    )}
-                                    
-                                    {includedPlanNames.length > 0 && (
-                                        <span className="text-[10px] text-blue-100 mt-1 flex items-center gap-1">
-                                            <Sparkles size={10} />
-                                            Free with {includedPlanNames[0]}
-                                        </span>
                                     )}
                                 </>
                             ) : (
@@ -278,19 +344,28 @@ const NextClassCard = ({ hasActiveMembership }) => {
                 </div>
                 
                 {/* DYNAMIC ACTION BUTTON */}
-                <button 
+                <button
                     onClick={handleAction}
                     className="bg-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1 hover:bg-blue-50 transition-colors shadow-sm"
                     style={{ color: theme.primaryColor }}
                 >
                     {isBooked ? (
                         <>View Schedule <ArrowRight size={14} /></>
+                    ) : isCreditOnly && hasActiveMembership ? (
+                        // ✅ CREDIT-ONLY CLASS + HAS MEMBERSHIP
+                        credits >= creditCost ? (
+                            <>Book <ArrowRight size={14} /></>
+                        ) : (
+                            <>Get Credits <ShoppingBag size={14} /></>
+                        )
                     ) : hasActiveMembership ? (
                         <>Book <ArrowRight size={14} /></>
                     ) : (
-                        // If no membership, check if drop-in is allowed to change text
-                        nextClass.dropInEnabled ? (
-                            <>Get Pass <ShoppingBag size={14} /></>
+                        // ✅ NO MEMBERSHIP - Check credits first
+                        nextClass.dropInEnabled && credits >= creditCost ? (
+                            <>Book <ArrowRight size={14} /></>
+                        ) : nextClass.dropInEnabled ? (
+                            <>Get Credits <ShoppingBag size={14} /></>
                         ) : (
                             <>View Plans <ArrowRight size={14} /></>
                         )
