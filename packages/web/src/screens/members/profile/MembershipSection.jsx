@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { CreditCard, ChevronRight, Calendar, DollarSign, RefreshCw, Clock, XCircle } from 'lucide-react';
+import { CreditCard, ChevronRight, Calendar, DollarSign, RefreshCw, Clock, XCircle, Bug } from 'lucide-react';
 import { useConfirm } from '../../../context/ConfirmationContext';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { getMembershipTiers, cancelUserMembership, getMembershipHistory, logMembershipHistory } from '../../../../../shared/api/firestore';
+import { doc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
+import { getMembershipTiers, cancelUserMembership, logMembershipHistory, runPermissionDiagnostics } from '../../../../../shared/api/firestore';
 import { auth, db } from '../../../../../shared/api/firebaseConfig';
 import { useGym } from '../../../context/GymContext';
 
@@ -15,15 +15,13 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
   const [membershipHistory, setMembershipHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
 
-  const fetchHistory = async () => {
-    const user = auth.currentUser;
-    if (user && currentGym?.id) {
-        setLoadingHistory(true);
-        const res = await getMembershipHistory(user.uid, currentGym.id);
-        if (res.success) {
-            setMembershipHistory(res.history);
-        }
-        setLoadingHistory(false);
+  // ✅ NEW: Add diagnostic handler
+  const handleRunDiagnostic = async () => {
+    if (currentGym?.id) {
+      console.log("🔍 Running diagnostic from member side...");
+      await runPermissionDiagnostics(currentGym.id);
+    } else {
+      console.error("No current gym ID available for diagnostic");
     }
   };
 
@@ -36,32 +34,58 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
         }
       };
       fetchTiers();
-      fetchHistory();
     }
+  }, [currentGym?.id]);
+
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user || !currentGym?.id) {
+      setMembershipHistory([]);
+      return;
+    }
+
+    setLoadingHistory(true);
+    const historyRef = collection(db, 'users', user.uid, 'membershipHistory');
+    const q = query(historyRef, where('gymId', '==', currentGym.id), orderBy('createdAt', 'desc'));
+
+    const unsub = onSnapshot(q, (snapshot) => {
+      const history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMembershipHistory(history);
+      setLoadingHistory(false);
+    }, (error) => {
+      console.error("Error fetching membership history:", error);
+      setLoadingHistory(false);
+    });
+
+    return () => unsub();
   }, [currentGym?.id]);
 
   useEffect(() => {
     const user = auth.currentUser;
     if (!user || !currentGym?.id) return;
 
-    const unsub = onSnapshot(doc(db, 'users', user.uid), (userDoc) => {
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        const currentGymMembership = (userData.memberships || []).find(m => m.gymId === currentGym.id);
-        setLiveMembership(currentGymMembership);
+    // Listen directly to the membership subcollection document
+    const membershipRef = doc(db, 'users', user.uid, 'memberships', currentGym.id);
+
+    const unsub = onSnapshot(membershipRef, (snap) => {
+      if (snap.exists()) {
+        setLiveMembership({ id: snap.id, ...snap.data() });
       } else {
         setLiveMembership(null);
       }
+    }, (error) => {
+      console.error("Error fetching membership:", error);
+      setLiveMembership(null);
     });
 
     return () => unsub();
   }, [currentGym?.id]);
 
-  const { 
-    planName, 
-    status, 
-    startDate, 
-    trialEndDate, // ✅ Receive trial end date
+  const {
+    planName,
+    status,
+    startDate,
+    trialEndDate,
     price,
     assignedPrice,
     interval = 'month',
@@ -87,10 +111,9 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
   const statusDisplay = getStatusDisplay(status);
   const dateOpts = { year: 'numeric', month: 'short', day: 'numeric' };
 
-  // Helper to parse dates
   const parseDate = (dateVal) => {
     if (!dateVal) return null;
-    if (dateVal.toDate) return dateVal.toDate(); 
+    if (dateVal.toDate) return dateVal.toDate();
     if (dateVal instanceof Date) return dateVal;
     return new Date(dateVal);
   };
@@ -101,56 +124,49 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
   const handleCancel = async () => {
     const nextBillingDateStr = getNextBillingDate()?.toLocaleDateString('en-US', dateOpts) || 'the end of the current period';
     const isConfirmed = await confirm({
-        title: 'Cancel Membership?',
-        message: `This will prevent your membership from auto-renewing. You will still have access until ${nextBillingDateStr}. Are you sure?`,
-        confirmText: "Yes, Cancel",
-        cancelText: "Keep Membership",
-        type: 'danger'
+      title: 'Cancel Membership?',
+      message: `This will prevent your membership from auto-renewing. You will still have access until ${nextBillingDateStr}. Are you sure?`,
+      confirmText: "Yes, Cancel",
+      cancelText: "Keep Membership",
+      type: 'danger'
     });
 
     if (isConfirmed) {
-        setIsCancelling(true);
-        try {
-            const user = auth.currentUser;
-            if (!user || !currentGym?.id) throw new Error("User or gym not found.");
+      setIsCancelling(true);
+      try {
+        const user = auth.currentUser;
+        if (!user || !currentGym?.id) throw new Error("User or gym not found.");
 
-            const result = await cancelUserMembership(user.uid, currentGym.id);
-            if (result.success) {
-                await logMembershipHistory(user.uid, currentGym.id, 'Member scheduled cancellation.', user.uid);
-                fetchHistory();
-            } else {
-                throw new Error(result.error || "Failed to schedule cancellation.");
-            }
-        } catch (error) {
-            console.error("Failed to cancel membership:", error);
-        } finally {
-            setIsCancelling(false);
+        const result = await cancelUserMembership(user.uid, currentGym.id);
+        if (result.success) {
+          await logMembershipHistory(user.uid, currentGym.id, 'Member scheduled cancellation.', user.uid);
+        } else {
+          throw new Error(result.error || "Failed to schedule cancellation.");
         }
+      } catch (error) {
+        console.error("Failed to cancel membership:", error);
+      } finally {
+        setIsCancelling(false);
+      }
     }
   };
 
-  // --- Logic: Determine the next billing date ---
   const getNextBillingDate = () => {
     const now = new Date();
-    
-    // 1. If currently in trial, the next billing date IS the trial end date
+
     if (isTrialing && trialEndObj) {
-        return trialEndObj;
+      return trialEndObj;
     }
 
-    // 2. If active, calculate next cycle based on start date
-    // (If the user converted from a trial, the 'startDate' should theoretically update to the trial end date, 
-    // or you calculate cycles relative to trialEndObj if it exists)
-    const anchorDate = trialEndObj || startObj; 
-    
+    const anchorDate = trialEndObj || startObj;
+
     if (!anchorDate || !isActive) return null;
 
     let nextDate = new Date(anchorDate);
-    // Loop until we find a date in the future
     while (nextDate <= now) {
-        if (interval === 'week') nextDate.setDate(nextDate.getDate() + 7);
-        else if (interval === 'year') nextDate.setFullYear(nextDate.getFullYear() + 1);
-        else nextDate.setMonth(nextDate.getMonth() + 1);
+      if (interval === 'week') nextDate.setDate(nextDate.getDate() + 7);
+      else if (interval === 'year') nextDate.setFullYear(nextDate.getFullYear() + 1);
+      else nextDate.setMonth(nextDate.getMonth() + 1);
     }
     return nextDate;
   };
@@ -159,9 +175,23 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
 
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-bold text-gray-900 px-1">Membership & Billing</h3>
+      <div className="flex items-center justify-between px-1">
+        <h3 className="text-sm font-bold text-gray-900">Membership & Billing</h3>
+        {/* ✅ NEW: Debug button (only show in development) */}
+        {process.env.NODE_ENV === 'development' && (
+          <button
+            onClick={handleRunDiagnostic}
+            className="flex items-center gap-1 px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200 transition-colors"
+            title="Run permission diagnostic"
+          >
+            <Bug size={12} />
+            Debug
+          </button>
+        )}
+      </div>
+
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        
+
         {/* Header */}
         <div className="p-4 border-b border-gray-50">
           <div className="flex justify-between items-start mb-2">
@@ -174,61 +204,60 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
             </div>
           </div>
           {liveMembership && (
-             <div className="text-sm text-gray-500 font-medium">
-                ${parseFloat(displayPrice || 0).toFixed(2)} / {interval}
-             </div>
+            <div className="text-sm text-gray-500 font-medium">
+              ${parseFloat(displayPrice || 0).toFixed(2)} / {interval}
+            </div>
           )}
         </div>
-        
+
         {/* Dates Grid */}
         {liveMembership && (
-            <div className="grid grid-cols-2 divide-x divide-gray-50 bg-gray-50/50">
-                <div className="p-3 flex flex-col justify-center items-center text-center">
-                    <div className="flex items-center gap-1.5 mb-1">
-                        <Calendar size={12} className="text-blue-500" />
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Started</span>
-                    </div>
-                    <p className="text-xs font-semibold text-gray-700">
-                        {startObj ? startObj.toLocaleDateString('en-US', dateOpts) : 'N/A'}
-                    </p>
-                </div>
-
-                <div className="p-3 flex flex-col justify-center items-center text-center">
-                    <div className="flex items-center gap-1.5 mb-1">
-                        {isTrialing ? <Clock size={12} className="text-orange-500" /> : <RefreshCw size={12} className="text-green-500" />}
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">
-                            {isTrialing ? 'Trial Ends' : 'Renews'}
-                        </span>
-                    </div>
-                    <p className={`text-xs font-semibold ${isTrialing ? 'text-orange-600' : 'text-gray-700'}`}>
-                        {nextBillingDate 
-                            ? nextBillingDate.toLocaleDateString('en-US', dateOpts) 
-                            : '—'
-                        }
-                    </p>
-                </div>
+          <div className="grid grid-cols-2 divide-x divide-gray-50 bg-gray-50/50">
+            <div className="p-3 flex flex-col justify-center items-center text-center">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Calendar size={12} className="text-blue-500" />
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Started</span>
+              </div>
+              <p className="text-xs font-semibold text-gray-700">
+                {startObj ? startObj.toLocaleDateString('en-US', dateOpts) : 'N/A'}
+              </p>
             </div>
+
+            <div className="p-3 flex flex-col justify-center items-center text-center">
+              <div className="flex items-center gap-1.5 mb-1">
+                {isTrialing ? <Clock size={12} className="text-orange-500" /> : <RefreshCw size={12} className="text-green-500" />}
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">
+                  {isTrialing ? 'Trial Ends' : 'Renews'}
+                </span>
+              </div>
+              <p className={`text-xs font-semibold ${isTrialing ? 'text-orange-600' : 'text-gray-700'}`}>
+                {nextBillingDate
+                  ? nextBillingDate.toLocaleDateString('en-US', dateOpts)
+                  : '—'
+                }
+              </p>
+            </div>
+          </div>
         )}
 
         {/* Billing Action */}
-        <button 
+        <button
           onClick={onManageBilling}
           className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors border-t border-gray-100 group"
         >
           <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
-              isActive || isTrialing ? 'bg-blue-50 text-blue-600 group-hover:bg-blue-100' : 'bg-gray-100 text-gray-400'
-            }`}>
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isActive || isTrialing ? 'bg-blue-50 text-blue-600 group-hover:bg-blue-100' : 'bg-gray-100 text-gray-400'
+              }`}>
               <CreditCard size={20} />
             </div>
             <div className="text-left">
               <p className="text-sm font-bold text-gray-900">Payment Method</p>
               <p className="text-xs text-gray-500">
-                {isTrialing 
-                    ? 'Add card before trial ends' 
-                    : isActive 
-                        ? 'Update card or view invoices' 
-                        : 'Add a payment method'
+                {isTrialing
+                  ? 'Add card before trial ends'
+                  : isActive
+                    ? 'Update card or view invoices'
+                    : 'Add a payment method'
                 }
               </p>
             </div>
@@ -238,39 +267,39 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
 
         {/* Cancellation Section */}
         {cancelAtPeriodEnd ? (
-            <div className="p-4 bg-yellow-50 border-t border-yellow-100 text-center">
-                <p className="text-xs text-yellow-800 font-semibold">
-                    Your membership is set to cancel and will not renew. Access ends after {nextBillingDate?.toLocaleDateString('en-US', dateOpts) || 'your billing cycle end date'}.
-                </p>
-            </div>
+          <div className="p-4 bg-yellow-50 border-t border-yellow-100 text-center">
+            <p className="text-xs text-yellow-800 font-semibold">
+              Your membership is set to cancel and will not renew. Access ends after {nextBillingDate?.toLocaleDateString('en-US', dateOpts) || 'your billing cycle end date'}.
+            </p>
+          </div>
         ) : (isActive || isTrialing) && (
-             <div className="p-3 bg-gray-50/50 border-t border-gray-100 text-center">
-                 <button 
-                     onClick={handleCancel} 
-                     disabled={isCancelling}
-                     className="text-xs font-semibold text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 mx-auto"
-                 >
-                     <XCircle size={14} />
-                     {isCancelling ? 'Cancelling...' : 'Cancel Membership'}
-                 </button>
-             </div>
+          <div className="p-3 bg-gray-50/50 border-t border-gray-100 text-center">
+            <button
+              onClick={handleCancel}
+              disabled={isCancelling}
+              className="text-xs font-semibold text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 mx-auto"
+            >
+              <XCircle size={14} />
+              {isCancelling ? 'Cancelling...' : 'Cancel Membership'}
+            </button>
+          </div>
         )}
-        
+
         {/* History Section */}
         {membershipHistory.length > 0 && (
-            <div className="p-4 border-t border-gray-100">
-                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Recent History</h4>
-                <div className="space-y-2">
-                    {membershipHistory.slice(0, 3).map(log => (
-                        <div key={log.id} className="text-xs text-gray-600">
-                            <p className="font-medium">{log.description}</p>
-                            <p className="text-gray-400 text-[10px]">
-                                {log.createdAt ? new Date(log.createdAt.toDate()).toLocaleString([], {dateStyle:'short', timeStyle:'short'}) : 'Unknown Date'}
-                            </p>
-                        </div>
-                    ))}
+          <div className="p-4 border-t border-gray-100">
+            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Recent History</h4>
+            <div className="space-y-2">
+              {membershipHistory.slice(0, 3).map(log => (
+                <div key={log.id} className="text-xs text-gray-600">
+                  <p className="font-medium">{log.description}</p>
+                  <p className="text-gray-400 text-[10px]">
+                    {log.createdAt ? new Date(log.createdAt.toDate()).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Unknown Date'}
+                  </p>
                 </div>
+              ))}
             </div>
+          </div>
         )}
       </div>
     </div>

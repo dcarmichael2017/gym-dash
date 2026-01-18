@@ -3,16 +3,18 @@
 import React from 'react';
 import { 
     CheckCircle2, XCircle, Clock, Trash2, Edit2, Archive, 
-    Link as LinkIcon, Users, User 
+    Link as LinkIcon, Users, AlertCircle
 } from 'lucide-react';
 
-export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
+export const MemberTableRow = ({ member, gymId, allMembers, onEdit, onDelete }) => {
+    // Use the pre-fetched membership data from getGymMembers
+    console.log(member);
+    const currentMembership = member.currentMembership;
     
     // --- Derived State ---
-    const currentMembership = (member.memberships || []).find(m => m.gymId === member.gymId);
     const planName = currentMembership?.membershipName;
-    // Default to 'prospect' which shows as 'Free Member' if no specific gym membership is found.
     const effectiveStatus = currentMembership?.status || 'prospect';
+    const isCancelling = currentMembership?.cancelAtPeriodEnd === true; // ✅ NEW
 
     // --- Helper: Find Payer ---
     const payer = member.payerId ? allMembers.find(m => m.id === member.payerId) : null;
@@ -26,6 +28,21 @@ export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
     const getStatusBadge = () => {
         const status = effectiveStatus.toLowerCase();
         
+        // ✅ NEW: Show cancellation status first if applicable
+        if (isCancelling) {
+            return (
+                <div className="flex flex-col items-start gap-1">
+                    <span className="flex items-center text-xs font-bold text-orange-700 bg-orange-100 px-2 py-1 rounded-full w-fit border border-orange-200">
+                        <AlertCircle className="w-3 h-3 mr-1"/> Cancelling
+                    </span>
+                    {/* Show original status as secondary info */}
+                    <span className="text-[10px] text-gray-500">
+                        ({status === 'trialing' ? 'Trial' : status === 'active' ? 'Active' : status})
+                    </span>
+                </div>
+            );
+        }
+        
         switch(status) {
             case 'active': 
                 return <span className="flex items-center text-xs font-bold text-green-700 bg-green-100 px-2 py-1 rounded-full w-fit"><CheckCircle2 className="w-3 h-3 mr-1"/> Active</span>;
@@ -35,7 +52,6 @@ export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
                 return <span className="flex items-center text-xs font-bold text-red-700 bg-red-100 px-2 py-1 rounded-full w-fit"><XCircle className="w-3 h-3 mr-1"/> Past Due</span>;
             case 'archived': 
                 return <span className="flex items-center text-xs font-bold text-gray-600 bg-gray-200 px-2 py-1 rounded-full w-fit"><Archive className="w-3 h-3 mr-1"/> Archived</span>;
-            // Consolidated Naming Strategy
             case 'prospect': 
             case 'guest':
                 return <span className="text-xs font-bold text-yellow-700 bg-yellow-100 px-2 py-1 rounded-full w-fit">Free Member</span>;
@@ -46,7 +62,7 @@ export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
 
     return (
         <tr onClick={() => onEdit(member)} className="hover:bg-gray-50 transition-colors group cursor-pointer">
-            {/* 1. Member Info */}
+            {/* Member Info */}
             <td className="px-6 py-4">
                 <div className="flex items-center">
                     <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold mr-3 overflow-hidden shrink-0">
@@ -63,17 +79,17 @@ export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
                 </div>
             </td>
 
-            {/* 2. Status */}
+            {/* Status */}
             <td className="px-6 py-4">
                 {getStatusBadge()}
             </td>
 
-            {/* 3. Plan Name */}
+            {/* Plan Name */}
             <td className="px-6 py-4 text-sm text-gray-600">
                 {planName || <span className="text-gray-400 italic">Free Member</span>}
             </td>
 
-            {/* 4. Family Status */}
+            {/* Family Status */}
             <td className="px-6 py-4">
                 {member.payerId ? (
                     <div className="flex flex-col items-start">
@@ -103,7 +119,7 @@ export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
                 )}
             </td>
 
-            {/* 5. Actions */}
+            {/* Actions */}
             <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                 <div className="flex justify-end gap-2">
                     <button 
@@ -116,9 +132,9 @@ export const MemberTableRow = ({ member, allMembers, onEdit, onDelete }) => {
                     <button 
                         onClick={() => onDelete(member)}
                         className="text-gray-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
-                        title={member.status === 'active' ? "Archive Member" : "Delete Member"}
+                        title={currentMembership?.status === 'active' ? "Archive Member" : "Delete Member"}
                     >
-                        {member.status === 'active' ? <Archive className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+                        {currentMembership?.status === 'active' ? <Archive className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
                     </button>
                 </div>
             </td>

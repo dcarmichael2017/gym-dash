@@ -26,7 +26,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
         maxCapacity: 20,
         instructorId: '',
         frequency: 'Weekly',
-        dropInEnabled: true,
+        dropInEnabled: false, // ✅ Default OFF
         creditCost: 1, 
         allowedMembershipIds: [],
         programId: '',
@@ -94,8 +94,7 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
             const initCancel = getSetting('cancelWindowHours', 2);
             const initCheckIn = getSetting('checkInWindowMinutes', 60);
             const initFee = getSetting('lateCancelFee', 0);
-
-            const initLateBooking = getSetting('lateBookingMinutes', 15); // Default 15 mins if rule active
+            const initLateBooking = getSetting('lateBookingMinutes', 15);
 
             if (classData) {
                 // UX FIX: If cost is 0 in DB (because it was disabled), show 1 in the UI input so it's ready to use if toggled on.
@@ -110,7 +109,8 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     maxCapacity: classData.maxCapacity !== undefined ? classData.maxCapacity : 20,
                     instructorId: classData.instructorId || '',
                     frequency: classData.frequency || 'Weekly',
-                    dropInEnabled: classData.dropInEnabled !== undefined ? classData.dropInEnabled : true,
+                    // ✅ UPDATE: Use stored value, or default to FALSE if undefined
+                    dropInEnabled: classData.dropInEnabled !== undefined ? classData.dropInEnabled : false,
                     creditCost: visualCreditCost, 
                     allowedMembershipIds: classData.allowedMembershipIds || [],
                     programId: classData.programId || '',
@@ -144,7 +144,8 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     days: defaultFreq === 'Single Event' ? [] : [], 
                     maxCapacity: 20,
                     instructorId: '',
-                    dropInEnabled: !hasMemberships, 
+                    // ✅ UPDATE: Forced FALSE for new classes
+                    dropInEnabled: false, 
                     creditCost: 1, 
                     allowedMembershipIds: hasMemberships ? membershipList.filter(m => m.interval !== 'one_time').map(m => m.id) : [],
                     programId: '',
@@ -218,15 +219,13 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
             lateBookingMinutes: activeRules.lateBooking ? (parseInt(formData.lateBookingMinutes) || 0) : null,
         } : null;
 
-        // --- CRITICAL FIX HERE ---
-        // If dropInEnabled is FALSE, we force creditCost to 0.
-        // This ensures the BookingModal knows there is no credit option.
+        // ✅ This logic is correct: It saves 0 if disabled, but uses input if enabled.
         const finalCreditCost = formData.dropInEnabled ? (parseInt(formData.creditCost) || 0) : 0;
 
         const payload = {
             ...formData,
             duration: parseInt(formData.duration) || 60,
-            dropInEnabled: formData.dropInEnabled,
+            dropInEnabled: formData.dropInEnabled, // explicitly passing true/false
             creditCost: finalCreditCost, 
             maxCapacity: parseInt(formData.maxCapacity) || 0,
             bookingRules: bookingRulesPayload,
@@ -285,6 +284,9 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
         }
     };
 
+    // ... Rest of the component (handlers, render) remains the same
+    
+    // (Copied Handlers to ensure completeness of the snippet)
     const handleClassSeriesRetirement = async () => {
         if (!isExistingClass) return;
 

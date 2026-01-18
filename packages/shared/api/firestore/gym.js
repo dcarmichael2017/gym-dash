@@ -13,9 +13,12 @@ export const createGym = async (gymData) => {
       createdAt: new Date(),
     });
 
+    // ✅ FIX: Always set BOTH gymId (legacy) AND gymIds (new standard)
     const userRef = doc(db, "users", userId);
     await setDoc(userRef, {
       gymId: gymRef.id,
+      [`gymIds.${gymRef.id}`]: true,  // ✅ NEW: Multi-gym support
+      lastActiveGymId: gymRef.id,     // ✅ NEW: Track active gym
       role: 'owner'
     }, { merge: true });
 
@@ -89,52 +92,6 @@ export const searchGyms = async (searchTerm = '') => {
   }
 };
 
-export const joinGym = async (userId, gymId, gymName) => {
-  try {
-    const userRef = doc(db, "users", userId);
-
-    const newMembership = {
-      gymId: gymId,
-      gymName: gymName, 
-      role: 'member',
-      status: 'prospect', 
-      joinedAt: new Date()
-    };
-
-    await updateDoc(userRef, {
-      memberships: arrayUnion(newMembership),
-      lastActiveGymId: gymId, 
-      gymId: gymId
-    });
-
-    return { success: true };
-  } catch (error) {
-    console.error("Error joining gym:", error);
-    return { success: false, error: error.message };
-  }
-};
-
-export const disconnectGym = async (userId, gymId) => {
-  try {
-    const userRef = doc(db, "users", userId);
-    const userSnap = await getDoc(userRef);
-
-    if (!userSnap.exists()) throw new Error("User not found");
-
-    const userData = userSnap.data();
-    const updatedMemberships = (userData.memberships || []).filter(m => m.gymId !== gymId);
-
-    await updateDoc(userRef, {
-      memberships: updatedMemberships,
-      gymId: updatedMemberships.length > 0 ? updatedMemberships[0].gymId : null
-    });
-
-    return { success: true };
-  } catch (error) {
-    console.error("Error disconnecting gym:", error);
-    return { success: false, error: error.message };
-  }
-};
 
 // --- WAIVER & LEGAL ---
 
@@ -170,27 +127,13 @@ export const getGymWaiver = async (gymId) => {
 
 export const signWaiver = async (userId, gymId, version = 1) => {
   try {
-    const userRef = doc(db, "users", userId);
-    const userSnap = await getDoc(userRef);
-
-    if (!userSnap.exists()) throw new Error("User not found");
-
-    const userData = userSnap.data();
-    const memberships = userData.memberships || [];
-
-    const updatedMemberships = memberships.map(m => {
-      if (m.gymId === gymId) {
-        return {
-          ...m,
-          waiverSigned: true,
-          waiverSignedAt: new Date(),
-          waiverSignedVersion: version
-        };
-      }
-      return m;
+    const membershipRef = doc(db, 'users', userId, 'memberships', gymId);
+    await updateDoc(membershipRef, { 
+      waiverSigned: true,
+      waiverSignedAt: new Date(),
+      waiverSignedVersion: version,
+      updatedAt: new Date()
     });
-
-    await updateDoc(userRef, { memberships: updatedMemberships });
     return { success: true };
   } catch (error) {
     console.error("Error signing waiver:", error);

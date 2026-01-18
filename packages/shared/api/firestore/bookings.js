@@ -9,19 +9,20 @@ import { createCreditLog } from './credits'; // Import helper from credits modul
 
 
 /**
- * 2. BOOK: Add a member to the roster
+ * Books a member into a class with full eligibility and cost handling
  */
 export const bookMember = async (gymId, classInfo, member, options = {}) => {
   try {
     return await runTransaction(db, async (transaction) => {
-      // Setup Refs
+      // --- Setup Refs ---
       const bookingId = `${classInfo.id}_${classInfo.dateString}_${member.id}`;
       const attendanceRef = doc(db, "gyms", gymId, "attendance", bookingId);
       const classDocRef = doc(db, "gyms", gymId, "classes", classInfo.id);
       const userDocRef = doc(db, "users", member.id);
       const gymDocRef = doc(db, "gyms", gymId);
 
-      const [classSnap, userSnap, bookingSnap] = await Promise.all([
+      // --- Fetch All Required Documents in Transaction ---
+      const [classSnap, userSnap, bookingSnap, gymSnap] = await Promise.all([
         transaction.get(classDocRef),
         transaction.get(userDocRef),
         transaction.get(attendanceRef),
@@ -35,54 +36,48 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
       const userData = userSnap.data();
       const gymData = gymSnap.exists() ? gymSnap.data() : {};
       const classRules = classData.bookingRules || {};
-      // 2. Gym Default Rules
       const gymRules = gymData.booking || {};
 
-      // 3. Merged Active Rules (Class Overrides Gym > Gym Overrides System)
+      // --- Merged Active Rules ---
       const activeRules = {
-          cancelWindowHours: classRules.cancelWindowHours !== undefined 
-              ? classRules.cancelWindowHours 
-              : (gymRules.cancelWindowHours !== undefined ? gymRules.cancelWindowHours : 2),
-          
-          lateCancelFee: classRules.lateCancelFee !== undefined 
-              ? classRules.lateCancelFee 
-              : (gymRules.lateCancelFee !== undefined ? gymRules.lateCancelFee : 0),
-          
-          lateBookingMinutes: classRules.lateBookingMinutes !== undefined 
-              ? classRules.lateBookingMinutes 
-              : (gymRules.lateBookingMinutes !== undefined ? gymRules.lateBookingMinutes : null),
-          
-          bookingWindowDays: classRules.bookingWindowDays !== undefined
-              ? classRules.bookingWindowDays
-              : (gymRules.bookingWindowDays !== undefined ? gymRules.bookingWindowDays : null)
+        cancelWindowHours: classRules.cancelWindowHours !== undefined
+          ? classRules.cancelWindowHours
+          : (gymRules.cancelWindowHours !== undefined ? gymRules.cancelWindowHours : 2),
+
+        lateCancelFee: classRules.lateCancelFee !== undefined
+          ? classRules.lateCancelFee
+          : (gymRules.lateCancelFee !== undefined ? gymRules.lateCancelFee : 0),
+
+        lateBookingMinutes: classRules.lateBookingMinutes !== undefined
+          ? classRules.lateBookingMinutes
+          : (gymRules.lateBookingMinutes !== undefined ? gymRules.lateBookingMinutes : null),
+
+        bookingWindowDays: classRules.bookingWindowDays !== undefined
+          ? classRules.bookingWindowDays
+          : (gymRules.bookingWindowDays !== undefined ? gymRules.bookingWindowDays : null)
       };
 
-      // Check Duplicates
+      // --- Check Duplicates ---
       if (bookingSnap.exists() && bookingSnap.data().status !== BOOKING_STATUS.CANCELLED) {
         throw "Member is already booked.";
       }
 
-      // --- 1. TIME & WINDOW CHECKS (ENFORCING RULES) ---
+      // --- TIME & WINDOW CHECKS ---
       const [h, m] = classInfo.time.split(':').map(Number);
       const [Y, M, D] = classInfo.dateString.split('-').map(Number);
       const classStartObj = new Date(Y, M - 1, D, h, m);
       const now = new Date();
 
-      // If the class series has a recurrenceEndDate, and this booking is AFTER it, block it.
-      if (classData.recurrenceEndDate) {
-        // Compare date strings (YYYY-MM-DD)
-        if (classInfo.dateString > classData.recurrenceEndDate) {
-          throw "This class series has ended.";
-        }
+      // Check if series has ended
+      if (classData.recurrenceEndDate && classInfo.dateString > classData.recurrenceEndDate) {
+        throw "This class series has ended.";
       }
 
-      // A. Booking Window Check (Can I book this far in advance?)
-      // ✅ NEW LOGIC
+      // A. Booking Window Check
       if (!options.isStaff && !options.force && activeRules.bookingWindowDays) {
         const windowDays = parseInt(activeRules.bookingWindowDays);
         const maxBookingDate = new Date();
         maxBookingDate.setDate(maxBookingDate.getDate() + windowDays);
-        // Set to end of that day to be generous
         maxBookingDate.setHours(23, 59, 59, 999);
 
         if (classStartObj > maxBookingDate) {
@@ -92,12 +87,11 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
         }
       }
 
-      // B. Late Booking Check (Is it too late to join?)
+      // B. Late Booking Check
       const duration = parseInt(classData.duration) || 60;
       const classEndTime = new Date(classStartObj.getTime() + duration * 60000);
       const isRetroactive = now > classEndTime;
 
-      // ✅ UPDATED LOGIC: Use lateBookingMinutes from rules, default to class duration if not set
       let lateMinutes = activeRules.lateBookingMinutes != null
         ? parseInt(activeRules.lateBookingMinutes)
         : duration;
@@ -106,7 +100,6 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
       const isAllowedLate = options.force || options.isStaff;
 
       if (now > cutoffTime && !isAllowedLate) throw "Booking closed.";
-
 
       // --- COST CALCULATION ---
       let baseCost = 1;
@@ -117,10 +110,12 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
         if (isNaN(baseCost)) baseCost = 1;
       }
 
-      // --- 2. SOURCE OF FUNDS LOGIC ---
+      // --- ✅ FIX: SOURCE OF FUNDS LOGIC (Transaction-Safe) ---
       let bookingType = 'unknown';
       let costUsed = 0;
-      let gatekeeper = canUserBook(classData, userData, gymId);
+
+      // Pass the transaction to canUserBook
+      let gatekeeper = await canUserBook(classData, member.id, gymId, transaction);
 
       if (options.bookingType) {
         bookingType = options.bookingType;
@@ -146,7 +141,7 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
         }
       }
 
-      // --- 3. DEDUCT CREDITS ---
+      // --- DEDUCT CREDITS ---
       if (costUsed > 0) {
         const userCredits = parseInt(userData.classCredits) || 0;
         if (!options.force && userCredits < costUsed) throw "Insufficient credits.";
@@ -165,7 +160,7 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
         }
       }
 
-      // --- 4. CAPACITY CHECK ---
+      // --- CAPACITY CHECK ---
       let status = BOOKING_STATUS.BOOKED;
       if (!options.force && !isRetroactive) {
         const rosterQuery = query(
@@ -183,7 +178,7 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
         status = BOOKING_STATUS.ATTENDED;
       }
 
-      // --- 5. HANDLE PROGRESSION ---
+      // --- HANDLE PROGRESSION ---
       const programId = classData.programId || null;
 
       if (status === BOOKING_STATUS.ATTENDED) {
@@ -221,15 +216,14 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
         transaction.update(userDocRef, userUpdates);
       }
 
-      // --- 6. WRITE ATTENDANCE RECORD ---
-
-      // ✅ NEW: Create a clean snapshot of the rules at this moment
+      // --- WRITE ATTENDANCE RECORD ---
       const bookingRulesSnapshot = {
         cancelWindowHours: parseFloat(activeRules.cancelWindowHours),
         lateCancelFee: parseFloat(activeRules.lateCancelFee),
         lateBookingMinutes: activeRules.lateBookingMinutes,
-        creditCost: baseCost 
+        creditCost: baseCost
       };
+
       const payload = {
         classId: classInfo.id,
         className: classInfo.name,
@@ -240,14 +234,12 @@ export const bookMember = async (gymId, classInfo, member, options = {}) => {
         memberId: member.id,
         memberName: member.name || "Unknown Member",
         memberPhoto: member.photoUrl || null,
-        status: status, // Defined in capacity check
+        status: status,
         bookedAt: new Date(),
-        bookingType: bookingType, // Defined in Cost logic
-        costUsed: costUsed,       // Defined in Cost logic
-        programId: programId,     // Defined in Progression logic
+        bookingType: bookingType,
+        costUsed: costUsed,
+        programId: programId,
         checkedInAt: status === BOOKING_STATUS.ATTENDED ? classStartObj : null,
-
-        // ✅ SAVE THE SNAPSHOT
         bookingRulesSnapshot: bookingRulesSnapshot
       };
 
@@ -444,19 +436,19 @@ export const cancelBooking = async (gymId, attendanceId, options = {}) => {
       const wasTakingSpot = [BOOKING_STATUS.BOOKED, BOOKING_STATUS.ATTENDED].includes(data.status);
 
       const isLateCancel = !shouldRefund && !options.isStaff;
-      
+
       let applicableFee = 0;
       if (isLateCancel) {
-          // Same Hierarchy for Fees: Snapshot > Class > Gym > 0
-          if (data.bookingRulesSnapshot && data.bookingRulesSnapshot.lateCancelFee !== undefined) {
-              applicableFee = parseFloat(data.bookingRulesSnapshot.lateCancelFee);
-          } else if (classData.bookingRules && classData.bookingRules.lateCancelFee !== undefined) {
-              applicableFee = parseFloat(classData.bookingRules.lateCancelFee);
-          } else if (gymDefaults.lateCancelFee !== undefined) {
-              applicableFee = parseFloat(gymDefaults.lateCancelFee);
-          } else {
-              applicableFee = 0;
-          }
+        // Same Hierarchy for Fees: Snapshot > Class > Gym > 0
+        if (data.bookingRulesSnapshot && data.bookingRulesSnapshot.lateCancelFee !== undefined) {
+          applicableFee = parseFloat(data.bookingRulesSnapshot.lateCancelFee);
+        } else if (classData.bookingRules && classData.bookingRules.lateCancelFee !== undefined) {
+          applicableFee = parseFloat(classData.bookingRules.lateCancelFee);
+        } else if (gymDefaults.lateCancelFee !== undefined) {
+          applicableFee = parseFloat(gymDefaults.lateCancelFee);
+        } else {
+          applicableFee = 0;
+        }
       }
 
       transaction.update(attRef, {
@@ -465,8 +457,8 @@ export const cancelBooking = async (gymId, attendanceId, options = {}) => {
         updatedAt: new Date(),
         refunded: refundedAmount > 0,
         refundAmount: refundedAmount,
-        lateCancel: isLateCancel,       
-        lateCancelFeeApplied: applicableFee 
+        lateCancel: isLateCancel,
+        lateCancelFeeApplied: applicableFee
       });
 
       // --- 5. PROMOTE WAITLIST ---
@@ -498,6 +490,10 @@ export const cancelBooking = async (gymId, attendanceId, options = {}) => {
   }
 };
 
+/**
+ * Comprehensive eligibility check with weekly limit tracking
+ * This function is called OUTSIDE transactions, so regular getDoc is fine
+ */
 export const checkBookingEligibility = async (gymId, userId, classInstanceProp) => {
   const result = {
     instructorName: classInstanceProp.resolvedInstructorName || classInstanceProp.instructorName || null,
@@ -513,12 +509,11 @@ export const checkBookingEligibility = async (gymId, userId, classInstanceProp) 
     const classRef = doc(db, 'gyms', gymId, 'classes', classInstanceProp.id);
     const classSnap = await getDoc(classRef);
 
-    // Merge prop data with DB data (DB takes precedence for rules)
     const classData = classSnap.exists()
       ? { ...classInstanceProp, ...classSnap.data(), id: classInstanceProp.id }
       : classInstanceProp;
 
-    // 2. Fetch User & Membership
+    // 2. Fetch User & Profile
     const userRef = doc(db, 'users', userId);
     const userSnap = await getDoc(userRef);
     if (!userSnap.exists()) throw new Error("User not found");
@@ -526,15 +521,18 @@ export const checkBookingEligibility = async (gymId, userId, classInstanceProp) 
     const userData = userSnap.data();
     result.userProfile = userData;
 
-    // 3. Initial Gatekeeper Check
-    let baseEligibility = canUserBook(classData, userData, gymId);
+    // 3. Initial Gatekeeper Check (Transaction = null, so uses getDoc internally)
+    let baseEligibility = await canUserBook(classData, userId, gymId, null);
 
     // 4. Deep Membership Check (Weekly Limits)
     if (baseEligibility.type === 'membership') {
-      const userMem = (userData.memberships || []).find(m => m.gymId === gymId);
+      // ✅ FIX: Fetch from subcollection
+      const membershipRef = doc(db, 'users', userId, 'memberships', gymId);
+      const membershipSnap = await getDoc(membershipRef);
+      const userMembershipData = membershipSnap.exists() ? { id: membershipSnap.id, ...membershipSnap.data() } : null;
 
-      if (userMem?.membershipId) {
-        const tierSnap = await getDoc(doc(db, 'gyms', gymId, 'membershipTiers', userMem.membershipId));
+      if (userMembershipData?.membershipId) {
+        const tierSnap = await getDoc(doc(db, 'gyms', gymId, 'membershipTiers', userMembershipData.membershipId));
 
         if (tierSnap.exists()) {
           const tierData = tierSnap.data();
@@ -542,7 +540,6 @@ export const checkBookingEligibility = async (gymId, userId, classInstanceProp) 
 
           const limit = parseInt(tierData.weeklyLimit);
 
-          // Only check usage if a valid limit > 0 exists
           if (!isNaN(limit) && limit > 0) {
             const usageRes = await getWeeklyClassCount(gymId, userId, classData.dateString);
 
@@ -555,14 +552,13 @@ export const checkBookingEligibility = async (gymId, userId, classInstanceProp) 
 
               // --- LIMIT REACHED LOGIC ---
               if (usageRes.count >= limit) {
-                // Determine if we can fallback to credits
                 const creditCost = parseInt(classData.creditCost) || 1;
                 const userCredits = parseInt(userData.classCredits) || 0;
 
                 if (classData.dropInEnabled && userCredits >= creditCost) {
                   baseEligibility = {
                     allowed: true,
-                    type: 'credit', // Switches type to credit
+                    type: 'credit',
                     cost: creditCost,
                     reason: `Weekly limit reached (${usageRes.count}/${limit}). Booking via Credit.`
                   };
@@ -604,14 +600,43 @@ export const checkBookingEligibility = async (gymId, userId, classInstanceProp) 
   }
 };
 
-export const canUserBook = (classData, userData, targetGymId) => {
+/**
+ * Checks if a user can book a class based on membership and credit availability.
+ * NOW TRANSACTION-SAFE: Accepts optional transaction parameter
+ * 
+ * @param {Object} classData - The class document data
+ * @param {string} userId - The user's ID
+ * @param {string} targetGymId - The gym ID
+ * @param {Transaction} transaction - Optional Firestore transaction object
+ * @returns {Object} - { allowed, reason, type, cost }
+ */
+export const canUserBook = async (classData, userId, targetGymId, transaction = null) => {
   const allowedPlans = classData.allowedMembershipIds || [];
   const creditCost = parseInt(classData.creditCost) || 0;
+
+  // --- Fetch User Profile ---
+  const userRef = doc(db, 'users', userId);
+  const userSnap = transaction
+    ? await transaction.get(userRef)
+    : await getDoc(userRef);
+
+  if (!userSnap.exists()) {
+    return { allowed: false, reason: "User profile not found.", type: 'denied', cost: 0 };
+  }
+  const userData = userSnap.data();
   let credits = parseInt(userData.classCredits) || 0;
 
-  const relevantMembership = (userData.memberships || []).find(m => m.gymId === targetGymId);
+  // --- ✅ FIX: Fetch Membership from Subcollection (Transaction-Safe) ---
+  const membershipRef = doc(db, 'users', userId, 'memberships', targetGymId);
+  const membershipSnap = transaction
+    ? await transaction.get(membershipRef)
+    : await getDoc(membershipRef);
+
+  const relevantMembership = membershipSnap.exists() ? { id: membershipSnap.id, ...membershipSnap.data() } : null;
+
   const VALID_ACCESS_STATUSES = ['active', 'trialing'];
 
+  // --- Check Membership Access ---
   if (relevantMembership) {
     const memStatus = (relevantMembership.status || '').toLowerCase().trim();
     const planId = relevantMembership.membershipId;
@@ -623,6 +648,7 @@ export const canUserBook = (classData, userData, targetGymId) => {
     }
   }
 
+  // --- Check Credit/Drop-In Access ---
   if (userData.status !== 'banned') {
     if (creditCost > 0 && credits >= creditCost) {
       return {
@@ -637,6 +663,7 @@ export const canUserBook = (classData, userData, targetGymId) => {
     }
   }
 
+  // --- Denial Messages ---
   let denialReason = "Membership required to book.";
   if (relevantMembership && allowedPlans.includes(relevantMembership.membershipId)) {
     denialReason = `Your membership is currently ${relevantMembership.status}.`;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ScrollText, CheckCircle, Loader2, XCircle, Scale, FileText, X, History, ArrowLeft } from 'lucide-react';
-import { getGymWaiver } from '../../../../../../packages/shared/api/firestore'; 
+import { getGymWaiver } from '../../../../../../packages/shared/api/firestore/gym'; 
 import { useConfirm } from '../../../context/ConfirmationContext';
 import { doc, getDoc } from 'firebase/firestore'; 
 import { db } from '../../../../../../packages/shared/api/firebaseConfig';
@@ -96,7 +96,11 @@ const WaiverModal = ({
 
     if (isConfirmed) {
         setSubmitting(true);
-        await onDecline();
+        try {
+            await onDecline();
+        } finally {
+            setSubmitting(false);
+        }
     }
   };
 

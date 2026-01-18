@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { User, Mail, Phone, LogOut, Edit2, Check, X, Loader2, ShieldAlert, History, XCircle, Calendar, Clock } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { User, Mail, Phone, LogOut, Edit2, Check, X, Loader2, ShieldAlert } from 'lucide-react';
 import { useMemberProfile } from './useMemberProfile';
 import { ProfileField } from './ProfileFields';
 import { MembershipSection } from './MembershipSection';
@@ -12,65 +12,33 @@ const MemberProfileScreen = () => {
         user, formData, setFormData, isEditing, setIsEditing, loading,
         showWaiverModal, setShowWaiverModal, currentWaiverVersion,
         handleUpdateProfile, handleCancel, handleWaiverSign, formatPhoneNumber,
-        getStatusDisplay, currentGym, memberships, showSuccess
+        getStatusDisplay, currentGym, userMembership, showSuccess
     } = useMemberProfile();
 
     const theme = currentGym?.theme || { primaryColor: '#2563eb' };
     
-    // Find the user's membership for the current gym and enrich it with plan details
     const myMembership = useMemo(() => {
-        // --- LOGGING START ---
-        console.group("🔍 Debugging Membership Logic");
-        
-        // 1. Get the raw record
-        const rawMembership = memberships?.find(m => m.gymId === currentGym?.id);
-        console.log("1. Raw User Record:", rawMembership);
+        if (!userMembership) return null;
 
-        if (!rawMembership) {
-            console.log("❌ No membership record found for this gym.");
-            console.groupEnd();
-            return null;
-        }
+        const tierDetails = currentGym?.membershipTiers?.find(t => t.id === userMembership.membershipId);
 
-        // 2. Find the reference tier
-        console.log("2. Available Gym Tiers:", currentGym?.membershipTiers);
-        
-        const tierDetails = currentGym?.membershipTiers?.find(t => t.id === rawMembership.membershipId);
-        console.log("3. Matched Tier Details:", tierDetails);
-
-        if (!tierDetails) {
-            console.warn("⚠️ Mismatch: User has membershipId", rawMembership.membershipId, "but it does not exist in gym tiers.");
-        }
-
-        // 3. Merge logic
-        const mergedData = {
-            // Base defaults
-            ...tierDetails, 
-            ...rawMembership,
-            
-            // Explicit Field Mapping 
-            planName: rawMembership.planName || tierDetails?.name || "Unknown Plan",
-            price: rawMembership.customPrice !== undefined ? rawMembership.customPrice : (tierDetails?.price || 0),
-            interval: rawMembership.interval || tierDetails?.interval || 'month',
-            id: rawMembership.membershipId || tierDetails?.id
+        return {
+            ...tierDetails,
+            ...userMembership,
+            planName: userMembership.membershipName || tierDetails?.name || "Unknown Plan",
+            price: userMembership.assignedPrice ?? tierDetails?.price ?? 0,
+            interval: userMembership.interval || tierDetails?.interval || 'month',
+            id: userMembership.id
         };
-
-        console.log("4. Final Merged Output:", mergedData);
-        console.groupEnd();
-        // --- LOGGING END ---
-
-        return mergedData;
-    }, [memberships, currentGym]);
+    }, [userMembership, currentGym]);
 
     const statusBadge = getStatusDisplay(myMembership?.status || 'guest');
-    
     const hasWaiver = myMembership?.waiverSigned === true;
     const userSignedVersion = myMembership?.waiverSignedVersion || 0;
     const isOutdated = hasWaiver && userSignedVersion < currentWaiverVersion;
 
     return (
         <div className="pb-32 bg-gray-50 min-h-screen relative">
-
             {/* SUCCESS TOAST */}
             {showSuccess && (
                 <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[110] animate-in fade-in slide-in-from-top-4 duration-300">
@@ -85,12 +53,16 @@ const MemberProfileScreen = () => {
 
             {showWaiverModal && (
                 <WaiverModal
-                    gymId={currentGym.id} gymName={currentGym.name} theme={theme}
-                    onAccept={handleWaiverSign} onDecline={() => setShowWaiverModal(false)}
+                    gymId={currentGym.id} 
+                    gymName={currentGym.name} 
+                    theme={theme}
+                    onAccept={handleWaiverSign} 
+                    onDecline={() => setShowWaiverModal(false)}
                     onClose={() => setShowWaiverModal(false)}
                     viewOnly={hasWaiver && !isOutdated}
                     targetVersion={hasWaiver && !isOutdated ? userSignedVersion : currentWaiverVersion}
-                    lastSignedVersion={userSignedVersion} isUpdate={isOutdated}
+                    lastSignedVersion={userSignedVersion} 
+                    isUpdate={isOutdated}
                 />
             )}
 
@@ -109,12 +81,20 @@ const MemberProfileScreen = () => {
 
                     <div className="flex gap-2 shrink-0 ml-4">
                         {!isEditing ? (
-                            <button onClick={() => setIsEditing(true)} className="p-2 bg-gray-50 rounded-full text-gray-500 hover:text-gray-900 transition-all">
+                            <button 
+                                onClick={() => setIsEditing(true)} 
+                                className="p-2 bg-gray-50 rounded-full text-gray-500 hover:text-gray-900 transition-all"
+                            >
                                 <Edit2 size={18} />
                             </button>
                         ) : (
                             <div className="flex gap-2">
-                                <button onClick={handleCancel} className="p-2 bg-gray-50 rounded-full text-gray-500"><X size={18} /></button>
+                                <button 
+                                    onClick={handleCancel} 
+                                    className="p-2 bg-gray-50 rounded-full text-gray-500"
+                                >
+                                    <X size={18} />
+                                </button>
                                 <button 
                                     onClick={handleUpdateProfile} 
                                     disabled={loading} 
@@ -130,7 +110,7 @@ const MemberProfileScreen = () => {
             </div>
 
             <div className="p-6 space-y-8">
-                {/* 1. PERSONAL DETAILS SECTION */}
+                {/* PERSONAL DETAILS */}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                     <ProfileField 
                         icon={User} 
@@ -159,12 +139,17 @@ const MemberProfileScreen = () => {
                         onChange={e => setFormData({...formData, phoneNumber: formatPhoneNumber(e.target.value)})} 
                         placeholder="(555) 000-0000"
                     />
-                    <ProfileField icon={Mail} label="Email Address" value={user?.email} editable={false} />
+                    <ProfileField 
+                        icon={Mail} 
+                        label="Email Address" 
+                        value={user?.email} 
+                        editable={false} 
+                    />
                 </div>
 
-                {/* 2. EMERGENCY CONTACT SECTION (NEW) */}
+                {/* EMERGENCY CONTACT */}
                 <div>
-                     <div className="flex items-center gap-2 mb-3 px-1">
+                    <div className="flex items-center gap-2 mb-3 px-1">
                         <ShieldAlert size={16} className="text-red-500" />
                         <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Emergency Contact</h4>
                     </div>

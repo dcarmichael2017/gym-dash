@@ -43,7 +43,6 @@ export const SignUpScreen = () => {
           email: formData.email.toLowerCase().trim(),
           phoneNumber: formData.phoneNumber.replace(/[^\d]/g, ''), // Strip non-digits
           role: selectedRole, // 'owner' or 'member'
-          status: 'active',
           createdAt: new Date()
       };
 

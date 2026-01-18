@@ -206,6 +206,9 @@ const NextClassCard = ({ hasActiveMembership }) => {
     );
   }
 
+  // Helper to determine cost display
+  const creditCost = nextClass.creditCost !== undefined ? nextClass.creditCost : 0;
+
   return (
     <div 
         className="rounded-2xl p-6 text-white shadow-lg relative overflow-hidden transition-all hover:scale-[1.01]"
@@ -247,8 +250,15 @@ const NextClassCard = ({ hasActiveMembership }) => {
                         <>
                             {nextClass.dropInEnabled ? (
                                 <>
-                                    <span className="text-[10px] uppercase opacity-75 font-bold">Drop-in Price</span>
-                                    <span className="text-lg font-bold">${nextClass.dropInPrice || 25}</span>
+                                    <span className="text-[10px] uppercase opacity-75 font-bold">Class Cost</span>
+                                    {creditCost > 0 ? (
+                                        <span className="text-lg font-bold">
+                                            {creditCost} Credit{creditCost !== 1 ? 's' : ''}
+                                        </span>
+                                    ) : (
+                                        <span className="text-lg font-bold">Free</span>
+                                    )}
+                                    
                                     {includedPlanNames.length > 0 && (
                                         <span className="text-[10px] text-blue-100 mt-1 flex items-center gap-1">
                                             <Sparkles size={10} />

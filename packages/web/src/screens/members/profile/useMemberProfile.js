@@ -1,19 +1,20 @@
 import { useState, useEffect } from 'react';
 import { auth, db } from '../../../../../../packages/shared/api/firebaseConfig';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, onSnapshot } from 'firebase/firestore';
 import { updateProfile } from 'firebase/auth';
-import { signWaiver, getGymWaiver } from '../../../../../../packages/shared/api/firestore';
+import { signWaiver, getGymWaiver } from '../../../../../../packages/shared/api/firestore/gym'; // Adjusted import path
 import { useGym } from '../../../context/GymContext';
 import { useConfirm } from '../../../context/ConfirmationContext'; 
 
 export const useMemberProfile = () => {
-    const { currentGym, memberships } = useGym();
+    const { currentGym } = useGym(); // Removed 'memberships' from here
     const { confirm } = useConfirm(); 
     const [user, setUser] = useState(auth.currentUser);
     const [isEditing, setIsEditing] = useState(false);
     const [loading, setLoading] = useState(false);
     const [showWaiverModal, setShowWaiverModal] = useState(false);
     const [currentWaiverVersion, setCurrentWaiverVersion] = useState(1);
+    const [userMembership, setUserMembership] = useState(null); // State for the individual membership
     
     // Updated state to include Emergency Contact
     const [formData, setFormData] = useState({ 
@@ -44,6 +45,29 @@ export const useMemberProfile = () => {
     };
 
     const stripPhoneNumber = (value) => value ? value.replace(/[^\d]/g, '') : '';
+
+    // --- Real-time listener for the user's specific membership ---
+    useEffect(() => {
+        const currentUser = auth.currentUser;
+        if (!currentUser || !currentGym?.id) {
+            setUserMembership(null);
+            return;
+        }
+
+        const membershipRef = doc(db, 'users', currentUser.uid, 'memberships', currentGym.id);
+        const unsub = onSnapshot(membershipRef, (snap) => {
+            if (snap.exists()) {
+                setUserMembership({ id: snap.id, ...snap.data() });
+            } else {
+                setUserMembership(null);
+            }
+        }, (error) => {
+            console.error("Error fetching user membership in profile:", error);
+            setUserMembership(null);
+        });
+
+        return () => unsub();
+    }, [user, currentGym?.id]); // Depend on user and currentGym to refetch if they change
 
     useEffect(() => {
         const fetchUserData = async () => {
@@ -137,18 +161,19 @@ export const useMemberProfile = () => {
     };
 
     const handleWaiverSign = async () => {
-        if (user && currentGym) {
-            await signWaiver(user.uid, currentGym.id, currentWaiverVersion);
-            setShowWaiverModal(false);
-        }
-    };
+    if (user && currentGym) {
+        // ✅ Ensure currentWaiverVersion is passed here
+        await signWaiver(user.uid, currentGym.id, currentWaiverVersion);
+        setShowWaiverModal(false);
+    }
+};
 
     const getStatusDisplay = (status) => {
         const s = status?.toLowerCase();
         if (s === 'active') return { label: 'Active Member', color: 'bg-green-100 text-green-700 border-green-200' };
         if (s === 'trialing') return { label: 'Trial Period', color: 'bg-blue-100 text-blue-700 border-blue-200' };
         if (s === 'past_due') return { label: 'Payment Failed', color: 'bg-red-100 text-red-700 border-red-200' };
-        if (s === 'expired' || s === 'cancelled') return { label: 'Former Member', color: 'bg-orange-100 text-orange-700 border-orange-200' };
+        if (s === 'expired' || s === 'cancelled' || s === 'inactive') return { label: 'Former Member', color: 'bg-orange-100 text-orange-700 border-orange-200' }; // Added 'inactive'
         return { label: 'Free Member', color: 'bg-gray-100 text-gray-500 border-gray-200' };
     };
 
@@ -156,6 +181,6 @@ export const useMemberProfile = () => {
         user, formData, setFormData, isEditing, setIsEditing, loading,
         showWaiverModal, setShowWaiverModal, currentWaiverVersion,
         handleUpdateProfile, handleCancel, handleWaiverSign, formatPhoneNumber,
-        getStatusDisplay, currentGym, memberships, showSuccess
+        getStatusDisplay, currentGym, userMembership, showSuccess // Changed 'memberships' to 'userMembership'
     };
 };

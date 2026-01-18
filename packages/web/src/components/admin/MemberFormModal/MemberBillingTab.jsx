@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { CreditCard, Pencil, DollarSign, Tag, Coins, Plus, Minus, History, Save, X, ArrowRight, Calendar, RefreshCw, AlertCircle, XCircle } from 'lucide-react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
 import { auth, db } from '../../../../../shared/api/firebaseConfig';
-import { adjustUserCredits, getUserCreditHistory, adminCancelUserMembership, cancelUserMembership, getMembershipHistory, logMembershipHistory } from '../../../../../shared/api/firestore';
-import { useConfirm } from '../../../context/ConfirmationContext'; 
+import { adjustUserCredits, getUserCreditHistory, adminCancelUserMembership, cancelUserMembership, logMembershipHistory, getMembershipHistory } from '../../../../../shared/api/firestore';
+import { useConfirm } from '../../../context/ConfirmationContext';
 
 export const MemberBillingTab = ({
     formData,
@@ -13,43 +14,52 @@ export const MemberBillingTab = ({
     trialOverrideDays,
     setTrialOverrideDays,
     tiers,
-    memberData
+    memberData,
+    gymId
 }) => {
     const { confirm } = useConfirm();
-    const [liveData, setLiveData] = useState(null);
+    const [liveUserData, setLiveUserData] = useState(null);
+    const [currentMembership, setCurrentMembership] = useState(null); // ✅ Separate state
     const [isEditing, setIsEditing] = useState(false);
 
     // --- Real-time Data Listener ---
     useEffect(() => {
         if (!memberData?.id) return;
         const unsub = onSnapshot(doc(db, 'users', memberData.id), (doc) => {
-            setLiveData(doc.data());
+            setLiveUserData({ id: doc.id, ...doc.data() });
         });
         return () => unsub();
     }, [memberData?.id]);
 
-    // --- Derived State ---
-    const displayUser = liveData || memberData;
-    // Assuming the user's current membership is in the `memberships` array and scoped by their primary gymId
-    const currentMembership = (displayUser?.memberships || []).find(m => m.gymId === displayUser.gymId);
+    useEffect(() => {
+        if (!memberData?.id || !gymId) return;
+
+        const membershipRef = doc(db, 'users', memberData.id, 'memberships', gymId);
+        const unsub = onSnapshot(membershipRef, (snap) => {
+            if (snap.exists()) {
+                setCurrentMembership({ id: snap.id, ...snap.data() });
+            } else {
+                setCurrentMembership(null);
+            }
+        }, (error) => {
+            console.error("Error fetching membership:", error);
+            setCurrentMembership(null);
+        });
+
+        return () => unsub();
+    }, [memberData?.id, gymId]);
+
+    const displayUser = liveUserData || memberData;
     const hasMembership = !!(currentMembership && currentMembership.membershipId);
     const currentTier = hasMembership ? tiers.find(t => t.id === currentMembership.membershipId) : null;
-    const displayPlanName = currentMembership?.planName || currentTier?.name;
-    const userPrice = currentMembership?.assignedPrice ?? currentMembership?.price;
+    const displayPlanName = currentMembership?.membershipName || currentTier?.name;
+    const userPrice = currentMembership?.price;
 
-    useEffect(() => {
-        if (!hasMembership && !isEditing) {
-            setIsEditing(true);
-        }
-    }, [hasMembership, isEditing]);
-    
     // --- Current State Analysis ---
     const selectedPlan = tiers.find(t => t.id === formData.membershipId);
     const isSamePlan = currentMembership && currentMembership.membershipId === formData.membershipId;
     const showTrialOption = selectedPlan?.hasTrial && (!isSamePlan || currentMembership?.status === 'trialing');
 
-    // Determine effective price for display/logic
-    // If user is editing price, show that. If blank/new plan, show plan default.
     const displayPrice = customPrice !== '' ? customPrice : (selectedPlan?.price || '');
 
     const remainingTrialDays = useMemo(() => {
@@ -58,15 +68,14 @@ export const MemberBillingTab = ({
         }
         const trialEnd = currentMembership.trialEndDate.toDate ? currentMembership.trialEndDate.toDate() : new Date(currentMembership.trialEndDate);
         const today = new Date();
-        today.setHours(0,0,0,0);
+        today.setHours(0, 0, 0, 0);
         if (trialEnd < today) return 0;
-        
+
         const diffTime = trialEnd.getTime() - today.getTime();
         return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     }, [currentMembership]);
 
     useEffect(() => {
-        // This effect will run when the selected plan changes OR when the user's data loads.
         if (isEditing) {
             if (currentMembership?.status === 'trialing' && remainingTrialDays !== null) {
                 setTrialOverrideDays(String(remainingTrialDays));
@@ -78,18 +87,19 @@ export const MemberBillingTab = ({
         }
     }, [isEditing, selectedPlan, currentMembership, remainingTrialDays, setTrialOverrideDays]);
 
-    // --- Credits State (Existing) ---
+    // --- Credits State ---
     const [showCreditHistory, setShowCreditHistory] = useState(false);
     const [creditHistory, setCreditHistory] = useState([]);
-    const [pendingChange, setPendingChange] = useState(0); 
+    const [pendingChange, setPendingChange] = useState(0);
     const [adjustReason, setAdjustReason] = useState('');
     const [loadingCredits, setLoadingCredits] = useState(false);
     const [displayCredits, setDisplayCredits] = useState(displayUser?.classCredits || 0);
 
-    // --- Membership History State (New) ---
+    // --- Membership History State ---
     const [showMembershipHistory, setShowMembershipHistory] = useState(false);
     const [membershipHistory, setMembershipHistory] = useState([]);
     const [loadingMembershipHistory, setLoadingMembershipHistory] = useState(false);
+    const [debugInfo, setDebugInfo] = useState(null);
 
     useEffect(() => {
         if (displayUser?.classCredits !== undefined) {
@@ -104,22 +114,34 @@ export const MemberBillingTab = ({
         }
     };
 
-    const loadMembershipHistory = async () => {
-        if (displayUser?.id && currentMembership?.gymId) {
-            setLoadingMembershipHistory(true);
-            const res = await getMembershipHistory(displayUser.id, currentMembership.gymId);
-            if (res.success) {
-                setMembershipHistory(res.history);
-            }
-            setLoadingMembershipHistory(false);
-        }
-    };
-
     useEffect(() => {
-        if (showMembershipHistory) {
-            loadMembershipHistory();
-        }
-    }, [showMembershipHistory, displayUser?.id, currentMembership?.gymId]);
+        const loadMembershipHistory = async () => {
+            if (!showMembershipHistory || !displayUser?.id || !gymId) {
+                setMembershipHistory([]);
+                return;
+            }
+
+            setLoadingMembershipHistory(true);
+
+            try {
+                const result = await getMembershipHistory(displayUser.id, gymId);
+
+                if (result.success) {
+                    setMembershipHistory(result.history);
+                } else {
+                    console.error('[MemberBillingTab] Error fetching membership history:', result.error);
+                    setMembershipHistory([]);
+                }
+            } catch (error) {
+                console.error('[MemberBillingTab] Exception while fetching membership history:', error);
+                setMembershipHistory([]);
+            } finally {
+                setLoadingMembershipHistory(false);
+            }
+        };
+
+        loadMembershipHistory();
+    }, [showMembershipHistory, displayUser?.id, gymId]);
 
     useEffect(() => {
         if (showCreditHistory) loadHistory();
@@ -129,7 +151,6 @@ export const MemberBillingTab = ({
         if (!currentMembership) return;
         const priceToEdit = currentMembership.assignedPrice ?? currentMembership.price;
         setCustomPrice(priceToEdit !== undefined ? String(priceToEdit) : '');
-        // Sync form with current membership data
         const currentTier = tiers.find(t => t.id === currentMembership.membershipId);
         setFormData(prev => ({
             ...prev,
@@ -155,7 +176,6 @@ export const MemberBillingTab = ({
                 const result = await adminCancelUserMembership(displayUser.id, currentMembership.gymId);
                 if (result.success) {
                     await logMembershipHistory(displayUser.id, currentMembership.gymId, 'Membership cancelled immediately by admin.', adminId);
-                    if (showMembershipHistory) loadMembershipHistory();
                     setIsEditing(false);
                 } else {
                     alert(`Error: ${result.error}`);
@@ -174,7 +194,6 @@ export const MemberBillingTab = ({
                 const result = await cancelUserMembership(displayUser.id, currentMembership.gymId);
                 if (result.success) {
                     await logMembershipHistory(displayUser.id, currentMembership.gymId, 'Membership scheduled to cancel at end of period by admin.', adminId);
-                    if (showMembershipHistory) loadMembershipHistory();
                     setIsEditing(false);
                 } else {
                     alert(`Error: ${result.error}`);
@@ -194,22 +213,18 @@ export const MemberBillingTab = ({
             planName: plan ? plan.name : null,
             startDate: isNewAssignment ? new Date() : (prev.startDate || memberData?.startDate),
         }));
-        
-        // Auto-fill price if picking a new plan
+
         if (plan) setCustomPrice(plan.price);
         else setCustomPrice('');
     };
 
-    // --- DATE FORMATTER ---
     const formatDate = (dateVal) => {
         if (!dateVal) return 'N/A';
         const d = dateVal.toDate ? dateVal.toDate() : new Date(dateVal);
         return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
     };
 
-    // ... [Credit Handlers remain the same] ...
     const handleSaveCredits = async () => {
-        // ... (Keep existing implementation) ...
         if (!memberData?.id || pendingChange === 0) return;
         const finalBalance = displayCredits + pendingChange;
         const actionType = pendingChange > 0 ? "Add" : "Deduct";
@@ -227,7 +242,6 @@ export const MemberBillingTab = ({
         const reason = adjustReason.trim() || defaultReason;
         const result = await adjustUserCredits(displayUser.id, pendingChange, reason, adminId);
         if (result.success) {
-            // Data will refresh via onSnapshot, just reset form state
             setPendingChange(0);
             setAdjustReason('');
             if (showCreditHistory) loadHistory();
@@ -245,7 +259,7 @@ export const MemberBillingTab = ({
                 <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl p-5 text-white shadow-md relative overflow-hidden">
                     {/* Background Pattern */}
                     <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 blur-2xl"></div>
-                    
+
                     <button onClick={handleEditClick} className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 p-2 rounded-full text-white transition-colors z-20">
                         <Pencil size={16} />
                     </button>
@@ -258,10 +272,9 @@ export const MemberBillingTab = ({
                                 <span className="bg-white/10 px-2 py-0.5 rounded text-xs font-medium text-white/90">
                                     ${parseFloat(userPrice || 0).toFixed(2)}/{currentMembership.interval || 'mo'}
                                 </span>
-                                <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
-                                    currentMembership.status === 'active' ? 'bg-green-500 text-white' : 
+                                <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${currentMembership.status === 'active' ? 'bg-green-500 text-white' :
                                     currentMembership.status === 'trialing' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'
-                                }`}>
+                                    }`}>
                                     {currentMembership.status}
                                 </span>
                             </div>
@@ -277,12 +290,12 @@ export const MemberBillingTab = ({
                         </div>
                         <div>
                             <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5 flex items-center gap-1">
-                                {currentMembership.status === 'trialing' ? <RefreshCw size={10} /> : <RefreshCw size={10} />} 
+                                {currentMembership.status === 'trialing' ? <RefreshCw size={10} /> : <RefreshCw size={10} />}
                                 {currentMembership.status === 'trialing' ? 'Trial Ends' : 'Renews'}
                             </p>
                             <p className="text-sm font-medium">
-                                {currentMembership.status === 'trialing' 
-                                    ? formatDate(currentMembership.trialEndDate) 
+                                {currentMembership.status === 'trialing'
+                                    ? formatDate(currentMembership.trialEndDate)
                                     : 'Auto-Renew' // Or calculate next billing date if needed
                                 }
                             </p>
@@ -300,135 +313,138 @@ export const MemberBillingTab = ({
 
             {/* --- 2. EDIT SUBSCRIPTION FORM --- */}
             {(isEditing || !hasMembership) && (
-            <div>
-                <div className="flex items-center justify-between mb-2">
-                    <label className="block text-xs font-semibold text-gray-500 uppercase">
-                        {hasMembership ? 'Modify Subscription' : 'Assign Membership'}
-                    </label>
-                    {hasMembership && isEditing && (
-                        <button type="button" onClick={() => setIsEditing(false)} className="text-xs font-medium text-gray-500 hover:text-gray-800 underline">
-                            Cancel Edit
-                        </button>
-                    )}
-                </div>
-                
-                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-                    <div className="p-4 bg-gray-50 border-b border-gray-200">
-                        <div className="relative">
-                            <CreditCard className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                            <select
-                                value={formData.membershipId}
-                                onChange={handlePlanChange}
-                                className="w-full pl-9 p-2.5 border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
-                            >
-                                <option value="">-- No Membership --</option>
-                                {tiers.map(tier => (
-                                    <option key={tier.id} value={tier.id}>{tier.name} — ${tier.price}</option>
-                                ))}
-                            </select>
-                        </div>
+                <div>
+                    <div className="flex items-center justify-between mb-2">
+                        <label className="block text-xs font-semibold text-gray-500 uppercase">
+                            {hasMembership ? 'Modify Subscription' : 'Assign Membership'}
+                        </label>
+                        {hasMembership && isEditing && (
+                            <button type="button" onClick={() => setIsEditing(false)} className="text-xs font-medium text-gray-500 hover:text-gray-800 underline">
+                                Cancel Edit
+                            </button>
+                        )}
                     </div>
 
-                    {formData.membershipId && (
-                        <div className="p-4 space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Billing Rate</label>
-                                    <div className="relative">
-                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                            <span className="text-gray-500 font-bold">$</span>
-                                        </div>
-                                        <input
-                                            type="number"
-                                            value={customPrice}
-                                            onChange={e => setCustomPrice(e.target.value)}
-                                            className="w-full pl-7 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-medium text-gray-900"
-                                            placeholder={selectedPlan?.price || "0.00"}
-                                        />
-                                        <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                            <span className="text-gray-400 text-xs">/{selectedPlan?.interval || 'mo'}</span>
-                                        </div>
-                                    </div>
-                                    <p className="text-[10px] text-gray-400 mt-1">
-                                        Leave blank to use default (${selectedPlan?.price})
-                                    </p>
-                                </div>
-                                
-                                {/* Start Date Override (Optional Power Feature) */}
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Start Date</label>
-                                    <div className="relative">
-                                        <input
-                                            type="date"
-                                            value={formData.startDate ? new Date(formData.startDate).toISOString().split('T')[0] : ''}
-                                            onChange={(e) => setFormData({...formData, startDate: new Date(e.target.value)})}
-                                            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm text-gray-700"
-                                        />
-                                    </div>
-                                </div>
+                    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                        <div className="p-4 bg-gray-50 border-b border-gray-200">
+                            <div className="relative">
+                                <CreditCard className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                                <select
+                                    value={formData.membershipId}
+                                    onChange={handlePlanChange}
+                                    className="w-full pl-9 p-2.5 border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                                >
+                                    <option value="">-- No Membership --</option>
+                                    {tiers.map(tier => (
+                                        <option key={tier.id} value={tier.id}>{tier.name} — ${tier.price}</option>
+                                    ))}
+                                </select>
                             </div>
+                        </div>
 
-                            {/* Trial Override Input */}
-                            {showTrialOption && (
-                                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100">
+                        {formData.membershipId && (
+                            <div className="p-4 space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Trial Days</label>
+                                        <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Billing Rate</label>
                                         <div className="relative">
+                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                <span className="text-gray-500 font-bold">$</span>
+                                            </div>
                                             <input
                                                 type="number"
-                                                value={trialOverrideDays}
-                                                onChange={e => setTrialOverrideDays(e.target.value)}
-                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-medium text-gray-900"
-                                                placeholder={selectedPlan?.trialDays || "0"}
+                                                value={customPrice}
+                                                onChange={e => setCustomPrice(e.target.value)}
+                                                className="w-full pl-7 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-medium text-gray-900"
+                                                placeholder={selectedPlan?.price || "0.00"}
                                             />
                                             <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                                <span className="text-gray-400 text-xs">days</span>
+                                                <span className="text-gray-400 text-xs">/{selectedPlan?.interval || 'mo'}</span>
                                             </div>
                                         </div>
                                         <p className="text-[10px] text-gray-400 mt-1">
-                                            Set to 0 for immediate activation.
+                                            Leave blank to use default (${selectedPlan?.price})
                                         </p>
                                     </div>
-                                    <div className="bg-blue-50 rounded-lg p-3 border border-blue-100 h-full flex flex-col justify-center">
-                                        <h4 className="text-sm font-bold text-blue-900">
-                                            {Number(trialOverrideDays) > 0 ? 'Starts with Free Trial' : 'Immediate Activation'}
-                                        </h4>
-                                        <p className="text-xs text-blue-700 mt-0.5">
-                                            {Number(trialOverrideDays) > 0
-                                                ? `Billing starts ${new Date(Date.now() + (Number(trialOverrideDays) * 86400000)).toLocaleDateString()}.`
-                                                : `Billing will start on ${new Date().toLocaleDateString()}.`
-                                            }
-                                        </p>
+
+                                    {/* Start Date Override (Optional Power Feature) */}
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Start Date</label>
+                                        <div className="relative">
+                                            <input
+                                                type="date"
+                                                value={formData.startDate ? (() => {
+                                                    const d = formData.startDate.toDate ? formData.startDate.toDate() : new Date(formData.startDate);
+                                                    return d.toISOString().split('T')[0];
+                                                })() : ''}
+                                                onChange={(e) => setFormData({ ...formData, startDate: new Date(e.target.value) })}
+                                                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm text-gray-700"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                            )}
-                        </div>
-                    )}
 
-                    {/* Admin Cancellation Action */}
-                    {hasMembership && isEditing && (
-                        <div className="p-4 bg-red-50 border-t border-red-200">
-                            <label className="block text-xs font-semibold text-red-900 uppercase mb-2 text-center">Cancel Membership</label>
-                            <div className="grid grid-cols-2 gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => handleAdminCancel(false)}
-                                    className="w-full text-center p-2 rounded-lg text-xs font-bold transition-colors bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
-                                >
-                                    Cancel at End of Period
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => handleAdminCancel(true)}
-                                    className="w-full text-center p-2 rounded-lg text-xs font-bold transition-colors bg-red-100 text-red-700 hover:bg-red-200"
-                                >
-                                    Cancel Immediately
-                                </button>
+                                {/* Trial Override Input */}
+                                {showTrialOption && (
+                                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-100">
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Trial Days</label>
+                                            <div className="relative">
+                                                <input
+                                                    type="number"
+                                                    value={trialOverrideDays}
+                                                    onChange={e => setTrialOverrideDays(e.target.value)}
+                                                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-medium text-gray-900"
+                                                    placeholder={selectedPlan?.trialDays || "0"}
+                                                />
+                                                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                                                    <span className="text-gray-400 text-xs">days</span>
+                                                </div>
+                                            </div>
+                                            <p className="text-[10px] text-gray-400 mt-1">
+                                                Set to 0 for immediate activation.
+                                            </p>
+                                        </div>
+                                        <div className="bg-blue-50 rounded-lg p-3 border border-blue-100 h-full flex flex-col justify-center">
+                                            <h4 className="text-sm font-bold text-blue-900">
+                                                {Number(trialOverrideDays) > 0 ? 'Starts with Free Trial' : 'Immediate Activation'}
+                                            </h4>
+                                            <p className="text-xs text-blue-700 mt-0.5">
+                                                {Number(trialOverrideDays) > 0
+                                                    ? `Billing starts ${new Date(Date.now() + (Number(trialOverrideDays) * 86400000)).toLocaleDateString()}.`
+                                                    : `Billing will start on ${new Date().toLocaleDateString()}.`
+                                                }
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                        </div>
-                    )}
+                        )}
+
+                        {/* Admin Cancellation Action */}
+                        {hasMembership && isEditing && (
+                            <div className="p-4 bg-red-50 border-t border-red-200">
+                                <label className="block text-xs font-semibold text-red-900 uppercase mb-2 text-center">Cancel Membership</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleAdminCancel(false)}
+                                        className="w-full text-center p-2 rounded-lg text-xs font-bold transition-colors bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
+                                    >
+                                        Cancel at End of Period
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleAdminCancel(true)}
+                                        className="w-full text-center p-2 rounded-lg text-xs font-bold transition-colors bg-red-100 text-red-700 hover:bg-red-200"
+                                    >
+                                        Cancel Immediately
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
-            </div>
             )}
 
             {/* --- MEMBERSHIP HISTORY --- */}
@@ -459,7 +475,7 @@ export const MemberBillingTab = ({
                                     <div key={log.id} className="text-xs p-2.5 rounded-lg bg-gray-50 border border-gray-100">
                                         <p className="font-semibold text-gray-800">{log.description}</p>
                                         <span className="text-[10px] text-gray-500">
-                                            {log.createdAt ? new Date(log.createdAt.toDate()).toLocaleString([], {dateStyle:'short', timeStyle:'short'}) : 'Unknown Date'}
+                                            {log.createdAt ? new Date(log.createdAt.toDate()).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Unknown Date'}
                                         </span>
                                     </div>
                                 ))
@@ -476,7 +492,7 @@ export const MemberBillingTab = ({
                         <Coins size={18} className="text-orange-500" />
                         <span>Class Credits</span>
                     </div>
-                    <button 
+                    <button
                         type="button"
                         onClick={() => setShowCreditHistory(!showCreditHistory)}
                         className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
@@ -488,7 +504,7 @@ export const MemberBillingTab = ({
                 <div className="p-6">
                     {/* Stepper Control Row */}
                     <div className="flex items-center justify-center gap-6 select-none">
-                        <button 
+                        <button
                             type="button"
                             onClick={() => setPendingChange(prev => prev - 1)}
                             className="w-12 h-12 rounded-full bg-gray-100 hover:bg-red-50 text-gray-600 hover:text-red-600 flex items-center justify-center transition-colors active:scale-95"
@@ -505,7 +521,7 @@ export const MemberBillingTab = ({
                             </span>
                         </div>
 
-                        <button 
+                        <button
                             type="button"
                             onClick={() => setPendingChange(prev => prev + 1)}
                             className="w-12 h-12 rounded-full bg-gray-100 hover:bg-green-50 text-gray-600 hover:text-green-600 flex items-center justify-center transition-colors active:scale-95"
@@ -531,14 +547,14 @@ export const MemberBillingTab = ({
                             </div>
 
                             <div className="flex gap-2">
-                                <input 
-                                    type="text" 
+                                <input
+                                    type="text"
                                     placeholder="Reason (e.g., 'Refund for missed class')"
                                     value={adjustReason}
                                     onChange={(e) => setAdjustReason(e.target.value)}
                                     className="flex-1 text-sm p-2 border border-gray-300 rounded-lg outline-none focus:border-blue-500 bg-white"
                                 />
-                                <button 
+                                <button
                                     type="button"
                                     onClick={handleSaveCredits}
                                     disabled={loadingCredits}
@@ -563,12 +579,11 @@ export const MemberBillingTab = ({
                                             <div className="flex flex-col gap-0.5">
                                                 <span className="font-semibold text-gray-700">{log.description || log.type}</span>
                                                 <span className="text-[10px] text-gray-400">
-                                                    {log.date ? new Date(log.date.toDate()).toLocaleString([], {dateStyle:'short', timeStyle:'short'}) : 'Unknown Date'}
+                                                    {log.date ? new Date(log.date.toDate()).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Unknown Date'}
                                                 </span>
                                             </div>
-                                            <div className={`font-mono font-bold px-2 py-1 rounded ${
-                                                log.amount > 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'
-                                            }`}>
+                                            <div className={`font-mono font-bold px-2 py-1 rounded ${log.amount > 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'
+                                                }`}>
                                                 {log.amount > 0 ? '+' : ''}{log.amount}
                                             </div>
                                         </div>

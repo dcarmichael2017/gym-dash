@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Search, MapPin, ArrowRight, Loader2, X, ChevronLeft } from 'lucide-react';
 import { auth } from '../../../../../../packages/shared/api/firebaseConfig';
-import { searchGyms, joinGym } from '../../../../../../packages/shared/api/firestore';
+import { searchGyms } from '../../../../../../packages/shared/api/firestore';
+import { joinGym } from '../../../../../../packages/shared/api/firestore/members'; // Updated import path
 
 const GymSearch = ({ onCancel, onJoinSuccess }) => {
   const [isSearching, setIsSearching] = useState(false);

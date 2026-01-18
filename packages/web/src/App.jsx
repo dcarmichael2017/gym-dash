@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 
 // --- SHARED ---
 import { auth, db } from '../../../packages/shared/api/firebaseConfig';
@@ -54,33 +54,53 @@ import MemberGroupChatScreen from './screens/members/chat/GroupChatScreen';
 function App() {
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null);
+  const [hasGym, setHasGym] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // 1. GLOBAL AUTH LISTENER
   useEffect(() => {
-    console.log("[App] Effect mounted, listening for auth...");
+    let userUnsubscribe; // Variable to hold the Firestore listener
 
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    const authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        try {
-          const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-          if (userDoc.exists()) {
-            setRole(userDoc.data().role || 'member');
+        setUser(currentUser);
+        
+        // 2. REAL-TIME LISTENER
+        // Instead of fetching once, we subscribe to changes on the user document.
+        userUnsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setRole(data.role || 'member');
+            
+            // This will now auto-update to TRUE the moment they finish Step 1
+            setHasGym(!!data.gymId); 
           } else {
             setRole('member');
+            setHasGym(false);
           }
-          setUser(currentUser);
-        } catch (error) {
-          setRole('member');
-          setUser(currentUser);
-        }
+          setLoading(false); // Data is ready
+        }, (error) => {
+          console.error("User doc error:", error);
+          setLoading(false);
+        });
+
       } else {
+        // User logged out
         setUser(null);
         setRole(null);
+        setHasGym(false);
+        setLoading(false);
+        
+        // Clean up Firestore listener if it exists
+        if (userUnsubscribe) userUnsubscribe();
       }
-      setLoading(false);
     });
-    return () => unsubscribe();
+
+    // Cleanup function when App unmounts
+    return () => {
+      authUnsubscribe();
+      if (userUnsubscribe) userUnsubscribe();
+    };
   }, []);
 
   if (loading) {
@@ -135,27 +155,29 @@ function App() {
 
             {/* --- MEMBER ROUTES --- */}
             <Route path="/members" element={
-                user && role === 'member' ? (
-                    // WRAP ALL MEMBER ROUTES SO CART PERSISTS
-                    <StoreProvider>
-                        <MemberLayout />
-                    </StoreProvider>
-                ) : <Navigate to="/login" />
+              user && role === 'member' ? (
+                // WRAP ALL MEMBER ROUTES SO CART PERSISTS
+                <StoreProvider>
+                  <MemberLayout />
+                </StoreProvider>
+              ) : <Navigate to="/login" />
             }>
               <Route path="home" element={<MemberHomeScreen />} />
               <Route path="schedule" element={<MemberScheduleScreen />} />
               <Route path="profile" element={<MemberProfileScreen />} />
-              
+
               <Route path="community" element={<MemberCommunityFeedScreen />} />
               <Route path="chat" element={<MemberGroupChatScreen />} />
               <Route path="store" element={<StoreScreen />} />
-              
+
               <Route index element={<Navigate to="home" replace />} />
             </Route>
 
             {/* --- ROOT REDIRECT --- */}
             <Route path="/" element={
               !user ? <Navigate to="/login" /> :
+                // Now 'hasGym' will be TRUE immediately after onboarding, preventing the loop
+                (role === 'owner' && !hasGym) ? <Navigate to="/onboarding/step-1" /> :
                 (role === 'owner' || role === 'staff') ? <Navigate to="/admin" /> :
                   <Navigate to="/members/home" />
             } />

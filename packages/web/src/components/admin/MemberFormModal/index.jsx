@@ -14,6 +14,7 @@ import { MemberRankTab } from './MemberRankTab';
 import {
   addManualMember,
   updateMemberProfile,
+  updateMemberMembership,
   getMembershipTiers,
   getGymDetails,
   logMembershipHistory
@@ -127,182 +128,161 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
   }, [isOpen, memberData]);
 
   // --- 3. SUBMIT HANDLER ---
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+const handleSubmit = async (e) => {
+  e.preventDefault();
 
-    if (!formData.firstName || !formData.lastName || !formData.email) {
-      setActiveTab('profile');
-      alert("Please fill out First Name, Last Name, and Email.");
-      return;
-    }
+  if (!formData.firstName || !formData.lastName || !formData.email) {
+    setActiveTab('profile');
+    alert("Please fill out First Name, Last Name, and Email.");
+    return;
+  }
 
-    setLoading(true);
+  setLoading(true);
 
-    let finalPhotoUrl = formData.photoUrl;
-    if (photoFile) {
-      const uploadRes = await uploadStaffPhoto(gymId, photoFile);
-      if (uploadRes.success) finalPhotoUrl = uploadRes.url;
-    }
+  let finalPhotoUrl = formData.photoUrl;
+  if (photoFile) {
+    const uploadRes = await uploadStaffPhoto(gymId, photoFile);
+    if (uploadRes.success) finalPhotoUrl = uploadRes.url;
+  }
 
-    const selectedPlan = tiers.find(t => t.id === formData.membershipId);
-    const finalPrice = customPrice !== '' ? Number(customPrice) : (selectedPlan ? Number(selectedPlan.price) : 0);
-    let subscriptionStatus = null;
-    let trialEndDate = null;
-    // If admin explicitly set a start date in the UI (add this field to formData if not present), use it.
-    // Otherwise, default to NOW.
-    let startDate = formData.startDate ? new Date(formData.startDate) : new Date();
+  const selectedPlan = tiers.find(t => t.id === formData.membershipId);
+  const finalPrice = customPrice !== '' ? Number(customPrice) : (selectedPlan ? Number(selectedPlan.price) : 0);
+  let subscriptionStatus = null;
+  let trialEndDate = null;
+  let startDate = formData.startDate ? new Date(formData.startDate) : new Date();
 
-    const isSamePlan = memberData && memberData.membershipId === formData.membershipId;
-
-    // --- STATUS LOGIC ---
-    if (!formData.membershipId) {
-      subscriptionStatus = 'prospect'; 
+  // --- STATUS LOGIC ---
+  if (!formData.membershipId) {
+    subscriptionStatus = 'prospect'; 
+    trialEndDate = null;
+  } else {
+    const trialDays = Number(trialOverrideDays) || 0;
+    if (selectedPlan?.hasTrial && trialDays > 0) {
+      subscriptionStatus = 'trialing';
+      const tDate = new Date(startDate);
+      tDate.setDate(tDate.getDate() + trialDays);
+      trialEndDate = tDate;
+    } else {
+      subscriptionStatus = 'active';
       trialEndDate = null;
-      startDate = null; 
+    }
+  }
+
+  const fullName = `${formData.firstName.trim()} ${formData.lastName.trim()}`;
+
+  // Build change log
+  const oldMembership = memberData?.currentMembership;
+  const isNewMember = !memberData;
+  const changes = [];
+
+  if (isNewMember && formData.membershipId) {
+    changes.push(`Assigned '${selectedPlan?.name}' plan.`);
+  } else if (!isNewMember && formData.membershipId !== (oldMembership?.membershipId || null)) {
+    const newPlanName = selectedPlan?.name || 'No Plan';
+    if (!oldMembership?.membershipId) {
+      changes.push(`Assigned '${newPlanName}' plan.`);
     } else {
-      const trialDays = Number(trialOverrideDays) || 0;
-      if (selectedPlan?.hasTrial && trialDays > 0) {
-        subscriptionStatus = 'trialing';
-        // Calculate Trial End Date based on the form's start date
-        const tDate = new Date(startDate);
-        tDate.setDate(tDate.getDate() + trialDays);
-        trialEndDate = tDate;
-      } else {
-        subscriptionStatus = 'active';
-        trialEndDate = null;
-      }
+      const oldPlan = tiers.find(t => t.id === oldMembership.membershipId);
+      changes.push(`Plan changed from '${oldPlan?.name}' to '${newPlanName}'.`);
     }
+  }
 
-    const fullName = `${formData.firstName.trim()} ${formData.lastName.trim()}`;
-
-    const changes = [];
-    const oldMembership = memberData ? (memberData.memberships || []).find(m => m.gymId === gymId) : null;
-    const isNewMember = !memberData;
-
-    if (isNewMember && formData.membershipId) {
-        changes.push(`Assigned '${selectedPlan?.name}' plan.`);
-    } else if (!isNewMember && formData.membershipId !== (oldMembership?.membershipId || null)) {
-        const newPlanName = selectedPlan?.name || 'No Plan';
-        if (!oldMembership?.membershipId) {
-            changes.push(`Assigned '${newPlanName}' plan.`);
-        } else {
-            const oldPlan = tiers.find(t => t.id === oldMembership.membershipId);
-            changes.push(`Plan changed from '${oldPlan?.name}' to '${newPlanName}'.`);
-        }
+  if (!isNewMember && oldMembership && formData.membershipId === oldMembership.membershipId) {
+    const oldPrice = oldMembership.assignedPrice ?? oldMembership.price;
+    if (finalPrice !== oldPrice) {
+      changes.push(`Price adjusted to $${finalPrice.toFixed(2)}.`);
     }
-
-    const finalPriceForLog = customPrice !== '' ? Number(customPrice) : (selectedPlan ? Number(selectedPlan.price) : 0);
-    if (!isNewMember && oldMembership && formData.membershipId === oldMembership.membershipId) {
-        const oldPrice = oldMembership.assignedPrice ?? oldMembership.price;
-        if (finalPriceForLog !== oldPrice) {
-            changes.push(`Price adjusted to $${finalPriceForLog.toFixed(2)}.`);
-        }
+  }
+  
+  if (subscriptionStatus === 'trialing') {
+    const trialDays = Number(trialOverrideDays);
+    if (isNewMember || oldMembership?.status !== 'trialing') {
+      changes.push(`${changes.length > 0 ? 'with' : 'Started'} a ${trialDays}-day trial.`);
     }
-    
-    if (subscriptionStatus === 'trialing') {
-        const trialDays = Number(trialOverrideDays);
-        if (isNewMember || oldMembership?.status !== 'trialing') {
-            if (changes.length > 0) {
-                changes.push(`with a ${trialDays}-day trial.`);
-            } else {
-                changes.push(`Started a ${trialDays}-day trial.`);
-            }
-        } else { // Already in trial, check if days changed
-            const oldTrialEnd = oldMembership.trialEndDate ? new Date(oldMembership.trialEndDate) : null;
-            if (oldTrialEnd) {
-                const today = new Date();
-                today.setHours(0,0,0,0);
-                if (oldTrialEnd >= today) {
-                    const diffTime = oldTrialEnd.getTime() - today.getTime();
-                    const oldRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                    if (trialDays !== oldRemaining) {
-                        changes.push(`Trial period adjusted to ${trialDays} days remaining.`);
-                    }
-                }
-            }
-        }
-    }
-    const logDescription = changes.join(' ');
+  }
 
-    // --- CRITICAL CHANGE: CONSTRUCT MEMBERSHIPS ARRAY ---
-    // 1. Get existing memberships (to preserve other gyms)
-    let currentMemberships = memberData?.memberships || [];
+  let logDescription = changes.join(' ');
+  if (!isNewMember && logDescription.trim() === '') {
+    logDescription = 'Membership details updated by admin.';
+  }
 
-    // 2. Define the membership object for THIS gym
-    // This matches what checkBookingEligibility looks for
-    const gymMembershipData = {
-      gymId: gymId,
-      membershipId: formData.membershipId || null,
-      membershipName: selectedPlan ? selectedPlan.name : null,
-      status: subscriptionStatus,
-      price: finalPrice,
-      interval: selectedPlan ? selectedPlan.interval : 'month', // ✅ Save Interval
-      
-      // ✅ Save Dates (ISO Strings are safer for Firestore)
-      startDate: startDate ? startDate.toISOString() : null,
-      trialEndDate: trialEndDate ? trialEndDate.toISOString() : null,
-      
-      updatedAt: new Date().toISOString()
-    };
-
-    // 3. Update existing entry OR push new one
-    const existingIndex = currentMemberships.findIndex(m => m.gymId === gymId);
-    if (existingIndex >= 0) {
-      // Merge with existing to keep things like waiverSigned, waiverVersion
-      currentMemberships[existingIndex] = {
-        ...currentMemberships[existingIndex],
-        ...gymMembershipData
-      };
-    } else {
-      currentMemberships.push(gymMembershipData);
-    }
-
-    const payload = {
-      ...formData,
-      firstName: formData.firstName.trim(),
-      lastName: formData.lastName.trim(),
-      name: fullName,
-      searchName: fullName.toLowerCase(),
-      emergencyName: formData.emergencyName?.trim() || '',
-      emergencyPhone: formData.emergencyPhone?.replace(/[^\d]/g, '') || '',
-
-      // Keep root level sync for easy access
-      status: subscriptionStatus,
-      membershipId: formData.membershipId,
-      membershipName: selectedPlan ? selectedPlan.name : null,
-      
-      // ✅ Sync root level dates too (optional but helpful for some queries)
-      startDate: startDate ? startDate.toISOString() : null,
-      trialEndDate: trialEndDate ? trialEndDate.toISOString() : null,
-
-      memberships: currentMemberships,
-
-      programId: null, rankId: null, stripes: null, rankCredits: null
-    };
-
-    const isBecomingActive = subscriptionStatus === 'active';
-    const wasNotActive = !memberData || (memberData.status !== 'active');
-    if (isBecomingActive && wasNotActive) {
-      payload.convertedAt = new Date();
-    }
-
-    let result;
-    if (memberData) {
-      result = await updateMemberProfile(memberData.id, payload);
-    } else {
-      result = await addManualMember(gymId, payload);
-    }
-
-    if (result.success && logDescription) {
-        const adminId = auth.currentUser?.uid;
-        const userId = memberData ? memberData.id : result.member.id;
-        await logMembershipHistory(userId, gymId, logDescription, adminId);
-    }
-
-    setLoading(false);
-    if (result.success) { onSave(); onClose(); }
-    else { alert("Error: " + result.error); }
+  // ✅ FIXED: Separate user profile data from membership data
+  const userProfilePayload = {
+    firstName: formData.firstName.trim(),
+    lastName: formData.lastName.trim(),
+    name: fullName,
+    searchName: fullName.toLowerCase(),
+    email: formData.email,
+    phoneNumber: formData.phoneNumber,
+    emergencyName: formData.emergencyName?.trim() || '',
+    emergencyPhone: formData.emergencyPhone?.replace(/[^\d]/g, '') || '',
+    photoUrl: finalPhotoUrl,
+    ranks: formData.ranks
   };
+
+  // ✅ FIXED: Membership data goes to SUBCOLLECTION
+  const membershipPayload = {
+    membershipId: formData.membershipId || null,
+    membershipName: selectedPlan?.name || null,
+    status: subscriptionStatus,
+    price: finalPrice,
+    interval: selectedPlan?.interval || 'month',
+    startDate: startDate,
+    trialEndDate: trialEndDate,
+    cancelAtPeriodEnd: false,
+    updatedAt: new Date()
+  };
+
+  // Only set gymId/gymName on creation or if missing
+  if (isNewMember || !oldMembership) {
+    const gymRes = await getGymDetails(gymId);
+    membershipPayload.gymId = gymId;
+    membershipPayload.gymName = gymRes.success ? gymRes.gym.name : '';
+    membershipPayload.joinedAt = new Date();
+    membershipPayload.createdAt = new Date();
+  }
+
+  let result;
+  try {
+    if (memberData) {
+      // ✅ UPDATE EXISTING MEMBER
+      // 1. Update user profile
+      await updateMemberProfile(memberData.id, userProfilePayload);
+      
+      // 2. Update membership subcollection
+      await updateMemberMembership(memberData.id, gymId, membershipPayload);
+      
+      result = { success: true };
+    } else {
+      // ✅ CREATE NEW MEMBER
+      result = await addManualMember(gymId, {
+        ...userProfilePayload,
+        ...membershipPayload
+      });
+    }
+
+    // Log changes
+    if (result.success && logDescription.trim()) {
+      const adminId = auth.currentUser?.uid;
+      const userId = memberData ? memberData.id : result.member.id;
+      await logMembershipHistory(userId, gymId, logDescription, adminId);
+    }
+
+  } catch (error) {
+    console.error("Error saving member:", error);
+    result = { success: false, error: error.message };
+  }
+
+  setLoading(false);
+  if (result.success) {
+    onSave();
+    if (!memberData) {
+      onClose();
+    }
+  } else {
+    alert("Error: " + result.error);
+  }
+};
 
   if (!isOpen) return null;
 
@@ -374,6 +354,7 @@ export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, al
                 <MemberBillingTab
                   formData={formData} setFormData={setFormData} customPrice={customPrice} setCustomPrice={setCustomPrice}
                   trialOverrideDays={trialOverrideDays} setTrialOverrideDays={setTrialOverrideDays} tiers={tiers} memberData={memberData}
+                  gymId={gymId}
                 />
               )}
 

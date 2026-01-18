@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 
 import { auth, db } from '../../../../shared/api/firebaseConfig';
-import { getGymMembers, deleteMember, archiveMember } from '../../../../shared/api/firestore';
+import { getGymMembers, deleteMember, archiveMember, runPermissionDiagnostics } from '../../../../shared/api/firestore';
 import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 
 // --- UPDATE THIS IMPORT ---
@@ -51,14 +51,40 @@ const DashboardMembersScreen = () => {
   };
 
   const fetchMembers = async (gId) => {
-    const result = await getGymMembers(gId);
-    if (result.success) {
-      setMembers(result.members);
-      // Refresh current modal data if open
-      if (selectedMember) {
-        const freshProfile = result.members.find(m => m.id === selectedMember.id);
-        if (freshProfile) setSelectedMember(freshProfile);
-      }
+    console.log(`[Dashboard] Fetching members for Gym ID: ${gId}`);
+    setLoading(true); // Ensure loading state is triggered
+    
+    try {
+        const result = await getGymMembers(gId);
+        
+        console.log(`[Dashboard] API Result Success:`, result.success);
+
+        if (result.success) {
+            console.log(`[Dashboard] Raw Members Found: ${result.members.length}`);
+            
+            // Log the raw data to see if your new member exists here
+            if (result.members.length > 0) {
+                console.log(`[Dashboard] First Member Sample:`, result.members[0]);
+                // Check if specific member exists (replace 'Name' with the name you are looking for)
+                // console.log("[Dashboard] specific check:", result.members.find(m => m.firstName === 'Name'))
+            } else {
+                console.warn("[Dashboard] No members returned from API.");
+            }
+
+            setMembers(result.members);
+            
+            // Refresh current modal data if open
+            if (selectedMember) {
+                const freshProfile = result.members.find(m => m.id === selectedMember.id);
+                if (freshProfile) setSelectedMember(freshProfile);
+            }
+        } else {
+            console.error(`[Dashboard] API Error:`, result.error);
+        }
+    } catch (e) {
+        console.error(`[Dashboard] Critical Fetch Error:`, e);
+    } finally {
+        setLoading(false);
     }
   };
 
@@ -215,6 +241,7 @@ const DashboardMembersScreen = () => {
                 <MemberTableRow 
                     key={member.id} 
                     member={member} 
+                    gymId={gymId}
                     allMembers={members} 
                     onEdit={handleEdit} 
                     onDelete={handleDeleteClick} 
