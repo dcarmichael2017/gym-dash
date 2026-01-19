@@ -267,18 +267,92 @@ export const updateMemberProfile = async (memberId, data) => {
   }
 };
 
-export const archiveMember = async (memberId, churnReason = "Unknown") => {
+export const archiveMember = async (memberId, gymId, churnReason = "Unknown") => {
   try {
-    const memberRef = doc(db, "users", memberId);
-    await updateDoc(memberRef, {
-      status: 'archived',
+    // ✅ FIX: Update per-gym membership status instead of global status
+    const membershipRef = doc(db, "users", memberId, "memberships", gymId);
+    await updateDoc(membershipRef, {
+      status: 'inactive',
       canceledAt: new Date(),
-      churnReason: churnReason
+      churnReason: churnReason,
+      updatedAt: new Date()
     });
+
+    // Log the change
+    await logMembershipHistory(
+      memberId,
+      gymId,
+      `Membership archived: ${churnReason}`,
+      auth.currentUser?.uid || 'system'
+    );
+
     return { success: true };
   } catch (error) {
     console.error("Error archiving member:", error);
     return { success: false, error: error.message };
+  }
+};
+
+export const reactivateMember = async (memberId, gymId) => {
+  try {
+    const membershipRef = doc(db, "users", memberId, "memberships", gymId);
+    const membershipSnap = await getDoc(membershipRef);
+
+    if (!membershipSnap.exists()) {
+      return { success: false, error: "Membership not found" };
+    }
+
+    // Reactivate the membership by setting status to active
+    await updateDoc(membershipRef, {
+      status: 'active',
+      canceledAt: null,
+      churnReason: null,
+      updatedAt: new Date()
+    });
+
+    // Log the reactivation
+    await logMembershipHistory(
+      memberId,
+      gymId,
+      'Membership reactivated by admin.',
+      auth.currentUser?.uid || 'system'
+    );
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error reactivating member:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const getMemberFutureBookings = async (gymId, memberId) => {
+  try {
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    const attRef = collection(db, "gyms", gymId, "attendance");
+    const q = query(
+      attRef,
+      where("memberId", "==", memberId),
+      where("dateString", ">=", todayStr),
+      where("status", "in", ["booked", "waitlisted"])
+    );
+
+    const snapshot = await getDocs(q);
+    const bookings = [];
+
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      bookings.push({
+        id: doc.id,
+        ...data
+      });
+    });
+
+    return { success: true, bookings };
+  } catch (error) {
+    console.error("Error getting member future bookings:", error);
+    return { success: false, error: error.message, bookings: [] };
   }
 };
 
@@ -469,18 +543,25 @@ export const searchMembersForBooking = async (gymId, searchTerm) => {
 export const updateMemberMembership = async (userId, gymId, membershipData) => {
   try {
     const membershipRef = doc(db, 'users', userId, 'memberships', gymId);
-    
-    const updates = {
+
+    // Filter out undefined values and prepare updates
+    const updates = Object.entries({
       ...membershipData,
       updatedAt: new Date()
-    };
-    
+    }).reduce((acc, [key, value]) => {
+      // Only include defined values (null is allowed for clearing fields)
+      if (value !== undefined) {
+        acc[key] = value;
+      }
+      return acc;
+    }, {});
+
     await updateDoc(membershipRef, updates);
-    
+
     // Log the change
     const description = `Membership updated: ${Object.keys(membershipData).join(', ')}`;
     await logMembershipHistory(userId, gymId, description, auth.currentUser?.uid || 'system');
-    
+
     return { success: true };
   } catch (error) {
     console.error("Error updating membership:", error);

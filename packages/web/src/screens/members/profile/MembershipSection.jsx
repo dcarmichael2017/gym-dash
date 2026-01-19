@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CreditCard, ChevronRight, Calendar, DollarSign, RefreshCw, Clock, XCircle, Bug } from 'lucide-react';
+import { CreditCard, ChevronRight, Calendar, DollarSign, RefreshCw, Clock, XCircle, Bug, AlertCircle } from 'lucide-react';
 import { useConfirm } from '../../../context/ConfirmationContext';
 import { doc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
 import { getMembershipTiers, cancelUserMembership, logMembershipHistory, runPermissionDiagnostics } from '../../../../../shared/api/firestore';
@@ -101,10 +101,15 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
 
   const getStatusDisplay = (status) => {
     switch (status?.toLowerCase()) {
-      case 'active': return { label: 'Active', color: 'text-green-700 bg-green-50 border-green-200' };
-      case 'trialing': return { label: 'Free Trial', color: 'text-blue-700 bg-blue-50 border-blue-200' };
-      case 'past_due': return { label: 'Past Due', color: 'text-red-700 bg-red-50 border-red-200' };
-      default: return { label: 'Inactive', color: 'text-gray-500 bg-gray-50 border-gray-200' };
+      case 'active': return { label: 'Active', color: 'text-green-700 bg-green-50 border-green-200', tooltip: null };
+      case 'trialing': return { label: 'Free Trial', color: 'text-blue-700 bg-blue-50 border-blue-200', tooltip: null };
+      case 'past_due': return { label: 'Past Due', color: 'text-red-700 bg-red-50 border-red-200', tooltip: null };
+      case 'inactive': return {
+        label: 'Inactive',
+        color: 'text-red-700 bg-red-50 border-red-200',
+        tooltip: 'Your gym access has been disabled by the gym administrator. Please contact the gym owner or staff for assistance.'
+      };
+      default: return { label: 'Inactive', color: 'text-gray-500 bg-gray-50 border-gray-200', tooltip: null };
     }
   };
 
@@ -209,6 +214,19 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
             </div>
           )}
         </div>
+
+        {/* Inactive Status Alert */}
+        {statusDisplay.tooltip && (
+          <div className="p-4 bg-red-50 border-b border-red-100">
+            <div className="flex items-start gap-2">
+              <AlertCircle size={16} className="text-red-600 mt-0.5 shrink-0" />
+              <div className="text-xs text-red-900">
+                <p className="font-bold mb-1">Access Disabled</p>
+                <p>{statusDisplay.tooltip}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Dates Grid */}
         {liveMembership && (

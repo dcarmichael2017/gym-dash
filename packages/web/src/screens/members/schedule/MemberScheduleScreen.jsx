@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, List, Loader2, ChevronLeft, ChevronRight, Coins } from 'lucide-react';
+import { Calendar, List, Loader2, ChevronLeft, ChevronRight, Coins, XCircle, AlertCircle } from 'lucide-react';
 import { useGym } from '../../../context/GymContext';
 import { auth, db } from '../../../../../../packages/shared/api/firebaseConfig';
 import { 
@@ -17,6 +17,10 @@ import BookingModal from './BookingModal';
 const MemberScheduleScreen = () => {
   const { currentGym, memberships, credits } = useGym(); // ✅ Get credits from context
   const theme = currentGym?.theme || { primaryColor: '#2563eb', secondaryColor: '#4f46e5' };
+
+  // Check if current member is inactive
+  const currentMembership = memberships?.find(m => m.gymId === currentGym?.id);
+  const isInactive = currentMembership?.status === 'inactive';
 
   const [viewMode, setViewMode] = useState('list');
   const [loading, setLoading] = useState(true);
@@ -156,6 +160,36 @@ const MemberScheduleScreen = () => {
   };
 
   if (loading && classes.length === 0) return <div className="flex justify-center p-10"><Loader2 className="animate-spin text-gray-400" /></div>;
+
+  // Show inactive message if member is inactive
+  if (isInactive) {
+    return (
+      <div className="pb-24 safe-top">
+        <div className="sticky top-0 bg-white z-30 px-6 py-4 border-b border-gray-100 shadow-sm">
+          <h1 className="text-2xl font-bold text-gray-900">Schedule</h1>
+        </div>
+        <div className="p-6 flex items-center justify-center min-h-[80vh]">
+          <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-8 shadow-md max-w-md border-2 border-red-200">
+            <div className="flex flex-col items-center text-center">
+              <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mb-4">
+                <XCircle size={32} className="text-red-600" />
+              </div>
+              <h2 className="text-xl font-bold text-gray-900 mb-2">Schedule Unavailable</h2>
+              <p className="text-sm text-gray-700 mb-4">
+                Your membership has been disabled by the gym administrator. You cannot view or book classes at this time.
+              </p>
+              <div className="bg-white/60 border border-red-200 rounded-lg p-4 flex items-start gap-2">
+                <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-red-900 text-left">
+                  Please contact the gym owner or staff to restore access to your account.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="pb-24 safe-top">

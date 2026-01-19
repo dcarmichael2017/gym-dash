@@ -6,7 +6,7 @@ import { useGym } from '../../../context/GymContext';
 import { signWaiver, getGymWaiver } from '../../../../../../packages/shared/api/firestore/gym';
 import { disconnectGym } from '../../../../../../packages/shared/api/firestore/members';
 import { getMemberAttendanceHistory } from '../../../../../../packages/shared/api/firestore/bookings';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
 
 // --- SUB-COMPONENTS ---
 import MembershipOffers from './MembershipOffers';
@@ -40,6 +40,9 @@ const MemberHomeScreen = () => {
     const [selectedProgram, setSelectedProgram] = useState('');
     const [selectedClass, setSelectedClass] = useState('');
 
+    // --- CHAT UNREAD COUNT STATE ---
+    const [totalUnreadCount, setTotalUnreadCount] = useState(0);
+
     // Derived state
     const theme = currentGym?.theme || { primaryColor: '#2563eb', secondaryColor: '#4f46e5' };
     const currentMembership = memberships?.find(m => m.gymId === currentGym?.id);
@@ -50,6 +53,8 @@ const MemberHomeScreen = () => {
 
     const isActiveMember = currentMembership?.status === 'active' ||
         currentMembership?.status === 'trialing';
+
+    const isInactiveMember = currentMembership?.status === 'inactive';
 
     // --- HELPERS FOR STATUS UI ---
     const getDisplayName = (status) => {
@@ -137,6 +142,50 @@ const MemberHomeScreen = () => {
         // Cleanup listener when gym changes or component unmounts
         return () => unsubscribe();
     }, [currentGym?.id]);
+
+    // --- EFFECT: SUBSCRIBE TO CHAT GROUPS FOR UNREAD COUNT ---
+    useEffect(() => {
+        if (!currentGym?.id || !user?.uid) {
+            setTotalUnreadCount(0);
+            return;
+        }
+
+        const chatGroupsRef = collection(db, "gyms", currentGym.id, "chatGroups");
+        const q = query(
+            chatGroupsRef,
+            where(`members.${user.uid}`, "==", true),
+            orderBy("updatedAt", "desc")
+        );
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            let unread = 0;
+            snapshot.docs.forEach(doc => {
+                const group = doc.data();
+                const lastReadAt = group.lastReadAt?.[user.uid];
+                const lastMessageAt = group.lastMessageAt;
+
+                if (!lastMessageAt) return;
+                if (!lastReadAt) {
+                    // Never read, count as 1 unread per group
+                    unread++;
+                    return;
+                }
+
+                const lastReadTime = lastReadAt.toDate ? lastReadAt.toDate() : new Date(lastReadAt);
+                const lastMsgTime = lastMessageAt.toDate ? lastMessageAt.toDate() : new Date(lastMessageAt);
+
+                if (lastMsgTime > lastReadTime) {
+                    unread++;
+                }
+            });
+            setTotalUnreadCount(unread);
+        }, (error) => {
+            console.warn("Chat groups subscription error:", error.message);
+            setTotalUnreadCount(0);
+        });
+
+        return () => unsubscribe();
+    }, [currentGym?.id, user?.uid]);
 
     // --- Filtering Logic for History Modal ---
     const programs = currentGym?.grading?.programs || [];
@@ -383,42 +432,59 @@ const MemberHomeScreen = () => {
 
             <NextClassCard hasActiveMembership={isActiveMember} />
 
-            <StatsOverView
-                user={userDoc}
-                gym={currentGym}
-                attendanceHistory={attendanceHistory}
-                loading={loading}
-                onClick={() => setShowHistoryModal(true)}
-            />
+            {/* Hide StatsOverView for inactive members */}
+            {!isInactiveMember && (
+                <StatsOverView
+                    user={userDoc}
+                    gym={currentGym}
+                    attendanceHistory={attendanceHistory}
+                    loading={loading}
+                    onClick={() => setShowHistoryModal(true)}
+                />
+            )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Community Feed Widget */}
-                <Link to="/members/community" className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-start gap-4 hover:bg-gray-50 transition-colors">
-                    <div className="bg-orange-100 p-3 rounded-full">
-                        <Users className="text-orange-600" size={20} />
-                    </div>
-                    <div>
-                        <p className="font-bold text-gray-800">Community Feed</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                            Latest: Great job to everyone who competed this weekend!
-                        </p>
-                    </div>
-                </Link>
+            {/* Hide Community/Chat widgets for inactive members */}
+            {!isInactiveMember && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Community Feed Widget */}
+                    <Link to="/members/community" className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-start gap-4 hover:bg-gray-50 transition-colors">
+                        <div className="bg-orange-100 p-3 rounded-full">
+                            <Users className="text-orange-600" size={20} />
+                        </div>
+                        <div>
+                            <p className="font-bold text-gray-800">Community Feed</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                                Latest: Great job to everyone who competed this weekend!
+                            </p>
+                        </div>
+                    </Link>
 
-                {/* Group Chat Widget */}
-                <Link to="/members/chat" className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-start gap-4 hover:bg-gray-50 transition-colors">
-                    <div className="bg-purple-100 p-3 rounded-full">
-                        <MessageSquare className="text-purple-600" size={20} />
-                    </div>
-                    <div>
-                        <p className="font-bold text-gray-800">Group Chat</p>
-                        <p className="text-xs text-gray-500 mt-1 flex items-center gap-1.5">
-                            <span className="h-2 w-2 rounded-full bg-red-500"></span>
-                            1 unread message
-                        </p>
-                    </div>
-                </Link>
-            </div>
+                    {/* Group Chat Widget */}
+                    <Link to="/members/chat" className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-start gap-4 hover:bg-gray-50 transition-colors">
+                        <div className="bg-purple-100 p-3 rounded-full relative">
+                            <MessageSquare className="text-purple-600" size={20} />
+                            {totalUnreadCount > 0 && (
+                                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                                    {totalUnreadCount > 10 ? '10+' : totalUnreadCount}
+                                </span>
+                            )}
+                        </div>
+                        <div>
+                            <p className="font-bold text-gray-800">Group Chat</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                                {totalUnreadCount > 0 ? (
+                                    <span className="flex items-center gap-1.5">
+                                        <span className="h-2 w-2 rounded-full bg-red-500"></span>
+                                        {totalUnreadCount > 10 ? '10+' : totalUnreadCount} unread message{totalUnreadCount !== 1 ? 's' : ''}
+                                    </span>
+                                ) : (
+                                    'View your group conversations'
+                                )}
+                            </p>
+                        </div>
+                    </Link>
+                </div>
+            )}
 
             {isFreeMember && (
                 <MembershipOffers />

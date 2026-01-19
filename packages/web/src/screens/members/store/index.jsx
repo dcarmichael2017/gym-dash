@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingBag, Shirt, Ticket, Dumbbell, ChevronRight, Loader2 } from 'lucide-react';
+import { ShoppingBag, Shirt, Ticket, Dumbbell, ChevronRight, Loader2, XCircle, AlertCircle } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom'; // Added useLocation
 import { useStore } from './StoreContext';
 import { ProductDetailModal } from './ProductDetailModal';
@@ -59,6 +59,10 @@ export const StoreScreen = () => {
     const { currentGym, memberships } = useGym();
     const { cartCount, setIsCartOpen } = useStore();
     const theme = currentGym?.theme || { primaryColor: '#2563eb' };
+
+    // Check if current member is inactive
+    const currentMembership = memberships?.find(m => m.gymId === currentGym?.id);
+    const isInactive = currentMembership?.status === 'inactive';
 
     // State
     const [activeCategory, setActiveCategory] = useState('all');
@@ -150,13 +154,43 @@ export const StoreScreen = () => {
         );
     };
 
+    // Show inactive message if member is inactive
+    if (isInactive) {
+        return (
+            <div className="min-h-screen bg-gray-50 pb-24 relative">
+                <div className="bg-white sticky top-0 z-10 border-b border-gray-100 shadow-sm px-6 py-4">
+                    <h1 className="text-xl font-bold text-gray-900">Pro Shop</h1>
+                </div>
+                <div className="p-6 flex items-center justify-center min-h-[80vh]">
+                    <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-8 shadow-md max-w-md border-2 border-red-200">
+                        <div className="flex flex-col items-center text-center">
+                            <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mb-4">
+                                <XCircle size={32} className="text-red-600" />
+                            </div>
+                            <h2 className="text-xl font-bold text-gray-900 mb-2">Store Unavailable</h2>
+                            <p className="text-sm text-gray-700 mb-4">
+                                Your membership has been disabled by the gym administrator. You cannot purchase items at this time.
+                            </p>
+                            <div className="bg-white/60 border border-red-200 rounded-lg p-4 flex items-start gap-2">
+                                <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
+                                <p className="text-xs text-red-900 text-left">
+                                    Please contact the gym owner or staff to restore access to your account.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen bg-gray-50 pb-24 relative">
-            
+
             {/* Header with Cart */}
             <div className="bg-white sticky top-0 z-10 border-b border-gray-100 shadow-sm px-6 py-4 flex justify-between items-center">
                 <h1 className="text-xl font-bold text-gray-900">Pro Shop</h1>
-                <button 
+                <button
                     onClick={() => setIsCartOpen(true)}
                     className="relative p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors"
                 >

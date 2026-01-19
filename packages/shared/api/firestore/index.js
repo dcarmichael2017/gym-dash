@@ -7,3 +7,4 @@ export * from './memberships';
 export * from './members';
 export * from './bookings';
 export * from './credits';
+export * from './chat';

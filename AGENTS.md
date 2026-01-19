@@ -854,6 +854,165 @@ await updateDoc(membershipRef, { status: 'cancelled' });
 where("memberships", "array-contains", { gymId: gymId })
 ```
 
+## 8.5. Common Gotchas & Solutions
+
+### GymContext vs Direct gymId Fetching
+
+**Admin Screens MUST NOT use GymContext**:
+```javascript
+// ❌ BAD - Admin screen using GymContext
+import { useGym } from '../../context/GymContext';
+const { currentGym } = useGym();
+// This will be undefined for admin users!
+
+// ✅ GOOD - Admin screen using direct gymId fetch
+const [gymId, setGymId] = useState(null);
+useEffect(() => {
+  const fetchUserData = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const userRef = doc(db, 'users', user.uid);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      setGymId(userData.gymId); // Admin users have a single gymId
+    }
+  };
+  fetchUserData();
+}, []);
+```
+
+**Why?**
+- **GymContext is for members** who can belong to multiple gyms and switch between them
+- **Admin/staff users** belong to a single gym stored in `user.gymId` field
+- Using GymContext in admin screens causes `undefined` gymId errors
+
+**Pattern**:
+- Member screens → Use `useGym()` from GymContext
+- Admin screens → Fetch `user.gymId` directly from user document
+
+### Fetching Gym Members
+
+**Use getGymMembers API, not direct Firestore queries**:
+```javascript
+// ❌ BAD - Direct Firestore query (doesn't work with subcollections)
+const usersRef = collection(db, 'users');
+const q = query(usersRef, where(`gymIds.${gymId}`, '==', true));
+const snapshot = await getDocs(q);
+
+// ✅ GOOD - Use the getGymMembers API
+import { getGymMembers } from '@shared/api/firestore';
+const result = await getGymMembers(gymId);
+if (result.success) {
+  const members = result.members; // Includes membership data
+}
+```
+
+**Why?**
+- `getGymMembers` uses `collectionGroup` to query membership subcollections
+- It automatically joins user profile data with their gym-specific membership
+- Returns enriched member objects with `currentMembership` field
+
+### Auto-Scroll in Chat Components
+
+**Prevent input blur on every keystroke**:
+```javascript
+// ❌ BAD - Auto-scroll triggers on state change, causing blur
+useEffect(() => {
+  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+}, [messages]); // Scrolls on EVERY message state change (including typing)
+
+// ✅ GOOD - Only scroll on actual new messages
+const prevMessageCountRef = useRef(messages.length);
+useEffect(() => {
+  if (messages.length > prevMessageCountRef.current) {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    prevMessageCountRef.current = messages.length;
+  }
+}, [messages]);
+```
+
+**Why?**
+- Auto-scrolling triggers layout recalculations
+- Causes active input to lose focus
+- Only scroll when new messages arrive, not on every render
+
+### Chat Layout with Fixed Input
+
+**Separate scrollable messages from fixed input**:
+```javascript
+// ✅ GOOD - Fixed height chat with sticky input
+<div className="flex flex-col h-screen">
+  {/* Header - Fixed */}
+  <div className="p-4 border-b bg-white">Header</div>
+
+  {/* Messages - Scrollable */}
+  <div className="flex-1 overflow-y-auto p-4">
+    {messages.map(msg => <Message key={msg.id} {...msg} />)}
+    <div ref={messagesEndRef} />
+  </div>
+
+  {/* Input - Fixed */}
+  <div className="p-4 bg-white border-t">
+    <input type="text" />
+  </div>
+</div>
+```
+
+**Why?**
+- `h-screen` ensures component fills viewport height
+- `flex-1 overflow-y-auto` makes only messages scroll
+- Input stays fixed at bottom, always accessible
+
+### Component Recreation Causing Input Focus Loss
+
+**Move components OUTSIDE the main component to prevent recreation**:
+```javascript
+// ❌ BAD - Components defined inside main component
+const MainComponent = () => {
+  const [text, setText] = useState('');
+
+  // This component is recreated on EVERY render
+  const ChatInput = ({ value, onChange }) => (
+    <input value={value} onChange={onChange} />
+  );
+
+  return <ChatInput value={text} onChange={setText} />;
+};
+
+// ✅ GOOD - Components defined outside
+const ChatInput = ({ value, onChange }) => (
+  <input
+    value={value}
+    onChange={onChange}
+    autoComplete="off"
+  />
+);
+
+const MainComponent = () => {
+  const [text, setText] = useState('');
+  return <ChatInput value={text} onChange={setText} />;
+};
+```
+
+**Why?**
+- When components are defined inside the parent, React sees them as NEW component types on each render
+- This causes React to unmount the old input and mount a new one
+- Mounting a new input loses focus and resets cursor position
+- Moving components outside ensures they maintain the same identity across renders
+
+**Additional fixes for input stability**:
+```javascript
+// Use onKeyDown instead of deprecated onKeyPress
+<input
+  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+  // NOT: onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+/>
+
+// Always add autoComplete="off" to prevent browser interference
+<input autoComplete="off" />
+```
+
 ## 9. Debugging Checklist
 
 ### When Membership Data Doesn't Load
@@ -1894,6 +2053,15 @@ match /users/{userId} {
 - **Complexity:** Medium
 - **Timeline:** 1-2 days
 - **Impact:** HIGH - Enables multi-gym bookings
+
+Community & Communication
+Managed Community Chat: In-app group chats and 1-on-1 messaging with automated data-purging to control costs.
+Revenue Gyms: Persistent history (purged at high threshold).
+Ghost Gyms: 48-hour rolling window (auto-delete) to minimize storage costs.
+Push Notification Engine: Broadcast alerts for closures and automated "Birthday/Milestone" greetings.
+Sparring/Roll Log: Digital journal for members to record rounds and techniques.
+still permission issues for marking as read, make names clickable to see full names as a little popup
+
 
 **Priority 2: Multi-Role Support**
 - **Why:** Enables admins to manage multiple gyms

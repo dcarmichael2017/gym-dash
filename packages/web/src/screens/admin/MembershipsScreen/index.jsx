@@ -10,6 +10,7 @@ import { FullScreenLoader } from '../../../components/common/FullScreenLoader';
 import { ConfirmationModal } from '../../../components/common/ConfirmationModal';
 import { Modal } from '../../../components/common/Modal'; // <--- NEW GENERIC MODAL
 import { TierMembersModal } from '../../../components/admin/TierMembersModal';
+import { MemberFormModal } from '../../../components/admin/MemberFormModal';
 
 // Specific Forms & Tabs
 import RecurringForm from '../../../components/admin/memberships/RecurringForm';
@@ -28,7 +29,8 @@ const MembershipsScreen = () => {
   const [selectedTier, setSelectedTier] = useState(null);
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, tierId: null });
   const [viewMembersModal, setViewMembersModal] = useState({ isOpen: false, tierName: '', members: [] });
-  
+  const [memberModal, setMemberModal] = useState({ isOpen: false, memberData: null });
+
   // Data State
   const [memberStats, setMemberStats] = useState({});
   const [allMembers, setAllMembers] = useState([]); 
@@ -48,10 +50,12 @@ const MembershipsScreen = () => {
         if (tiersRes.success) {
             tiersRes.tiers.forEach(t => stats[t.id] = { active: 0, trialing: 0 });
         }
+        // ✅ FIX: Access membership data from currentMembership subcollection
         membersRes.members.forEach(member => {
-            if (member.membershipId && stats[member.membershipId]) {
-                if (member.subscriptionStatus === 'trialing') stats[member.membershipId].trialing++;
-                else if (member.subscriptionStatus === 'active') stats[member.membershipId].active++;
+            const membership = member.currentMembership;
+            if (membership?.membershipId && stats[membership.membershipId]) {
+                if (membership.status === 'trialing') stats[membership.membershipId].trialing++;
+                else if (membership.status === 'active') stats[membership.membershipId].active++;
             }
         });
         setMemberStats(stats);
@@ -94,6 +98,10 @@ const MembershipsScreen = () => {
       setTiers(prev => prev.filter(t => t.id !== deleteModal.tierId));
       setDeleteModal({ isOpen: false, tierId: null });
     }
+  };
+
+  const handleMemberClick = (member) => {
+    setMemberModal({ isOpen: true, memberData: member });
   };
 
   // Filter Tiers for View
@@ -147,7 +155,7 @@ const MembershipsScreen = () => {
             tiers={recurringTiers} 
             memberStats={memberStats} 
             onEdit={handleOpenEdit} 
-            onViewMembers={(tier) => setViewMembersModal({ isOpen: true, tierName: tier.name, members: allMembers.filter(m => m.membershipId === tier.id) })} 
+            onViewMembers={(tier) => setViewMembersModal({ isOpen: true, tierName: tier.name, members: allMembers.filter(m => m.currentMembership?.membershipId === tier.id) })} 
             onDelete={(id) => setDeleteModal({ isOpen: true, tierId: id })}
             onAdd={handleOpenAdd}
           />
@@ -189,14 +197,25 @@ const MembershipsScreen = () => {
       </Modal>
 
       {/* Other Modals */}
-      <TierMembersModal 
+      <TierMembersModal
         isOpen={viewMembersModal.isOpen}
         onClose={() => setViewMembersModal({...viewMembersModal, isOpen: false})}
         tierName={viewMembersModal.tierName}
         members={viewMembersModal.members}
+        onMemberClick={handleMemberClick}
       />
 
-      <ConfirmationModal 
+      <MemberFormModal
+        isOpen={memberModal.isOpen}
+        onClose={() => setMemberModal({ isOpen: false, memberData: null })}
+        gymId={gymId}
+        memberData={memberModal.memberData}
+        onSave={() => refreshData(gymId)}
+        allMembers={allMembers}
+        onSelectMember={handleMemberClick}
+      />
+
+      <ConfirmationModal
         isOpen={deleteModal.isOpen}
         onClose={() => setDeleteModal({ isOpen: false, tierId: null })}
         onConfirm={handleDelete}
