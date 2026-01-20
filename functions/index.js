@@ -1,8 +1,8 @@
 // --- IMPORTS ---
-const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {onCall, HttpsError, onRequest} = require("firebase-functions/v2/https");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {onDocumentUpdated} = require("firebase-functions/v2/firestore");
-const {defineString} = require("firebase-functions/params");
+const {defineString, defineSecret} = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const stripe = require("stripe");
 
@@ -10,12 +10,20 @@ const stripe = require("stripe");
 admin.initializeApp();
 
 const stripeSecret = defineString("STRIPE_SECRET_KEY");
+const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
+
+// --- CORS CONFIG ---
+const ALLOWED_ORIGINS = [
+  /^https:\/\/.*\.app\.github\.dev$/,
+  "http://localhost:5173",
+  "http://localhost:5174",
+];
 
 // --- FUNCTION 1: CREATE STRIPE ACCOUNT (v2) ---
 exports.createStripeAccountLink = onCall(
     {
       region: "us-central1",
-      cors: [/^https:\/\/.*\.app\.github\.dev$/, "http://localhost:5173"],
+      cors: ALLOWED_ORIGINS,
     },
     async (request) => {
       const db = admin.firestore();
@@ -34,11 +42,10 @@ exports.createStripeAccountLink = onCall(
         );
       }
 
-      const allowedOrigins = [
-        /^https:\/\/.*\.app\.github\.dev$/,
-        "http://localhost:5173",
-      ];
-      const isAllowed = allowedOrigins.some((pattern) => pattern.test(origin));
+      // Validate origin
+      const isAllowed = ALLOWED_ORIGINS.some((pattern) =>
+        typeof pattern === "string" ? pattern === origin : pattern.test(origin),
+      );
       if (!isAllowed) {
         throw new HttpsError(
             "permission-denied",
@@ -49,7 +56,22 @@ exports.createStripeAccountLink = onCall(
       try {
         const user = await admin.auth().getUser(request.auth.uid);
         const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
 
+        // Check if gym already has a Stripe account
+        if (gymDoc.exists && gymDoc.data().stripeAccountId) {
+          // Account already exists, create a new account link for onboarding
+          const existingAccountId = gymDoc.data().stripeAccountId;
+          const accountLink = await stripeClient.accountLinks.create({
+            account: existingAccountId,
+            refresh_url: `${origin}/onboarding/step-6?gymId=${gymId}`,
+            return_url: `${origin}/onboarding/stripe-success?gymId=${gymId}`,
+            type: "account_onboarding",
+          });
+          return {url: accountLink.url};
+        }
+
+        // Create new Stripe account
         const account = await stripeClient.accounts.create({
           type: "standard",
           email: user.email,
@@ -62,6 +84,7 @@ exports.createStripeAccountLink = onCall(
         await gymRef.update({
           stripeAccountId: account.id,
           stripeAccountStatus: "PENDING",
+          stripeAccountCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
         const accountLink = await stripeClient.accountLinks.create({
@@ -74,7 +97,213 @@ exports.createStripeAccountLink = onCall(
         return {url: accountLink.url};
       } catch (error) {
         console.error("Error creating Stripe account link:", error);
-        throw new HttpsError("internal", "An error occurred.");
+        throw new HttpsError("internal", "An error occurred: " + error.message);
+      }
+    },
+);
+
+// --- FUNCTION: VERIFY STRIPE ACCOUNT STATUS ---
+/**
+ * Checks the Stripe account status and updates Firestore accordingly.
+ * Call this after user returns from Stripe onboarding or periodically.
+ */
+exports.verifyStripeAccount = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId} = request.data;
+
+      if (!gymId) {
+        throw new HttpsError("invalid-argument", "gymId is required.");
+      }
+
+      try {
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId) {
+          return {
+            success: true,
+            status: "NOT_CONNECTED",
+            chargesEnabled: false,
+            payoutsEnabled: false,
+            detailsSubmitted: false,
+          };
+        }
+
+        // Retrieve account from Stripe
+        const account = await stripeClient.accounts.retrieve(stripeAccountId);
+
+        // Determine status based on account state
+        let status = "PENDING";
+        if (account.charges_enabled && account.payouts_enabled) {
+          status = "ACTIVE";
+        } else if (account.requirements?.disabled_reason) {
+          status = "RESTRICTED";
+        } else if (account.details_submitted) {
+          status = "PENDING_VERIFICATION";
+        }
+
+        // Update Firestore with latest status
+        await gymRef.update({
+          stripeAccountStatus: status,
+          stripeChargesEnabled: account.charges_enabled,
+          stripePayoutsEnabled: account.payouts_enabled,
+          stripeDetailsSubmitted: account.details_submitted,
+          stripeAccountUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        return {
+          success: true,
+          status: status,
+          chargesEnabled: account.charges_enabled,
+          payoutsEnabled: account.payouts_enabled,
+          detailsSubmitted: account.details_submitted,
+          requirements: account.requirements,
+        };
+      } catch (error) {
+        console.error("Error verifying Stripe account:", error);
+        throw new HttpsError("internal", "Failed to verify account: " + error.message);
+      }
+    },
+);
+
+// --- FUNCTION: CREATE STRIPE ACCOUNT LINK FOR REFRESH/RECONNECT ---
+/**
+ * Creates a new account link for an existing Stripe account.
+ * Used when user needs to complete onboarding or update their account.
+ */
+exports.createStripeAccountLinkRefresh = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, origin, returnPath} = request.data;
+
+      if (!gymId || !origin) {
+        throw new HttpsError(
+            "invalid-argument",
+            "gymId and origin are required.",
+        );
+      }
+
+      // Validate origin
+      const isAllowed = ALLOWED_ORIGINS.some((pattern) =>
+        typeof pattern === "string" ? pattern === origin : pattern.test(origin),
+      );
+      if (!isAllowed) {
+        throw new HttpsError("permission-denied", "Origin not allowed.");
+      }
+
+      try {
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const stripeAccountId = gymDoc.data().stripeAccountId;
+        if (!stripeAccountId) {
+          throw new HttpsError(
+              "failed-precondition",
+              "No Stripe account connected. Please start fresh onboarding.",
+          );
+        }
+
+        const basePath = returnPath || "/admin/settings";
+        const accountLink = await stripeClient.accountLinks.create({
+          account: stripeAccountId,
+          refresh_url: `${origin}${basePath}?stripe_refresh=true&gymId=${gymId}`,
+          return_url: `${origin}${basePath}?stripe_success=true&gymId=${gymId}`,
+          type: "account_onboarding",
+        });
+
+        return {url: accountLink.url};
+      } catch (error) {
+        console.error("Error creating Stripe account link:", error);
+        throw new HttpsError("internal", "Failed to create link: " + error.message);
+      }
+    },
+);
+
+// --- FUNCTION: CREATE STRIPE LOGIN LINK ---
+/**
+ * Creates a login link for the connected account's Stripe Dashboard.
+ */
+exports.createStripeLoginLink = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId} = request.data;
+
+      if (!gymId) {
+        throw new HttpsError("invalid-argument", "gymId is required.");
+      }
+
+      try {
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const stripeAccountId = gymDoc.data().stripeAccountId;
+        if (!stripeAccountId) {
+          throw new HttpsError(
+              "failed-precondition",
+              "No Stripe account connected.",
+          );
+        }
+
+        // Create a login link to the Stripe Express dashboard
+        const loginLink = await stripeClient.accounts.createLoginLink(stripeAccountId);
+
+        return {url: loginLink.url};
+      } catch (error) {
+        console.error("Error creating Stripe login link:", error);
+        // For Standard accounts, they should go to dashboard.stripe.com directly
+        if (error.code === "account_invalid" || error.type === "StripeInvalidRequestError") {
+          return {
+            url: "https://dashboard.stripe.com",
+            note: "Standard accounts should use dashboard.stripe.com directly",
+          };
+        }
+        throw new HttpsError("internal", "Failed to create login link: " + error.message);
       }
     },
 );
@@ -512,3 +741,304 @@ exports.getStorageStats = onCall(
       }
     },
 );
+
+// ============================================================================
+// STRIPE WEBHOOK HANDLER
+// ============================================================================
+
+/**
+ * Stripe Webhook Handler
+ * Receives events from Stripe and processes them accordingly.
+ *
+ * IMPORTANT: This uses onRequest (not onCall) because Stripe sends raw HTTP requests.
+ * The webhook secret must be configured in Stripe Dashboard and set via:
+ *   firebase functions:secrets:set STRIPE_WEBHOOK_SECRET
+ */
+exports.stripeWebhook = onRequest(
+    {
+      region: "us-central1",
+      secrets: [stripeWebhookSecret],
+    },
+    async (req, res) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      // Only accept POST requests
+      if (req.method !== "POST") {
+        res.status(405).send("Method Not Allowed");
+        return;
+      }
+
+      const sig = req.headers["stripe-signature"];
+      const webhookSecret = stripeWebhookSecret.value();
+
+      let event;
+
+      try {
+        // Verify webhook signature
+        event = stripeClient.webhooks.constructEvent(
+            req.rawBody,
+            sig,
+            webhookSecret,
+        );
+      } catch (err) {
+        console.error("Webhook signature verification failed:", err.message);
+        res.status(400).send(`Webhook Error: ${err.message}`);
+        return;
+      }
+
+      console.log(`Received Stripe event: ${event.type} (${event.id})`);
+
+      try {
+        // Handle the event based on type
+        switch (event.type) {
+          case "account.updated":
+            await handleAccountUpdated(db, stripeClient, event);
+            break;
+
+          case "checkout.session.completed":
+            await handleCheckoutSessionCompleted(db, event);
+            break;
+
+          case "invoice.paid":
+            await handleInvoicePaid(db, event);
+            break;
+
+          case "invoice.payment_failed":
+            await handleInvoicePaymentFailed(db, event);
+            break;
+
+          case "customer.subscription.updated":
+            await handleSubscriptionUpdated(db, event);
+            break;
+
+          case "customer.subscription.deleted":
+            await handleSubscriptionDeleted(db, event);
+            break;
+
+          case "charge.refunded":
+            await handleChargeRefunded(db, event);
+            break;
+
+          default:
+            console.log(`Unhandled event type: ${event.type}`);
+        }
+
+        // Return success
+        res.status(200).json({received: true});
+      } catch (error) {
+        console.error("Error processing webhook:", error);
+        // Return 200 to acknowledge receipt (Stripe will retry on 4xx/5xx)
+        // Log the error but don't fail the webhook
+        res.status(200).json({received: true, error: error.message});
+      }
+    },
+);
+
+// --- WEBHOOK HANDLERS ---
+
+/**
+ * Handle account.updated event
+ * Updates the gym's Stripe account status when their connected account changes
+ */
+async function handleAccountUpdated(db, stripeClient, event) {
+  const account = event.data.object;
+  const gymId = account.metadata?.gymId;
+
+  if (!gymId) {
+    console.log("No gymId in account metadata, searching by account ID...");
+    // Find gym by stripeAccountId
+    const gymsSnapshot = await db.collection("gyms")
+        .where("stripeAccountId", "==", account.id)
+        .limit(1)
+        .get();
+
+    if (gymsSnapshot.empty) {
+      console.log(`No gym found for Stripe account ${account.id}`);
+      return;
+    }
+
+    const gymDoc = gymsSnapshot.docs[0];
+    await updateGymStripeStatus(db, gymDoc.id, account, event.id);
+  } else {
+    await updateGymStripeStatus(db, gymId, account, event.id);
+  }
+}
+
+/**
+ * Update gym document with Stripe account status
+ */
+async function updateGymStripeStatus(db, gymId, account, eventId) {
+  const gymRef = db.collection("gyms").doc(gymId);
+
+  // Check for idempotency
+  const eventRef = gymRef.collection("stripeEvents").doc(eventId);
+  const eventDoc = await eventRef.get();
+  if (eventDoc.exists && eventDoc.data().processed) {
+    console.log(`Event ${eventId} already processed, skipping.`);
+    return;
+  }
+
+  // Determine status
+  let status = "PENDING";
+  if (account.charges_enabled && account.payouts_enabled) {
+    status = "ACTIVE";
+  } else if (account.requirements?.disabled_reason) {
+    status = "RESTRICTED";
+  } else if (account.details_submitted) {
+    status = "PENDING_VERIFICATION";
+  }
+
+  // Update gym document
+  await gymRef.update({
+    stripeAccountStatus: status,
+    stripeChargesEnabled: account.charges_enabled,
+    stripePayoutsEnabled: account.payouts_enabled,
+    stripeDetailsSubmitted: account.details_submitted,
+    stripeAccountUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  // Log the event
+  await eventRef.set({
+    eventType: "account.updated",
+    stripeEventId: eventId,
+    processed: true,
+    processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    data: {
+      status: status,
+      chargesEnabled: account.charges_enabled,
+      payoutsEnabled: account.payouts_enabled,
+    },
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.log(`Updated gym ${gymId} Stripe status to ${status}`);
+}
+
+/**
+ * Handle checkout.session.completed event
+ * This is where we fulfill orders, add credits, or create memberships
+ */
+async function handleCheckoutSessionCompleted(db, event) {
+  const session = event.data.object;
+  const metadata = session.metadata || {};
+
+  console.log("Checkout session completed:", session.id);
+  console.log("Metadata:", metadata);
+
+  // Check what type of purchase this is based on metadata
+  const purchaseType = metadata.type; // 'membership', 'class_pack', 'shop_order'
+  const gymId = metadata.gymId;
+  const userId = metadata.userId;
+
+  if (!gymId) {
+    console.log("No gymId in session metadata, cannot process.");
+    return;
+  }
+
+  // Log the event for idempotency
+  const gymRef = db.collection("gyms").doc(gymId);
+  const eventRef = gymRef.collection("stripeEvents").doc(event.id);
+  const eventDoc = await eventRef.get();
+
+  if (eventDoc.exists && eventDoc.data().processed) {
+    console.log(`Event ${event.id} already processed, skipping.`);
+    return;
+  }
+
+  // Process based on type
+  switch (purchaseType) {
+    case "membership":
+      // Will be implemented in Phase 3
+      console.log("Membership purchase - handler to be implemented");
+      break;
+
+    case "class_pack":
+      // Will be implemented in Phase 4
+      console.log("Class pack purchase - handler to be implemented");
+      break;
+
+    case "shop_order":
+      // Will be implemented in Phase 4
+      console.log("Shop order - handler to be implemented");
+      break;
+
+    default:
+      console.log(`Unknown purchase type: ${purchaseType}`);
+  }
+
+  // Log the event as processed
+  await eventRef.set({
+    eventType: "checkout.session.completed",
+    stripeEventId: event.id,
+    processed: true,
+    processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    data: {
+      sessionId: session.id,
+      purchaseType: purchaseType,
+      userId: userId,
+      amountTotal: session.amount_total,
+    },
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+/**
+ * Handle invoice.paid event
+ * Updates membership renewal dates
+ */
+async function handleInvoicePaid(db, event) {
+  const invoice = event.data.object;
+  console.log("Invoice paid:", invoice.id);
+
+  // Will be implemented in Phase 5
+  // Update membership currentPeriodEnd, log to history
+}
+
+/**
+ * Handle invoice.payment_failed event
+ * Updates membership status to past_due, notifies member
+ */
+async function handleInvoicePaymentFailed(db, event) {
+  const invoice = event.data.object;
+  console.log("Invoice payment failed:", invoice.id);
+
+  // Will be implemented in Phase 5
+  // Update membership status to 'past_due', start grace period
+}
+
+/**
+ * Handle customer.subscription.updated event
+ * Syncs subscription changes (plan changes, cancellation scheduled, etc.)
+ */
+async function handleSubscriptionUpdated(db, event) {
+  const subscription = event.data.object;
+  console.log("Subscription updated:", subscription.id);
+
+  // Will be implemented in Phase 5
+  // Update membership document with new plan details, cancelAtPeriodEnd, etc.
+}
+
+/**
+ * Handle customer.subscription.deleted event
+ * Cancels membership when subscription ends
+ */
+async function handleSubscriptionDeleted(db, event) {
+  const subscription = event.data.object;
+  console.log("Subscription deleted:", subscription.id);
+
+  // Will be implemented in Phase 5
+  // Update membership status to 'cancelled'
+}
+
+/**
+ * Handle charge.refunded event
+ * Processes refunds and updates order status
+ */
+async function handleChargeRefunded(db, event) {
+  const charge = event.data.object;
+  console.log("Charge refunded:", charge.id);
+
+  // Will be implemented in Phase 8
+  // Update order status to 'refunded', log refund
+}

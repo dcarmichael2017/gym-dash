@@ -159,7 +159,12 @@ const DashboardSettingsScreen = () => {
         )}
 
         {activeTab === 'payments' && (
-            <PaymentsSettingsTab stripeId={gymData.stripeAccountId} theme={theme} />
+            <PaymentsSettingsTab
+                stripeId={gymData.stripeAccountId}
+                stripeStatus={gymData.stripeAccountStatus}
+                gymId={gymId}
+                theme={theme}
+            />
         )}
 
         {activeTab === 'legal' && (

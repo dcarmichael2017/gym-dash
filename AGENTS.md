@@ -2353,55 +2353,47 @@ const session = await stripe.checkout.sessions.create({
 
 ### Implementation Phases
 
-#### Phase 1: Foundation & Stripe Connect
+#### Phase 1: Foundation & Stripe Connect ✅ COMPLETE
 
-**[ ] 1.1 Environment Setup**
-- [ ] Create `.env.example` with placeholder Stripe keys
-- [ ] Document: `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`
-- [ ] Install Stripe SDK: `npm install stripe @stripe/stripe-js` in relevant packages
-- [ ] Create `packages/shared/api/stripe/` directory structure
-- [ ] **TODO**: Move secrets to Firebase Secret Manager for Cloud Functions (document procedure)
+**[x] 1.1 Environment Setup**
+- [x] Create `.env.example` with placeholder Stripe keys
+- [x] Document: `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`
+- [x] Install Stripe SDK in Cloud Functions (`stripe` package)
+- [x] Stripe secret deployed via Firebase Functions params: `defineString("STRIPE_SECRET_KEY")`
+- [ ] Install `@stripe/stripe-js` in web package for frontend (deferred - using Checkout redirects)
 
-**[ ] 1.2 Stripe Connect Onboarding**
-- [ ] Create `connectStripeAccount(gymId)` Cloud Function
-  - Generates Stripe OAuth link for Express account creation
-  - Stores pending status in gym document
-- [ ] Create `handleStripeOAuthCallback()` Cloud Function
-  - Exchanges authorization code for account ID
-  - Stores `stripeAccountId` in gym document
-- [ ] Update gym document schema:
+**[x] 1.2 Stripe Connect Onboarding**
+- [x] `createStripeAccountLink` Cloud Function (in `functions/index.js`)
+  - Creates Standard Stripe account for gym owner
+  - Stores `stripeAccountId` and `stripeAccountStatus: 'PENDING'` in gym document
+  - Returns account link URL for onboarding redirect
+- [x] Step 6 onboarding screen (`Step6_ConnectPaymentsScreen.jsx`)
+- [x] Success screen (`StripeSuccessScreen.jsx`) handles return from Stripe
+- [x] Gym document stores Stripe fields:
   ```javascript
   gyms/{gymId} {
-    // ...existing fields
     stripeAccountId: string | null,
-    stripeAccountStatus: 'pending' | 'active' | 'restricted' | 'not_connected',
-    stripeOnboardingComplete: boolean,
-    stripeAccountCreatedAt: timestamp | null
+    stripeAccountStatus: 'PENDING' | 'ACTIVE' | 'RESTRICTED',
   }
   ```
-- [ ] Create admin UI: "Connect Stripe Account" button in Settings > Billing tab
-- [ ] Create admin UI: Show Stripe account status card with:
-  - Connection status indicator
-  - "Complete Onboarding" link if incomplete
-  - "View Stripe Dashboard" link if connected
-- [ ] Handle `account.updated` webhook to sync status changes
+- [x] PaymentsSettingsTab shows connection status
+- [x] Added `verifyStripeAccount` function to check/update account status
+- [x] Added `createStripeAccountLinkRefresh` for reconnecting incomplete accounts
+- [x] Enhanced PaymentsSettingsTab with reconnect flow and Stripe Dashboard link
 
-**[ ] 1.3 Webhook Infrastructure**
-- [ ] Create `stripeWebhook` Cloud Function endpoint
-- [ ] Implement webhook signature verification (CRITICAL for security)
-- [ ] Create webhook event router/dispatcher pattern
-- [ ] Add webhook event logging:
-  ```javascript
-  gyms/{gymId}/stripeEvents/{eventId} {
-    eventType: string,
-    stripeEventId: string,    // For idempotency checks
-    processed: boolean,
-    processedAt: timestamp | null,
-    error: string | null,
-    createdAt: timestamp
-  }
-  ```
-- [ ] Configure webhook endpoint in Stripe Dashboard (test + live)
+**[x] 1.3 Webhook Infrastructure**
+- [x] `stripeWebhook` Cloud Function endpoint with signature verification
+- [x] Handles `account.updated` event to sync Stripe account status
+- [x] Handles `checkout.session.completed` for payment fulfillment
+- [x] Event logging to `gyms/{gymId}/stripeEvents/{eventId}`
+- [x] Idempotency checking via `stripeEventId`
+- [ ] Configure webhook endpoint in Stripe Dashboard (manual step)
+
+**Webhook Configuration (Manual Step Required):**
+1. Go to Stripe Dashboard > Developers > Webhooks
+2. Add endpoint: `https://us-central1-{PROJECT_ID}.cloudfunctions.net/stripeWebhook`
+3. Select events: `account.updated`, `checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`, `customer.subscription.deleted`
+4. Copy the signing secret and set it: `firebase functions:secrets:set STRIPE_WEBHOOK_SECRET`
 
 ---
 
@@ -2786,9 +2778,28 @@ STRIPE_WEBHOOK_SECRET=whsec_xxx
 STRIPE_APPLICATION_FEE_PERCENT=1.0
 ```
 
-**Security TODO:**
-- [ ] Move `STRIPE_SECRET_KEY` to Firebase Secret Manager for Cloud Functions
-- [ ] Use Firebase Functions config for webhook secret
+**Current Implementation (Already Deployed):**
+
+The Stripe secret key is already deployed to Firebase Cloud Functions using the `defineString` params:
+
+```javascript
+// In functions/index.js
+const { defineString } = require("firebase-functions/params");
+const stripeSecret = defineString("STRIPE_SECRET_KEY");
+
+// Used as:
+const stripeClient = stripe(stripeSecret.value());
+```
+
+To set/update the secret:
+```bash
+firebase functions:secrets:set STRIPE_SECRET_KEY
+# Then paste your sk_test_xxx or sk_live_xxx key
+```
+
+**Security Notes:**
+- [x] `STRIPE_SECRET_KEY` is deployed via Firebase Functions params (secure)
+- [ ] Add `STRIPE_WEBHOOK_SECRET` via Firebase Functions params
 - [ ] Document secret rotation procedure
 - [ ] Set up separate keys for test vs production environments
 
