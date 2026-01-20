@@ -246,6 +246,19 @@ service cloud.firestore {
          }
       }
       
+      // --- PRODUCTS SUBCOLLECTION ---
+      match /products/{productId} {
+         // All authenticated users can read active/public products
+         // Admin/Staff can read all products (including hidden/inactive)
+         allow read: if request.auth != null && (
+            (resource.data.active == true && resource.data.visibility == 'public') ||
+            isStaffOrOwner(gymId)
+         );
+
+         // Only staff/owners can create, update, delete products
+         allow create, update, delete: if request.auth != null && isStaffOrOwner(gymId);
+      }
+
       // --- COMMUNITY POSTS ---
       match /communityPosts/{postId} {
          // Anyone logged in can read posts

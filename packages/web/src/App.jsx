@@ -36,6 +36,7 @@ import DashboardSettingsScreen from './screens/admin/DashboardSettingsScreen';
 import DashboardAnalyticsScreen from './screens/admin/DashboardAnalyticsScreen';
 import DashboardCalendarScreen from './screens/admin/DashboardCalendarScreen';
 import DashboardClassesScreen from './screens/admin/DashboardClassesScreen';
+import ShopScreen from './screens/admin/ShopScreen';
 
 // --- MEMBER SCREENS ---
 import MemberHomeScreen from './screens/members/dashboard/MemberHomeScreen';
@@ -45,6 +46,7 @@ import MemberProfileScreen from './screens/members/profile/MemberProfileScreen';
 // UPDATED IMPORTS FOR STORE
 import { StoreScreen } from './screens/members/store'; // The UI
 import { StoreProvider } from './screens/members/store/StoreContext'; // The Data Layer
+import { ProductDetailScreen } from './screens/members/store/ProductDetailScreen'; // Product Detail Page
 import BroadcastCenterScreen from './screens/admin/BroadcastCenterScreen';
 import AdminCommunityFeedScreen from './screens/admin/CommunityFeedScreen';
 import AdminGroupChatScreen from './screens/admin/GroupChatScreen';
@@ -148,6 +150,7 @@ function App() {
               <Route path="community" element={<AdminCommunityFeedScreen />} />
               <Route path="chat" element={<AdminGroupChatScreen />} />
               <Route path="memberships" element={<DashboardMembershipsScreen />} />
+              <Route path="shop" element={<ShopScreen />} />
               <Route path="members" element={<DashboardMembersScreen />} />
               <Route path="staff" element={<DashboardStaffScreen />} />
               <Route path="settings" element={<DashboardSettingsScreen />} />
@@ -169,6 +172,7 @@ function App() {
               <Route path="community" element={<MemberCommunityFeedScreen />} />
               <Route path="chat" element={<MemberGroupChatScreen />} />
               <Route path="store" element={<StoreScreen />} />
+              <Route path="store/product/:productId" element={<ProductDetailScreen />} />
 
               <Route index element={<Navigate to="home" replace />} />
             </Route>

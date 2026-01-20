@@ -1,57 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { ShoppingBag, Shirt, Ticket, Dumbbell, ChevronRight, Loader2, XCircle, AlertCircle } from 'lucide-react';
-import { useNavigate, useLocation } from 'react-router-dom'; // Added useLocation
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useStore } from './StoreContext';
-import { ProductDetailModal } from './ProductDetailModal';
 import { CartDrawer } from './CartDrawer'; 
 
 // --- IMPORTS FOR DATA & TABS ---
 import { useGym } from '../../../context/GymContext';
 import { auth } from '../../../../../../packages/shared/api/firebaseConfig';
-import { getMembershipTiers } from '../../../../../../packages/shared/api/firestore';
+import { getMembershipTiers, getActiveProducts, PRODUCT_CATEGORIES } from '../../../../../../packages/shared/api/firestore';
 import MembershipListTab from './tabs/MembershipListTab';
 import MembershipDropInTab from './tabs/MembershipDropInTab';
-
-// --- MOCK DATA FOR PHYSICAL GOODS ---
-const MOCK_PRODUCTS = [
-    {
-        id: 'gear_1',
-        type: 'physical',
-        category: 'gear',
-        name: 'Team Rashguard',
-        price: 55.00,
-        image: 'https://images.unsplash.com/photo-1577223625816-7546f13df25d?auto=format&fit=crop&q=80&w=300',
-        hasVariants: true,
-        variants: [
-            { id: 's', label: 'Small', stock: 5, price: 55.00 },
-            { id: 'm', label: 'Medium', stock: 0, price: 55.00 },
-            { id: 'l', label: 'Large', stock: 12, price: 55.00 },
-        ]
-    },
-    {
-        id: 'gear_2',
-        type: 'physical',
-        category: 'gear',
-        name: 'Team Gi (White)',
-        price: 120.00,
-        image: 'https://images.unsplash.com/photo-1599058945522-28d584b6f0ff?auto=format&fit=crop&q=80&w=300',
-        hasVariants: true,
-        variants: [
-            { id: 'a1', label: 'A1', stock: 2, price: 120.00 },
-            { id: 'a2', label: 'A2', stock: 4, price: 120.00 },
-        ]
-    },
-    {
-        id: 'drink_1',
-        type: 'physical',
-        category: 'gear',
-        name: 'Sparkling Water',
-        price: 2.50,
-        image: 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?auto=format&fit=crop&q=80&w=300',
-        hasVariants: false,
-        stock: 50
-    }
-];
 
 export const StoreScreen = () => {
     const navigate = useNavigate();
@@ -66,9 +24,10 @@ export const StoreScreen = () => {
 
     // State
     const [activeCategory, setActiveCategory] = useState('all');
-    const [selectedProduct, setSelectedProduct] = useState(null);
     const [tiers, setTiers] = useState([]);
+    const [products, setProducts] = useState([]);
     const [loadingTiers, setLoadingTiers] = useState(true);
+    const [loadingProducts, setLoadingProducts] = useState(true);
 
     // --- DEEP LINK LISTENER ---
     useEffect(() => {
@@ -88,14 +47,14 @@ export const StoreScreen = () => {
             setLoadingTiers(true);
 
             const res = await getMembershipTiers(currentGym.id);
-            
+
             if (res.success) {
                 const myMembership = memberships.find(m => m.gymId === currentGym.id);
                 const isOwner = currentGym.ownerId === auth.currentUser?.uid;
                 const isStaff = myMembership?.role === 'staff' || myMembership?.role === 'coach' || myMembership?.role === 'admin';
 
                 const visibleTiers = res.tiers.filter(tier => {
-                   if (tier.active === false) return false; 
+                   if (tier.active === false) return false;
                    const level = tier.visibility || 'public';
                    if (isOwner) return true;
                    if (isStaff) return level !== 'admin';
@@ -109,6 +68,35 @@ export const StoreScreen = () => {
 
         fetchTiers();
     }, [currentGym, memberships]);
+
+    // --- 1.5. FETCH PRODUCTS ---
+    useEffect(() => {
+        const fetchProducts = async () => {
+            if (!currentGym) return;
+            setLoadingProducts(true);
+
+            const res = await getActiveProducts(currentGym.id);
+
+            if (res.success) {
+                // Transform products for display (add type: 'physical', map images to image)
+                const displayProducts = res.products.map(p => ({
+                    ...p,
+                    type: 'physical',
+                    image: p.images?.[0] || null,
+                    // Map variants to include 'label' for ProductDetailModal compatibility
+                    variants: p.hasVariants ? (p.variants || []).map(v => ({
+                        ...v,
+                        label: v.name,
+                        price: parseFloat(v.price) || p.price
+                    })) : []
+                }));
+                setProducts(displayProducts);
+            }
+            setLoadingProducts(false);
+        };
+
+        fetchProducts();
+    }, [currentGym]);
 
     // --- 2. SPLIT DATA ---
     const recurringPlans = tiers.filter(t => t.interval !== 'one_time');
@@ -127,10 +115,14 @@ export const StoreScreen = () => {
         }
 
         // Default: Render Physical Products (Gear/All)
-        // Filter Mock Products
-        const displayProducts = activeCategory === 'all' 
-            ? MOCK_PRODUCTS 
-            : MOCK_PRODUCTS.filter(p => p.category === activeCategory);
+        if (loadingProducts) {
+            return <Loader2 className="animate-spin mx-auto text-gray-400 mt-10" />;
+        }
+
+        // Filter products by category
+        const displayProducts = activeCategory === 'all'
+            ? products
+            : products.filter(p => p.category === activeCategory);
 
         if (displayProducts.length === 0) {
             return (
@@ -144,10 +136,11 @@ export const StoreScreen = () => {
         return (
             <div className="grid grid-cols-2 gap-4">
                 {displayProducts.map(product => (
-                    <ProductCard 
-                        key={product.id} 
-                        product={product} 
-                        onPress={() => setSelectedProduct(product)} 
+                    <ProductCard
+                        key={product.id}
+                        product={product}
+                        onPress={() => navigate(`/members/store/product/${product.id}`)}
+                        theme={theme}
                     />
                 ))}
             </div>
@@ -235,14 +228,7 @@ export const StoreScreen = () => {
                 {renderContent()}
             </div>
 
-            {/* Modals & Drawers */}
-            {selectedProduct && (
-                <ProductDetailModal 
-                    product={selectedProduct} 
-                    onClose={() => setSelectedProduct(null)} 
-                />
-            )}
-            
+            {/* Cart Drawer */}
             <CartDrawer />
         </div>
     );
@@ -264,35 +250,55 @@ const CategoryChip = ({ label, icon: Icon, active, onClick }) => (
     </button>
 );
 
-const ProductCard = ({ product, onPress }) => (
-    <button 
-        onClick={onPress}
-        className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col text-left hover:shadow-md transition-all active:scale-[0.98]"
-    >
-        <div className="aspect-square bg-gray-50 rounded-xl mb-3 overflow-hidden relative">
-            {product.image ? (
-                <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
-            ) : (
-                <div className="w-full h-full flex items-center justify-center text-gray-300">
-                    <ShoppingBag size={32} />
-                </div>
-            )}
-        </div>
-        <div className="flex-1 flex flex-col justify-between">
-            <div>
-                <h4 className="font-bold text-sm text-gray-900 line-clamp-2 leading-tight mb-1">
-                    {product.name}
-                </h4>
-                <p className="text-xs text-gray-500">
-                    {product.hasVariants ? `${product.variants.length} Options` : 'In Stock'}
-                </p>
+const ProductCard = ({ product, onPress, theme }) => {
+    const primaryColor = theme?.primaryColor || '#2563eb';
+    const isOnSale = product.compareAtPrice && product.compareAtPrice > product.price;
+
+    return (
+        <button
+            onClick={onPress}
+            className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col text-left hover:shadow-md transition-all active:scale-[0.98]"
+        >
+            <div className="aspect-square bg-gray-50 rounded-xl mb-3 overflow-hidden relative">
+                {product.image ? (
+                    <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-300">
+                        <ShoppingBag size={32} />
+                    </div>
+                )}
+                {/* Sale Badge */}
+                {isOnSale && (
+                    <div className="absolute top-2 right-2 px-2 py-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full">
+                        SALE
+                    </div>
+                )}
             </div>
-            <div className="mt-3 flex items-center justify-between">
-                <span className="font-bold text-blue-600">${product.price.toFixed(2)}</span>
-                <div className="w-6 h-6 bg-gray-50 rounded-full flex items-center justify-center text-gray-400">
-                    <ChevronRight size={14} />
+            <div className="flex-1 flex flex-col justify-between">
+                <div>
+                    <h4 className="font-bold text-sm text-gray-900 line-clamp-2 leading-tight mb-1">
+                        {product.name}
+                    </h4>
+                    <p className="text-xs text-gray-500">
+                        {product.hasVariants ? `${product.variants?.length || 0} Options` : 'In Stock'}
+                    </p>
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                        <span className="font-bold" style={{ color: primaryColor }}>
+                            ${product.price?.toFixed(2)}
+                        </span>
+                        {isOnSale && (
+                            <span className="text-xs text-gray-400 line-through">
+                                ${product.compareAtPrice?.toFixed(2)}
+                            </span>
+                        )}
+                    </div>
+                    <div className="w-6 h-6 bg-gray-50 rounded-full flex items-center justify-center text-gray-400">
+                        <ChevronRight size={14} />
+                    </div>
                 </div>
             </div>
-        </div>
-    </button>
-);
+        </button>
+    );
+};

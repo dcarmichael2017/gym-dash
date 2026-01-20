@@ -78,7 +78,7 @@ export const ProductDetailModal = ({ product, onClose }) => {
                     <div className="flex flex-col">
                         <span className="text-xs text-gray-500 font-medium">Price</span>
                         <span className="text-2xl font-bold text-gray-900">
-                            ${selectedVariant ? selectedVariant.price : product.price}
+                            ${(selectedVariant ? selectedVariant.price : product.price)?.toFixed(2)}
                         </span>
                     </div>
                     <button 

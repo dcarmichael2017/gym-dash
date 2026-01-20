@@ -9,3 +9,4 @@ export * from './bookings';
 export * from './credits';
 export * from './chat';
 export * from './community';
+export * from './products';

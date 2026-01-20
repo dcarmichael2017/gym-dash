@@ -2114,11 +2114,105 @@ const primaryColor = theme?.primaryColor || '#2563eb';
 🟡 P2: Commerce & Payments (Phase 8 - "The Store")
 This is the next major module according to your docs. You cannot do "Stripe Integration" without the Store UI.
 
-[ ] Admin Shop Dashboard:
+[x] Admin Shop Dashboard: ✅ COMPLETED
 
-Action: Create the UI for Admins to add "Physical Products" (Gear, Water) vs "Digital Services" (Class Packs).
+Action: Created a simplified Shopify-like interface for admins to manage physical products (gear, merchandise, drinks) with full CRUD operations, variant support, and member store integration.
 
-Logic: Implement the "Variant" logic (Size/Color) mentioned in Phase 8.1.
+**Implementation Details:**
+
+**New Files Created:**
+
+1. **Shared API Layer**
+   - `packages/shared/api/firestore/products.js` - Full CRUD operations:
+     - `createProduct(gymId, productData)` - Create new product
+     - `getProducts(gymId)` - Get all products for admin view
+     - `getActiveProducts(gymId)` - Get active public products for member store
+     - `getProductById(gymId, productId)` - Get single product
+     - `updateProduct(gymId, productId, data)` - Update product
+     - `deleteProduct(gymId, productId)` - Delete product
+     - `updateProductStock(gymId, productId, variantId, quantity)` - Update stock
+     - `getLowStockProducts(gymId, threshold)` - Get low stock alerts
+     - `getTotalStock(product)` - Calculate total stock across variants
+     - `isInStock(product, variantId)` - Check stock availability
+     - `PRODUCT_CATEGORIES` - Predefined categories (gear, apparel, drinks, supplements, accessories)
+
+2. **Admin Shop Screen** (`packages/web/src/screens/admin/ShopScreen/`)
+   - `index.jsx` - Main screen with tabs: "All Products" | "Low Stock"
+   - `ProductsTab.jsx` - Product grid with category filters, edit/delete actions
+   - `LowStockTab.jsx` - Low stock alerts table with inline stock editing
+
+3. **Product Form Modal** (`packages/web/src/components/admin/ProductFormModal/`)
+   - `index.jsx` - Sidebar-layout modal (like MemberFormModal pattern)
+   - `ProductDetailsTab.jsx` - Name, description, category, pricing, visibility, active/featured toggles
+   - `ProductVariantsTab.jsx` - Toggle variants on/off, dynamic variant rows with name/SKU/price/stock
+   - `ProductImagesTab.jsx` - Multi-image upload (1-5 images), drag-to-reorder, set primary image
+
+4. **Storage Functions** (added to `packages/shared/api/storage.js`)
+   - `uploadProductImage(gymId, productId, file)` - Upload product images to Firebase Storage
+
+**Files Modified:**
+
+1. `packages/shared/api/firestore/index.js` - Added products export
+2. `firestore.rules` - Added products subcollection rules:
+   - Members can read active/public products
+   - Admin/staff can read all products and have full write access
+3. `packages/web/src/layout/AdminLayout.jsx` - Added "Shop" nav item with ShoppingBag icon
+4. `packages/web/src/App.jsx` - Added `/admin/shop` route
+5. `packages/web/src/screens/members/store/index.jsx` - Replaced mock data with real Firestore fetch
+6. `packages/web/src/screens/members/store/ProductDetailModal.jsx` - Fixed price formatting
+
+**Database Schema:**
+
+```javascript
+gyms/{gymId}/products/{productId} {
+  // Core Info
+  name: string,
+  description: string,
+  category: 'gear' | 'apparel' | 'drinks' | 'supplements' | 'accessories',
+
+  // Pricing
+  price: number,
+  compareAtPrice: number | null,  // For sale pricing
+
+  // Variants
+  hasVariants: boolean,
+  variants: [{
+    id: string,
+    name: string,
+    sku: string | null,
+    price: number,
+    stock: number,
+    lowStockThreshold: number
+  }],
+
+  // Stock (if no variants)
+  stock: number | null,
+  lowStockThreshold: number,
+
+  // Images
+  images: string[],  // Array of URLs, first is primary
+
+  // Status
+  active: boolean,
+  visibility: 'public' | 'internal' | 'hidden',
+  featured: boolean,
+
+  // Metadata
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  createdBy: string
+}
+```
+
+**Key Features:**
+- Admin can create/edit/delete products with full form validation
+- Support for product variants (sizes, colors) with individual pricing and stock
+- Multi-image upload with drag-to-reorder and primary image selection
+- Low stock alerts with configurable threshold per product/variant
+- Sale pricing with compare-at-price and strikethrough display
+- Visibility controls (public, internal, hidden)
+- Member store automatically fetches real products from Firestore
+- Sale badges display on member store for discounted items
 
 [ ] Stripe Connect Integration:
 

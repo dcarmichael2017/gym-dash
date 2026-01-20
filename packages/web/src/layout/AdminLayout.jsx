@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { 
-  LayoutDashboard, Calendar, Users, Settings, LogOut, Menu, 
-  Dumbbell, Briefcase, CreditCard, BarChart3, BookOpen, Send, MessageSquare
+import {
+  LayoutDashboard, Calendar, Users, Settings, LogOut, Menu,
+  Dumbbell, Briefcase, CreditCard, BarChart3, BookOpen, Send, MessageSquare, ShoppingBag
 } from 'lucide-react';
 import { auth, db } from '../../../shared/api/firebaseConfig';
 
@@ -39,6 +39,7 @@ const DashboardLayout = () => {
     { name: 'Chat', path: '/admin/chat', icon: MessageSquare },
     
     { name: 'Memberships', path: '/admin/memberships', icon: CreditCard },
+    { name: 'Shop', path: '/admin/shop', icon: ShoppingBag },
     { name: 'Members', path: '/admin/members', icon: Users },
     { name: 'Staff', path: '/admin/staff', icon: Briefcase },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
@@ -198,7 +199,8 @@ const DashboardLayout = () => {
                 location.pathname.includes('classes') ? 'Classes' : 
                 location.pathname.includes('community') ? 'Community Feed' :
                 location.pathname.includes('settings') ? 'Settings' : 
-                location.pathname.includes('memberships') ? 'Memberships' : 
+                location.pathname.includes('memberships') ? 'Memberships' :
+                location.pathname.includes('shop') ? 'Pro Shop' : 
                 location.pathname.includes('members') ? 'Members' : 
                 location.pathname.includes('staff') ? 'Staff' :
                 gymName

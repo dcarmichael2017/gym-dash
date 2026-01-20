@@ -173,6 +173,43 @@ export const deleteStorageFile = async (url) => {
 };
 
 /**
+ * Upload a product image
+ * @param {string} gymId - The gym ID
+ * @param {string} productId - The product ID (can be 'temp' for new products)
+ * @param {File} file - The image file to upload
+ * @returns {Promise<{success: boolean, url?: string, error?: string}>}
+ */
+export const uploadProductImage = async (gymId, productId, file) => {
+  try {
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      return { success: false, error: 'File must be an image (JPEG, PNG, or WebP)' };
+    }
+
+    // Validate file size (max 5MB)
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      return { success: false, error: 'Image must be less than 5MB' };
+    }
+
+    // Generate a unique filename with timestamp
+    const timestamp = Date.now();
+    const extension = file.name.split('.').pop();
+    const filename = `${timestamp}_${Math.random().toString(36).substring(7)}.${extension}`;
+    const storageRef = ref(storage, `gyms/${gymId}/products/${productId || 'temp'}/${filename}`);
+
+    const snapshot = await uploadBytes(storageRef, file);
+    const downloadURL = await getDownloadURL(snapshot.ref);
+
+    return { success: true, url: downloadURL };
+  } catch (error) {
+    console.error("Error uploading product image:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
  * Delete all media files in a chat group folder
  * @param {string} gymId - The gym ID
  * @param {string} groupId - The chat group ID
