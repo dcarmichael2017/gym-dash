@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { 
   Plus, Search, Filter, User, AlertTriangle 
@@ -19,6 +20,9 @@ import { ConfirmationModal } from '../../components/common/ConfirmationModal';
 import { MemberTableRow } from '../../components/admin/MemberTableRow'; 
 
 const DashboardMembersScreen = () => {
+  const { theme } = useOutletContext() || {};
+  const primaryColor = theme?.primaryColor || '#2563eb';
+
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState([]);
   const [filteredMembers, setFilteredMembers] = useState([]);
@@ -228,9 +232,10 @@ const DashboardMembersScreen = () => {
           <h2 className="text-2xl font-bold text-gray-800">Members</h2>
           <p className="text-gray-500">Manage your students and families.</p>
         </div>
-        <button 
+        <button
           onClick={handleAdd}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700 transition-colors shadow-sm"
+          className="text-white px-4 py-2 rounded-lg flex items-center hover:opacity-90 transition-colors shadow-sm"
+          style={{ backgroundColor: primaryColor }}
         >
           <Plus className="h-5 w-5 mr-2" /> Add Member
         </button>
@@ -262,7 +267,8 @@ const DashboardMembersScreen = () => {
 
       {/* Members List */}
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        <table className="w-full text-left border-collapse">
+        <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse min-w-[640px]">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
               <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Member</th>
@@ -297,10 +303,11 @@ const DashboardMembersScreen = () => {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Modals */}
-      <MemberFormModal 
+      <MemberFormModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         gymId={gymId}
@@ -308,6 +315,7 @@ const DashboardMembersScreen = () => {
         onSave={() => fetchMembers(gymId)}
         allMembers={members}
         onSelectMember={setSelectedMember}
+        theme={theme}
       />
 
       {(actionModal.type === 'delete' || actionModal.type === 'archive') && actionModal.isOpen && (

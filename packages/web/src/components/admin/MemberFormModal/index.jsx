@@ -23,25 +23,24 @@ import { auth } from '../../../../../shared/api/firebaseConfig';
 import { uploadStaffPhoto } from '../../../../../shared/api/storage';
 
 // --- SIDEBAR BUTTON COMPONENT ---
-const NavItem = ({ id, label, icon: Icon, active, onClick }) => (
+const NavItem = ({ id, label, icon: Icon, active, onClick, primaryColor }) => (
   <button
     type="button"
     onClick={() => onClick(id)}
     className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium transition-all duration-200 border-l-4
-      ${active
-        ? 'bg-white text-blue-600 border-blue-600 shadow-sm'
-        : 'text-gray-500 border-transparent hover:bg-gray-100 hover:text-gray-900'
-      }`}
+      ${active ? 'bg-white shadow-sm' : 'text-gray-500 border-transparent hover:bg-gray-100 hover:text-gray-900'}`}
+    style={active ? { color: primaryColor, borderColor: primaryColor } : {}}
   >
     <div className="flex items-center gap-3">
-      <Icon size={18} className={active ? 'text-blue-600' : 'text-gray-400'} />
+      <Icon size={18} style={{ color: active ? primaryColor : '#9ca3af' }} />
       <span>{label}</span>
     </div>
-    {active && <ChevronRight size={14} className="text-blue-600" />}
+    {active && <ChevronRight size={14} style={{ color: primaryColor }} />}
   </button>
 );
 
-export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, allMembers = [], onSelectMember }) => {
+export const MemberFormModal = ({ isOpen, onClose, gymId, memberData, onSave, allMembers = [], onSelectMember, theme }) => {
+  const primaryColor = theme?.primaryColor || '#2563eb';
   const [activeTab, setActiveTab] = useState('profile');
 
   // --- MASTER FORM STATE ---
@@ -304,20 +303,20 @@ const handleSubmit = async (e) => {
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-1 p-2">
-            <NavItem id="profile" label="Profile & Contact" icon={User} active={activeTab === 'profile'} onClick={setActiveTab} />
+            <NavItem id="profile" label="Profile & Contact" icon={User} active={activeTab === 'profile'} onClick={setActiveTab} primaryColor={primaryColor} />
 
             {rankSystems.length > 0 && (
-              <NavItem id="ranks" label="Rank Progression" icon={TrendingUp} active={activeTab === 'ranks'} onClick={setActiveTab} />
+              <NavItem id="ranks" label="Rank Progression" icon={TrendingUp} active={activeTab === 'ranks'} onClick={setActiveTab} primaryColor={primaryColor} />
             )}
 
-            <NavItem id="billing" label="Membership & Billing" icon={CreditCard} active={activeTab === 'billing'} onClick={setActiveTab} />
+            <NavItem id="billing" label="Membership & Billing" icon={CreditCard} active={activeTab === 'billing'} onClick={setActiveTab} primaryColor={primaryColor} />
 
             {/* Conditional Tabs */}
             {memberData && (
               <>
                 <div className="my-2 border-t border-gray-200 mx-4"></div>
-                <NavItem id="family" label="Family Linking" icon={Users} active={activeTab === 'family'} onClick={setActiveTab} />
-                <NavItem id="history" label="Attendance History" icon={History} active={activeTab === 'history'} onClick={setActiveTab} />
+                <NavItem id="family" label="Family Linking" icon={Users} active={activeTab === 'family'} onClick={setActiveTab} primaryColor={primaryColor} />
+                <NavItem id="history" label="Attendance History" icon={History} active={activeTab === 'history'} onClick={setActiveTab} primaryColor={primaryColor} />
               </>
             )}
           </div>
@@ -389,7 +388,8 @@ const handleSubmit = async (e) => {
                 type="submit"
                 form="memberForm"
                 disabled={loading}
-                className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm transition-all"
+                className="px-6 py-2.5 text-white rounded-lg hover:opacity-90 font-medium shadow-sm transition-all"
+                style={{ backgroundColor: primaryColor }}
               >
                 {loading ? 'Saving...' : 'Save Changes'}
               </button>

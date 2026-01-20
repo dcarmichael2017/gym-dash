@@ -28,8 +28,9 @@ Cancellations must be requested 30 days in advance via the member portal...
 Harassment of members or staff will result in immediate termination...`
 };
 
-export const LegalSettingsTab = ({ gymId, showMessage }) => {
-  const [showHistory, setShowHistory] = useState(false); // New state
+export const LegalSettingsTab = ({ gymId, showMessage, theme }) => {
+  const primaryColor = theme?.primaryColor || '#2563eb';
+  const [showHistory, setShowHistory] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   
@@ -217,8 +218,9 @@ export const LegalSettingsTab = ({ gymId, showMessage }) => {
       <div className="pt-4 border-t border-gray-100 flex justify-end">
         <button
           onClick={handleSave}
-          disabled={loading || !hasChanges} // Disable if no changes
-          className="flex items-center px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={loading || !hasChanges}
+          className="flex items-center px-6 py-2 text-white rounded-lg hover:opacity-90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ backgroundColor: primaryColor }}
         >
           <Save className="h-4 w-4 mr-2" />
           {loading ? 'Saving...' : 'Save Legal Docs'}

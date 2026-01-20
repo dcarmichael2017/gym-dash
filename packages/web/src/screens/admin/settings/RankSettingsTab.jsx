@@ -8,7 +8,8 @@ import { PRESET_COLORS, RANK_PRESETS } from '../../../../../shared/constants/gym
 
 // --- COMPONENTS ---
 
-export const RankSettingsTab = ({ gymId, initialData, showMessage, onUpdate }) => {
+export const RankSettingsTab = ({ gymId, initialData, showMessage, onUpdate, theme }) => {
+  const primaryColor = theme?.primaryColor || '#2563eb';
   const [loading, setLoading] = useState(false);
   
   // Data State
@@ -416,7 +417,8 @@ export const RankSettingsTab = ({ gymId, initialData, showMessage, onUpdate }) =
         <button
           onClick={handleSave}
           disabled={loading}
-          className="flex items-center px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+          className="flex items-center px-6 py-2 text-white rounded-lg hover:opacity-90 transition-colors disabled:opacity-50"
+          style={{ backgroundColor: primaryColor }}
         >
           <Save className="h-4 w-4 mr-2" />
           {loading ? 'Saving...' : 'Save All Ranks'}

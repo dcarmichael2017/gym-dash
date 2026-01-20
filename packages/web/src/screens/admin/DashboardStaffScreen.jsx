@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { 
   Plus, 
@@ -28,6 +29,8 @@ import { FullScreenLoader } from '../../components/common/FullScreenLoader';
 import { uploadStaffPhoto } from '../../../../shared/api/storage';
 
 const DashboardStaffScreen = () => {
+  const { theme } = useOutletContext() || {};
+  const primaryColor = theme?.primaryColor || '#2563eb';
   const [loading, setLoading] = useState(true);
   const [gymId, setGymId] = useState(null);
   const [staffList, setStaffList] = useState([]);
@@ -201,7 +204,7 @@ const DashboardStaffScreen = () => {
             <h2 className="text-2xl font-bold text-gray-800">Staff Management</h2>
             <p className="text-gray-500">Manage instructors, coaches, and admin.</p>
         </div>
-        <button onClick={openAddModal} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700 transition-colors">
+        <button onClick={openAddModal} className="text-white px-4 py-2 rounded-lg flex items-center hover:opacity-90 transition-colors" style={{ backgroundColor: primaryColor }}>
           <Plus className="h-5 w-5 mr-2" /> Add Staff
         </button>
       </div>
@@ -217,7 +220,7 @@ const DashboardStaffScreen = () => {
                             {staff.photoUrl ? (
                                 <img src={staff.photoUrl} alt={staff.name} className="h-full w-full object-cover" />
                             ) : (
-                                <div className="h-full w-full flex items-center justify-center bg-blue-50 text-blue-600 font-bold text-xl">
+                                <div className="h-full w-full flex items-center justify-center font-bold text-xl" style={{ backgroundColor: `${primaryColor}10`, color: primaryColor }}>
                                     {staff.name[0]}
                                 </div>
                             )}
@@ -233,7 +236,7 @@ const DashboardStaffScreen = () => {
                     </div>
                     
                     <h3 className="font-bold text-gray-800 text-lg">{staff.name}</h3>
-                    <p className="text-blue-600 text-sm font-medium mb-3 flex items-center">
+                    <p className="text-sm font-medium mb-3 flex items-center" style={{ color: primaryColor }}>
                         <Shield className="h-3 w-3 mr-1" /> {staff.title}
                     </p>
                     {/* ... Bio/Email/Phone display remains the same ... */}
@@ -244,11 +247,11 @@ const DashboardStaffScreen = () => {
                 </div>
                 {/* ... Footer Actions remain the same ... */}
                 <div className="bg-gray-50 px-6 py-3 border-t border-gray-100 flex justify-end gap-3">
-                    <button onClick={() => openEditModal(staff)} className="text-gray-600 hover:text-blue-600 text-sm font-medium flex items-center">
+                    <button onClick={() => openEditModal(staff)} className="text-gray-600 text-sm font-medium flex items-center transition-colors hover:opacity-80" style={{ '--hover-color': primaryColor }} onMouseEnter={e => e.target.style.color = primaryColor} onMouseLeave={e => e.target.style.color = '#4b5563'}>
                         <Edit2 className="h-4 w-4 mr-1" /> Edit
                     </button>
-                    <button 
-                        onClick={() => handleDeleteClick(staff.id)} // Call new handler
+                    <button
+                        onClick={() => handleDeleteClick(staff.id)}
                         className="text-gray-400 hover:text-red-600 text-sm font-medium flex items-center transition-colors"
                     >
                         <Trash2 className="h-4 w-4 mr-1" /> Remove
@@ -260,7 +263,7 @@ const DashboardStaffScreen = () => {
             <div className="col-span-full py-16 text-center bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
                 <User className="h-12 w-12 text-gray-300 mx-auto mb-3" />
                 <p className="text-gray-500 font-medium">No staff members found.</p>
-                <button onClick={openAddModal} className="text-blue-600 text-sm hover:underline mt-1">Add your first team member</button>
+                <button onClick={openAddModal} className="text-sm hover:underline mt-1" style={{ color: primaryColor }}>Add your first team member</button>
             </div>
         )}
       </div>
@@ -293,13 +296,15 @@ const DashboardStaffScreen = () => {
                         <div className="px-6 bg-gray-50 border-b border-gray-100 flex items-center gap-4">
                             <button
                                 onClick={() => setModalTab('profile')}
-                                className={`py-2 text-sm font-semibold ${modalTab === 'profile' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                className={`py-2 text-sm font-semibold border-b-2 ${modalTab === 'profile' ? '' : 'text-gray-500 hover:text-gray-700 border-transparent'}`}
+                                style={modalTab === 'profile' ? { color: primaryColor, borderColor: primaryColor } : {}}
                             >
                                 Profile
                             </button>
                             <button
                                 onClick={() => setModalTab('payroll')}
-                                className={`py-2 text-sm font-semibold ${modalTab === 'payroll' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                className={`py-2 text-sm font-semibold border-b-2 ${modalTab === 'payroll' ? '' : 'text-gray-500 hover:text-gray-700 border-transparent'}`}
+                                style={modalTab === 'payroll' ? { color: primaryColor, borderColor: primaryColor } : {}}
                             >
                                 Payroll
                             </button>
@@ -403,16 +408,16 @@ const DashboardStaffScreen = () => {
                         ) : (
                             <div className="space-y-6 animate-in fade-in">
                                 {/* Payroll Tally */}
-                                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                                    <h4 className="font-bold text-blue-900">Current Month's Pay (Sample)</h4>
+                                <div className="rounded-xl p-4" style={{ backgroundColor: `${primaryColor}10`, border: `1px solid ${primaryColor}30` }}>
+                                    <h4 className="font-bold" style={{ color: primaryColor }}>Current Month's Pay (Sample)</h4>
                                     <div className="mt-3 flex justify-around items-center text-center">
                                         <div>
-                                            <p className="text-2xl font-bold text-blue-700">12</p>
-                                            <p className="text-xs text-blue-600 font-medium">Classes Taught</p>
+                                            <p className="text-2xl font-bold" style={{ color: primaryColor }}>12</p>
+                                            <p className="text-xs font-medium" style={{ color: primaryColor }}>Classes Taught</p>
                                         </div>
                                         <div>
-                                            <p className="text-2xl font-bold text-blue-700">${((formData.hourlyRate || 0) * 12).toFixed(2)}</p>
-                                            <p className="text-xs text-blue-600 font-medium">Total Owed</p>
+                                            <p className="text-2xl font-bold" style={{ color: primaryColor }}>${((formData.hourlyRate || 0) * 12).toFixed(2)}</p>
+                                            <p className="text-xs font-medium" style={{ color: primaryColor }}>Total Owed</p>
                                         </div>
                                     </div>
                                 </div>
@@ -467,7 +472,8 @@ const DashboardStaffScreen = () => {
                         </button>
                         <button 
                             type="submit"
-                            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors disabled:opacity-50 flex items-center"
+                            className="px-6 py-2 text-white rounded-lg hover:opacity-90 font-medium transition-colors disabled:opacity-50 flex items-center"
+                            style={{ backgroundColor: primaryColor }}
                             disabled={isSaving}
                         >
                             {isSaving ? 'Saving...' : (isEditMode ? 'Save Changes' : 'Create Staff')}

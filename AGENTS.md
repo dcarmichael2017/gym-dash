@@ -2076,9 +2076,40 @@ Implementation Details:
 - Created `getStorageStats` callable function for storage usage monitoring
 - Added helper functions in chat.js: `getExpiredMediaMessages()`, `removeMediaFromMessage()`, `getStorageGovernanceSettings()`, `updateStorageGovernanceSettings()`
 
-[ ] Mobile QA Across entire application:
+[x] Mobile QA Across entire application: ✅ COMPLETED
 
 Action: Verify both Admin and Member chat screens on actual mobile viewports (adjust padding/safe-areas). Confirm that admin and member screens work for both web and mobile views.
+
+Implementation Details:
+- **Theme System Audit**: Confirmed gym-specific theming via `theme.primaryColor` and `theme.secondaryColor` stored in Firestore
+- **Theme Distribution**: Admin screens receive theme via `useOutletContext()` from AdminLayout; Member screens use `useGym()` context
+- **Layout Presets**: 3 layouts supported (classic, sidebar, header) determining sidebar/header coloring
+
+**Admin Screen Theme Fixes:**
+- `DashboardMembersScreen.jsx`: Added table overflow fix (`overflow-x-auto`, `min-w-[640px]`) and themed "Add Member" button
+- `DashboardClassesScreen.jsx`: Themed view mode tabs (Weekly Schedule/One-Off Events), day badges, and icon boxes
+- `ClassFormModal/index.jsx`: Added theme prop, themed tabs and save button
+- `MembershipsScreen/index.jsx`: Themed tabs, passed theme to RecurringForm and ClassPackForm
+- `RecurringForm.jsx`: Themed visibility options, trial toggle, add feature button, submit button
+- `ClassPackForm.jsx`: Themed visibility options, add perk button, submit button
+- `MemberFormModal/index.jsx`: Themed NavItem component tabs and save button
+- `DashboardStaffScreen.jsx`: Themed avatar fallback, title badge, edit hover, modal tabs, payroll sample
+- `DashboardSettingsScreen.jsx`: Themed tabs, passed theme to all child settings tabs
+- Settings tabs (General, Booking, Legal, Rank, Branding): Updated save buttons to use primaryColor
+
+**Theme Pattern Used:**
+```javascript
+const { theme } = useOutletContext() || {};
+const primaryColor = theme?.primaryColor || '#2563eb';
+// Buttons: style={{ backgroundColor: primaryColor }}
+// Tabs: style={activeTab === 'x' ? { borderColor: primaryColor, color: primaryColor } : {}}
+// Badges: style={{ backgroundColor: `${primaryColor}10`, color: primaryColor }}
+```
+
+**Secondary Color Usage:**
+- `secondaryColor` is primarily used in AdminLayout for user avatar background
+- Used in BrandingSettingsTab for preview button outline
+- Most UI elements use `primaryColor` for consistency
 
 🟡 P2: Commerce & Payments (Phase 8 - "The Store")
 This is the next major module according to your docs. You cannot do "Stripe Integration" without the Store UI.

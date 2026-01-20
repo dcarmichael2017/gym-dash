@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
-import { Building, Palette, CreditCard, Scale, Settings, Medal } from 'lucide-react'; // Added Medal
+import { Building, Palette, CreditCard, Scale, Settings, Medal } from 'lucide-react';
 
 // API Imports
 import { auth, db } from '../../../../shared/api/firebaseConfig';
@@ -16,6 +17,9 @@ import { LegalSettingsTab } from './settings/LegalSettingsTab';
 import { RankSettingsTab } from './settings/RankSettingsTab';
 
 const DashboardSettingsScreen = () => {
+  const { theme } = useOutletContext() || {};
+  const primaryColor = theme?.primaryColor || '#2563eb';
+
   const [loading, setLoading] = useState(true);
   const [gymId, setGymId] = useState(null);
   const [activeTab, setActiveTab] = useState('general');
@@ -86,11 +90,8 @@ const DashboardSettingsScreen = () => {
             <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center px-6 py-4 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
-                    activeTab === tab.id 
-                    ? 'border-blue-600 text-blue-600' 
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
+                className={`flex items-center px-6 py-4 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${activeTab === tab.id ? '' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                style={activeTab === tab.id ? { borderColor: primaryColor, color: primaryColor } : {}}
             >
                 <tab.icon className="h-4 w-4 mr-2" />
                 {tab.label}
@@ -113,16 +114,17 @@ const DashboardSettingsScreen = () => {
         {/* 2. Pass refreshGymData as a prop (e.g., onUpdate) to tabs that modify data */}
         
         {activeTab === 'general' && (
-            <GeneralSettingsTab 
-                gymId={gymId} 
+            <GeneralSettingsTab
+                gymId={gymId}
                 initialData={{ name: gymData.name, description: gymData.description }}
                 showMessage={showMessage}
-                onUpdate={() => refreshGymData()} // Pass it here
+                onUpdate={() => refreshGymData()}
+                theme={theme}
             />
         )}
 
         {activeTab === 'branding' && (
-            <BrandingSettingsTab 
+            <BrandingSettingsTab
                 gymId={gymId}
                 initialData={{
                     primaryColor: gymData.theme?.primaryColor || '#DB2777',
@@ -132,37 +134,41 @@ const DashboardSettingsScreen = () => {
                 }}
                 showMessage={showMessage}
                 onUpdate={() => refreshGymData()}
+                theme={theme}
             />
         )}
 
         {activeTab === 'ranks' && (
-            <RankSettingsTab 
+            <RankSettingsTab
                 gymId={gymId}
                 initialData={gymData.grading}
                 showMessage={showMessage}
-                onUpdate={() => refreshGymData()} // <--- PASS IT HERE
+                onUpdate={() => refreshGymData()}
+                theme={theme}
             />
         )}
 
         {activeTab === 'booking' && (
-            <BookingPoliciesTab 
+            <BookingPoliciesTab
                 gymId={gymId}
                 initialData={gymData.booking}
                 showMessage={showMessage}
                 onUpdate={() => refreshGymData()}
+                theme={theme}
             />
         )}
 
         {activeTab === 'payments' && (
-            <PaymentsSettingsTab stripeId={gymData.stripeAccountId} />
+            <PaymentsSettingsTab stripeId={gymData.stripeAccountId} theme={theme} />
         )}
 
         {activeTab === 'legal' && (
-            <LegalSettingsTab 
+            <LegalSettingsTab
                 gymId={gymId}
                 initialData={gymData.legal}
                 showMessage={showMessage}
                 onUpdate={() => refreshGymData()}
+                theme={theme}
             />
         )}
 

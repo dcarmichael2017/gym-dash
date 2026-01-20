@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Save } from 'lucide-react';
 import { updateGymDetails } from '../../../../../shared/api/firestore';
 
-export const GeneralSettingsTab = ({ gymId, initialData, showMessage }) => {
+export const GeneralSettingsTab = ({ gymId, initialData, showMessage, theme }) => {
+  const primaryColor = theme?.primaryColor || '#2563eb';
   const [data, setData] = useState(initialData);
   const [saving, setSaving] = useState(false);
 
@@ -37,10 +38,11 @@ export const GeneralSettingsTab = ({ gymId, initialData, showMessage }) => {
           />
         </div>
         <div className="flex justify-end pt-4">
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             disabled={saving}
-            className="flex items-center bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            className="flex items-center text-white px-6 py-2 rounded-lg hover:opacity-90 disabled:opacity-50"
+            style={{ backgroundColor: primaryColor }}
           >
             <Save className="h-4 w-4 mr-2" /> {saving ? 'Saving...' : 'Save Changes'}
           </button>

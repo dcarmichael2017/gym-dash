@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Save, CalendarClock, LogIn, CheckSquare, Square, Info, DollarSign, AlertCircle, ChevronDown } from 'lucide-react';
 import { updateGymDetails } from '../../../../../shared/api/firestore';
 
-export const BookingPoliciesTab = ({ gymId, initialData, showMessage, onUpdate }) => {
+export const BookingPoliciesTab = ({ gymId, initialData, showMessage, onUpdate, theme }) => {
+  const primaryColor = theme?.primaryColor || '#2563eb';
   const [loading, setLoading] = useState(false);
   
   const [activeRules, setActiveRules] = useState({
@@ -309,7 +310,8 @@ export const BookingPoliciesTab = ({ gymId, initialData, showMessage, onUpdate }
         <button
           onClick={handleSave}
           disabled={loading}
-          className="flex items-center px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+          className="flex items-center px-6 py-2 text-white rounded-lg hover:opacity-90 transition-colors disabled:opacity-50"
+          style={{ backgroundColor: primaryColor }}
         >
           <Save className="h-4 w-4 mr-2" />
           {loading ? 'Saving...' : 'Save Policies'}

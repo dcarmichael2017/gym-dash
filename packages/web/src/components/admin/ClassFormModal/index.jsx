@@ -7,7 +7,8 @@ import { TabSchedule } from './TabSchedule';
 import { TabAccess } from './TabAccess';
 import { TabSettings } from './TabSettings';
 
-export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, membershipList = [], globalSettings, onSave, initialViewMode, onSessionClick }) => {
+export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, membershipList = [], globalSettings, onSave, initialViewMode, onSessionClick, theme }) => {
+    const primaryColor = theme?.primaryColor || '#2563eb';
     const { confirm: showConfirm } = useConfirm();
     const [activeTab, setActiveTab] = useState('schedule');
     const [rankSystems, setRankSystems] = useState([]);
@@ -385,17 +386,17 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
 
                     {/* TABS */}
                     <div className="flex px-6 space-x-6">
-                        <button onClick={() => setActiveTab('schedule')} className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'schedule' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                        <button onClick={() => setActiveTab('schedule')} className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'schedule' ? '' : 'border-transparent text-gray-500 hover:text-gray-700'}`} style={activeTab === 'schedule' ? { borderColor: primaryColor, color: primaryColor } : {}}>
                             <CalendarDays size={16} /> Schedule
                         </button>
-                        <button onClick={() => setActiveTab('access')} className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'access' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                        <button onClick={() => setActiveTab('access')} className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'access' ? '' : 'border-transparent text-gray-500 hover:text-gray-700'}`} style={activeTab === 'access' ? { borderColor: primaryColor, color: primaryColor } : {}}>
                             <CreditCard size={16} /> Access
                         </button>
-                        <button onClick={() => setActiveTab('settings')} className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'settings' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                        <button onClick={() => setActiveTab('settings')} className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'settings' ? '' : 'border-transparent text-gray-500 hover:text-gray-700'}`} style={activeTab === 'settings' ? { borderColor: primaryColor, color: primaryColor } : {}}>
                             <Sliders size={16} /> Settings
                         </button>
                         {isExistingClass && (
-                            <button onClick={() => setActiveTab('sessions')} className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'sessions' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                            <button onClick={() => setActiveTab('sessions')} className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'sessions' ? '' : 'border-transparent text-gray-500 hover:text-gray-700'}`} style={activeTab === 'sessions' ? { borderColor: primaryColor, color: primaryColor } : {}}>
                                 <CalendarRange size={16} /> Sessions
                             </button>
                         )}
@@ -496,13 +497,13 @@ export const ClassFormModal = ({ isOpen, onClose, gymId, classData, staffList, m
                     )}
 
                     {migrationReport ? (
-                        <button type="button" onClick={() => { onSave(); onClose(); }} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm">
+                        <button type="button" onClick={() => { onSave(); onClose(); }} className="px-6 py-2 text-white rounded-lg hover:opacity-90 font-medium transition-colors shadow-sm" style={{ backgroundColor: primaryColor }}>
                             Done
                         </button>
                     ) : (
                         <div className="flex justify-end gap-3">
                             <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors">Cancel</button>
-                            <button type="submit" form="classForm" disabled={loading || isClassActive} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm disabled:opacity-50">
+                            <button type="submit" form="classForm" disabled={loading || isClassActive} className="px-6 py-2 text-white rounded-lg hover:opacity-90 font-medium transition-colors shadow-sm disabled:opacity-50" style={{ backgroundColor: primaryColor }}>
                                 {loading ? 'Saving...' : (classData ? 'Save Changes' : 'Create Class')}
                             </button>
                         </div>

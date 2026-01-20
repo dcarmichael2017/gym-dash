@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { Plus, Trash2, Clock, Calendar as CalendarIcon, User, CalendarDays, Layers, RotateCcw, Archive } from 'lucide-react';
 
@@ -11,6 +12,9 @@ import { SeriesRetirementModal } from '../../components/admin/SeriesRetirementMo
 import { SessionDetailsModal } from '../../components/admin/SessionDetailsModal';
 
 const DashboardClassesScreen = () => {
+  const { theme } = useOutletContext() || {};
+  const primaryColor = theme?.primaryColor || '#2563eb';
+
   const [loading, setLoading] = useState(true);
   const [gymId, setGymId] = useState(null);
   const [classes, setClasses] = useState([]);
@@ -158,7 +162,8 @@ const DashboardClassesScreen = () => {
         </div>
         <button
           onClick={handleOpenCreate}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700 transition-colors shadow-sm"
+          className="text-white px-4 py-2 rounded-lg flex items-center hover:opacity-90 transition-colors shadow-sm"
+          style={{ backgroundColor: primaryColor }}
         >
           <Plus className="h-5 w-5 mr-2" /> Add Class
         </button>
@@ -169,13 +174,15 @@ const DashboardClassesScreen = () => {
         <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
           <button
             onClick={() => setViewMode('weekly')}
-            className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-all ${viewMode === 'weekly' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-all ${viewMode === 'weekly' ? 'bg-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            style={viewMode === 'weekly' ? { color: primaryColor } : {}}
           >
             <CalendarDays size={16} /> Weekly Schedule
           </button>
           <button
             onClick={() => setViewMode('events')}
-            className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-all ${viewMode === 'events' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-all ${viewMode === 'events' ? 'bg-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            style={viewMode === 'events' ? { color: primaryColor } : {}}
           >
             <Layers size={16} /> One-Off Events
           </button>
@@ -202,7 +209,7 @@ const DashboardClassesScreen = () => {
             <p className="text-gray-500 font-medium">
               {viewMode === 'weekly' ? 'No recurring classes found.' : 'No upcoming events found.'}
             </p>
-            <button onClick={handleOpenCreate} className="mt-4 text-blue-600 font-medium hover:underline">
+            <button onClick={handleOpenCreate} className="mt-4 font-medium hover:underline" style={{ color: primaryColor }}>
               Create your first {viewMode === 'weekly' ? 'class' : 'event'}
             </button>
           </div>
@@ -242,17 +249,16 @@ const DashboardClassesScreen = () => {
                 )}
                 <div className={`flex items-start md:items-center gap-5 ${isArchived ? 'opacity-60' : ''}`}>
                   {/* Icon Box */}
-                  <div className={`h-12 w-12 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      cls.frequency === 'Single Event' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'
-                  }`}>
+                  <div
+                      className={`h-12 w-12 rounded-lg flex items-center justify-center flex-shrink-0 ${cls.frequency === 'Single Event' ? 'bg-purple-50 text-purple-600' : ''}`}
+                      style={cls.frequency !== 'Single Event' ? { backgroundColor: `${primaryColor}10`, color: primaryColor } : {}}
+                  >
                      {cls.frequency === 'Single Event' ? <Layers className="h-6 w-6" /> : <Clock className="h-6 w-6" />}
                   </div>
 
                   <div>
-                    <h3 className={`font-bold text-lg transition-colors ${
-                        isArchived ? 'text-gray-600' : 'text-gray-800 group-hover:text-blue-600'
-                    }`}>
-                        {cls.name}
+                    <h3 className={`font-bold text-lg transition-colors ${isArchived ? 'text-gray-600' : 'text-gray-800'}`} style={!isArchived ? { '--hover-color': primaryColor } : {}}>
+                        <span className="group-hover:text-[--hover-color]">{cls.name}</span>
                     </h3>
                     
                     {/* Metadata Row */}
@@ -278,7 +284,7 @@ const DashboardClassesScreen = () => {
                     {cls.frequency !== 'Single Event' && (
                       <div className="flex gap-1.5 mt-3">
                         {cls.days.map(day => (
-                            <span key={day} className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-xs font-medium border border-blue-100">
+                            <span key={day} className="px-2 py-0.5 rounded text-xs font-medium border" style={{ backgroundColor: `${primaryColor}10`, color: primaryColor, borderColor: `${primaryColor}20` }}>
                                 {day.slice(0, 3)}
                             </span>
                         ))}
@@ -368,6 +374,7 @@ const DashboardClassesScreen = () => {
         onSave={() => refreshData(gymId)}
         initialViewMode={viewMode}
         onSessionClick={handleViewSessionRoster}
+        theme={theme}
       />
     </div>
   );

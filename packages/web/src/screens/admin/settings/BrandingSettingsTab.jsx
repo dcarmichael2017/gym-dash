@@ -12,7 +12,8 @@ const THEME_PRESETS = [
   { name: 'Sunset', primary: '#EA580C', secondary: '#F59E0B' },
 ];
 
-export const BrandingSettingsTab = ({ gymId, initialData, showMessage }) => {
+export const BrandingSettingsTab = ({ gymId, initialData, showMessage, theme }) => {
+  const themeColor = theme?.primaryColor || '#2563eb';
   const [data, setData] = useState(initialData);
   const [logoFile, setLogoFile] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -238,10 +239,11 @@ export const BrandingSettingsTab = ({ gymId, initialData, showMessage }) => {
 
         {/* SUBMIT */}
         <div className="flex justify-end pt-4">
-            <button 
-                type="submit" 
-                disabled={saving} 
-                className="flex items-center bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            <button
+                type="submit"
+                disabled={saving}
+                className="flex items-center text-white px-6 py-2 rounded-lg hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: themeColor }}
             >
                 <Save className="h-4 w-4 mr-2" /> {saving ? 'Saving...' : 'Save Branding'}
             </button>

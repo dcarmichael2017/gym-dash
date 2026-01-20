@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { Plus, Repeat, Ticket } from 'lucide-react';
 
@@ -19,6 +20,9 @@ import RecurringPlansTab from './RecurringPlansTab';
 import ClassPacksTab from './ClassPacksTab';
 
 const MembershipsScreen = () => {
+  const { theme } = useOutletContext() || {};
+  const primaryColor = theme?.primaryColor || '#2563eb';
+
   const [loading, setLoading] = useState(true);
   const [gymId, setGymId] = useState(null);
   const [tiers, setTiers] = useState([]);
@@ -121,8 +125,9 @@ const MembershipsScreen = () => {
         </div>
         
         <button 
-            onClick={handleOpenAdd} 
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700 transition-colors shadow-sm font-bold text-sm"
+            onClick={handleOpenAdd}
+            className="text-white px-4 py-2 rounded-lg flex items-center hover:opacity-90 transition-colors shadow-sm font-bold text-sm"
+            style={{ backgroundColor: primaryColor }}
         >
           <Plus className="h-5 w-5 mr-2" /> 
           {activeTab === 'recurring' ? 'Create Plan' : 'Create Pack'}
@@ -131,19 +136,17 @@ const MembershipsScreen = () => {
 
       {/* Tabs */}
       <div className="flex gap-6 mb-6 border-b border-gray-200">
-          <button 
+          <button
             onClick={() => setActiveTab('recurring')}
-            className={`pb-3 text-sm font-bold flex items-center gap-2 transition-all border-b-2 ${
-                activeTab === 'recurring' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
+            className={`pb-3 text-sm font-bold flex items-center gap-2 transition-all border-b-2 ${activeTab === 'recurring' ? '' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            style={activeTab === 'recurring' ? { borderColor: primaryColor, color: primaryColor } : {}}
           >
              <Repeat size={16} /> Recurring Plans
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('pack')}
-            className={`pb-3 text-sm font-bold flex items-center gap-2 transition-all border-b-2 ${
-                activeTab === 'pack' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
+            className={`pb-3 text-sm font-bold flex items-center gap-2 transition-all border-b-2 ${activeTab === 'pack' ? '' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            style={activeTab === 'pack' ? { borderColor: primaryColor, color: primaryColor } : {}}
           >
              <Ticket size={16} /> Class Packs
           </button>
@@ -180,18 +183,20 @@ const MembershipsScreen = () => {
       >
           {/* CONDITIONALLY RENDER FORM BASED ON ACTIVE TAB */}
           {activeTab === 'recurring' ? (
-              <RecurringForm 
-                  gymId={gymId} 
-                  tierData={selectedTier} 
+              <RecurringForm
+                  gymId={gymId}
+                  tierData={selectedTier}
                   onSave={() => refreshData(gymId)}
                   onClose={() => setIsModalOpen(false)}
+                  theme={theme}
               />
           ) : (
-              <ClassPackForm 
-                  gymId={gymId} 
-                  tierData={selectedTier} 
+              <ClassPackForm
+                  gymId={gymId}
+                  tierData={selectedTier}
                   onSave={() => refreshData(gymId)}
                   onClose={() => setIsModalOpen(false)}
+                  theme={theme}
               />
           )}
       </Modal>

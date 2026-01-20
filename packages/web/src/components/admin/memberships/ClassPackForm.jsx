@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Ticket, Plus, Trash2, Check, Globe, Users, Lock, Coins } from 'lucide-react';
 import { createMembershipTier, updateMembershipTier } from '../../../../../../packages/shared/api/firestore';
 
-const ClassPackForm = ({ gymId, tierData, onSave, onClose }) => {
+const ClassPackForm = ({ gymId, tierData, onSave, onClose, theme }) => {
+  const primaryColor = theme?.primaryColor || '#2563eb';
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -75,16 +76,13 @@ const ClassPackForm = ({ gymId, tierData, onSave, onClose }) => {
     <button
       type="button"
       onClick={() => setFormData({ ...formData, visibility: value })}
-      className={`flex-1 p-3 rounded-xl border text-left transition-all ${
-        formData.visibility === value 
-          ? 'bg-blue-50 border-blue-500 ring-1 ring-blue-500' 
-          : 'bg-white border-gray-200 hover:border-blue-200'
-      }`}
+      className={`flex-1 p-3 rounded-xl border text-left transition-all ${formData.visibility === value ? 'ring-1' : 'bg-white border-gray-200 hover:border-gray-300'}`}
+      style={formData.visibility === value ? { backgroundColor: `${primaryColor}10`, borderColor: primaryColor, ringColor: primaryColor } : {}}
     >
-      <div className={`mb-1 ${formData.visibility === value ? 'text-blue-600' : 'text-gray-400'}`}>
+      <div className="mb-1" style={{ color: formData.visibility === value ? primaryColor : '#9ca3af' }}>
         <Icon size={20} />
       </div>
-      <div className={`text-xs font-bold uppercase ${formData.visibility === value ? 'text-blue-900' : 'text-gray-600'}`}>
+      <div className="text-xs font-bold uppercase" style={{ color: formData.visibility === value ? primaryColor : '#4b5563' }}>
         {label}
       </div>
       <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">
@@ -158,7 +156,7 @@ const ClassPackForm = ({ gymId, tierData, onSave, onClose }) => {
                         <button type="button" onClick={() => removeFeature(i)} className="text-gray-400 hover:text-red-500"><Trash2 size={18} /></button>
                     </div>
                 ))}
-                <button type="button" onClick={addFeature} className="text-xs font-bold text-blue-600 flex items-center gap-1 hover:bg-blue-50 px-2 py-1 rounded"><Plus size={14} /> Add Perk</button>
+                <button type="button" onClick={addFeature} className="text-xs font-bold flex items-center gap-1 hover:opacity-80 px-2 py-1 rounded" style={{ color: primaryColor }}><Plus size={14} /> Add Perk</button>
             </div>
         </div>
 
@@ -173,7 +171,7 @@ const ClassPackForm = ({ gymId, tierData, onSave, onClose }) => {
 
         <div className="pt-6 mt-4 border-t border-gray-100 flex justify-end gap-3">
             <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors">Cancel</button>
-            <button type="submit" disabled={loading} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 transition-colors shadow-sm">{loading ? 'Saving...' : (tierData ? 'Update Pack' : 'Create Pack')}</button>
+            <button type="submit" disabled={loading} className="px-6 py-2 text-white rounded-lg hover:opacity-90 font-medium disabled:opacity-50 transition-colors shadow-sm" style={{ backgroundColor: primaryColor }}>{loading ? 'Saving...' : (tierData ? 'Update Pack' : 'Create Pack')}</button>
         </div>
     </form>
   );
