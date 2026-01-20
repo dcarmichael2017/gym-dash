@@ -8,3 +8,4 @@ export * from './members';
 export * from './bookings';
 export * from './credits';
 export * from './chat';
+export * from './community';

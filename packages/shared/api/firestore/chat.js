@@ -7,12 +7,13 @@ import {
   updateDoc,
   deleteDoc,
   query,
-  where,
   orderBy,
+  where,
   limit as firestoreLimit,
   onSnapshot,
   serverTimestamp,
-  deleteField
+  deleteField,
+  Timestamp
 } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
@@ -30,10 +31,12 @@ export const createChatGroup = async (gymId, groupName, memberIds, creatorId) =>
       return { success: false, error: "Missing required fields" };
     }
 
-    // Create members map from array
+    // Create members map with joinedAt timestamps
+    // Members can only see messages sent after they joined
+    const now = new Date();
     const membersMap = {};
     memberIds.forEach(id => {
-      membersMap[id] = true;
+      membersMap[id] = { joinedAt: now };
     });
 
     const chatGroupsRef = collection(db, "gyms", gymId, "chatGroups");
@@ -83,6 +86,7 @@ export const deleteChatGroup = async (gymId, groupId) => {
 
 /**
  * Add a member to a chat group
+ * Stores a joinedAt timestamp so the member can only see messages sent after joining
  * @param {string} gymId - The gym ID
  * @param {string} groupId - The chat group ID
  * @param {string} userId - User ID to add
@@ -92,7 +96,7 @@ export const addChatMember = async (gymId, groupId, userId) => {
   try {
     const groupRef = doc(db, "gyms", gymId, "chatGroups", groupId);
     await updateDoc(groupRef, {
-      [`members.${userId}`]: true,
+      [`members.${userId}`]: { joinedAt: new Date() },
       updatedAt: serverTimestamp()
     });
 
@@ -157,17 +161,20 @@ export const getAllChatGroups = async (gymId) => {
 export const getUserChatGroups = async (gymId, userId) => {
   try {
     const chatGroupsRef = collection(db, "gyms", gymId, "chatGroups");
-    const q = query(
-      chatGroupsRef,
-      where(`members.${userId}`, "==", true),
-      orderBy("updatedAt", "desc")
-    );
+    // Fetch all groups and filter client-side to support both legacy and new member format
+    const q = query(chatGroupsRef, orderBy("updatedAt", "desc"));
     const snapshot = await getDocs(q);
 
-    const groups = snapshot.docs.map(doc => ({
+    const allGroups = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     }));
+
+    // Filter to groups where user is a member (supports both formats)
+    const groups = allGroups.filter(g => {
+      const memberData = g.members?.[userId];
+      return memberData === true || (memberData && memberData.joinedAt);
+    });
 
     return { success: true, groups };
   } catch (error) {
@@ -184,31 +191,58 @@ export const getUserChatGroups = async (gymId, userId) => {
  * @param {string} senderName - Name of sender
  * @param {string} senderRole - Role of sender
  * @param {string} text - Message text
+ * @param {object} media - Optional media attachment { type, url, width, height, size }
  * @returns {Promise<{success: boolean, messageId?: string, error?: string}>}
  */
-export const sendMessage = async (gymId, groupId, senderId, senderName, senderRole, text) => {
+export const sendMessage = async (gymId, groupId, senderId, senderName, senderRole, text, media = null) => {
   try {
-    if (!text || text.trim() === "") {
-      return { success: false, error: "Message cannot be empty" };
+    // Either text or media must be provided
+    const hasText = text && text.trim() !== "";
+    const hasMedia = media && media.url;
+
+    if (!hasText && !hasMedia) {
+      return { success: false, error: "Message must have text or media" };
+    }
+
+    // Build message object
+    const messageData = {
+      senderId,
+      senderName,
+      senderRole,
+      text: hasText ? text.trim() : "",
+      timestamp: serverTimestamp(),
+      deletedAt: null,
+      deletedBy: null
+    };
+
+    // Add media if present
+    if (hasMedia) {
+      messageData.media = {
+        type: media.type || 'image',
+        url: media.url,
+        width: media.width || 0,
+        height: media.height || 0,
+        size: media.size || 0
+      };
     }
 
     // Add message to messages subcollection
     const messagesRef = collection(db, "gyms", gymId, "chatGroups", groupId, "messages");
-    const newMessageRef = await addDoc(messagesRef, {
-      senderId,
-      senderName,
-      senderRole,
-      text: text.trim(),
-      timestamp: serverTimestamp(),
-      deletedAt: null,
-      deletedBy: null
-    });
+    const newMessageRef = await addDoc(messagesRef, messageData);
+
+    // Build preview text for the group list
+    let previewText = hasText ? text.trim().substring(0, 100) : '';
+    if (hasMedia && !hasText) {
+      previewText = media.type === 'gif' ? '📎 Sent a GIF' : '📷 Sent an image';
+    } else if (hasMedia && hasText) {
+      previewText = `📷 ${text.trim().substring(0, 80)}`;
+    }
 
     // Update group with last message info
     const groupRef = doc(db, "gyms", gymId, "chatGroups", groupId);
     await updateDoc(groupRef, {
       lastMessageAt: serverTimestamp(),
-      lastMessageText: text.trim().substring(0, 100), // Truncate for preview
+      lastMessageText: previewText,
       lastMessageSender: senderName,
       updatedAt: serverTimestamp()
     });
@@ -283,24 +317,26 @@ export const subscribeToChatGroups = (gymId, userId, callback) => {
   try {
     const chatGroupsRef = collection(db, "gyms", gymId, "chatGroups");
 
-    let q;
-    if (userId) {
-      // Member view: only groups they're in
-      q = query(
-        chatGroupsRef,
-        where(`members.${userId}`, "==", true),
-        orderBy("updatedAt", "desc")
-      );
-    } else {
-      // Admin view: all groups
-      q = query(chatGroupsRef, orderBy("updatedAt", "desc"));
-    }
+    // Always fetch all groups and filter client-side for members
+    // This supports both legacy format (members.userId = true) and
+    // new format (members.userId = { joinedAt })
+    const q = query(chatGroupsRef, orderBy("updatedAt", "desc"));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const groups = snapshot.docs.map(doc => ({
+      let groups = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
+
+      // If userId provided, filter to only groups they're a member of
+      if (userId) {
+        groups = groups.filter(g => {
+          const memberData = g.members?.[userId];
+          // Support both legacy (true) and new format ({ joinedAt })
+          return memberData === true || (memberData && memberData.joinedAt);
+        });
+      }
+
       callback(groups);
     }, (error) => {
       console.error("Error in chat groups subscription:", error);
@@ -361,7 +397,9 @@ export const isUserInChatGroup = async (gymId, groupId, userId) => {
     }
 
     const groupData = groupSnap.data();
-    const isMember = groupData.members && groupData.members[userId] === true;
+    // Support both old format (true) and new format ({ joinedAt })
+    const memberData = groupData.members?.[userId];
+    const isMember = memberData === true || (memberData && memberData.joinedAt);
 
     return { success: true, isMember };
   } catch (error) {
@@ -415,4 +453,226 @@ export const getUnreadCount = (group, userId, messages) => {
     const msgTime = msg.timestamp?.toDate ? msg.timestamp.toDate() : new Date(msg.timestamp);
     return msgTime > lastReadTime;
   }).length;
+};
+
+/**
+ * Get the joinedAt timestamp for a member in a chat group
+ * Returns null if the user is not a member or if using legacy format
+ * @param {object} group - Chat group data
+ * @param {string} userId - User ID to check
+ * @returns {Date|null} The joinedAt date or null
+ */
+export const getMemberJoinedAt = (group, userId) => {
+  const memberData = group?.members?.[userId];
+  if (!memberData) return null;
+
+  // Legacy format: members[userId] = true (no joinedAt restriction)
+  if (memberData === true) return null;
+
+  // New format: members[userId] = { joinedAt: timestamp }
+  if (memberData.joinedAt) {
+    return memberData.joinedAt.toDate
+      ? memberData.joinedAt.toDate()
+      : new Date(memberData.joinedAt);
+  }
+
+  return null;
+};
+
+/**
+ * Filter messages to only show those sent after the user joined the chat
+ * This ensures users who are removed and re-added cannot see old messages
+ * @param {array} messages - Array of messages
+ * @param {object} group - Chat group data
+ * @param {string} userId - User ID to filter for
+ * @returns {array} Filtered messages the user is allowed to see
+ */
+export const filterMessagesForMember = (messages, group, userId) => {
+  if (!messages || messages.length === 0) return [];
+
+  const joinedAt = getMemberJoinedAt(group, userId);
+
+  // If no joinedAt (legacy format or admin), show all messages
+  if (!joinedAt) return messages;
+
+  // Filter to only show messages sent after the user joined
+  return messages.filter(msg => {
+    const msgTime = msg.timestamp?.toDate
+      ? msg.timestamp.toDate()
+      : new Date(msg.timestamp);
+    return msgTime >= joinedAt;
+  });
+};
+
+/**
+ * Check if a user is a member (helper that handles both legacy and new format)
+ * @param {object} group - Chat group data
+ * @param {string} userId - User ID to check
+ * @returns {boolean} Whether the user is a member
+ */
+export const isMember = (group, userId) => {
+  const memberData = group?.members?.[userId];
+  // Support both legacy (true) and new format ({ joinedAt })
+  return memberData === true || (memberData && memberData.joinedAt);
+};
+
+/**
+ * Get member count from a group (handles both legacy and new format)
+ * @param {object} group - Chat group data
+ * @returns {number} Number of members
+ */
+export const getMemberCount = (group) => {
+  if (!group?.members) return 0;
+  return Object.keys(group.members).length;
+};
+
+// ============================================================================
+// STORAGE GOVERNANCE FUNCTIONS
+// ============================================================================
+
+/**
+ * Get messages with media that are older than the retention period
+ * @param {string} gymId - The gym ID
+ * @param {string} groupId - The chat group ID
+ * @param {number} retentionDays - Number of days to retain media (default 30)
+ * @returns {Promise<{success: boolean, messages?: Array, error?: string}>}
+ */
+export const getExpiredMediaMessages = async (gymId, groupId, retentionDays = 30) => {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+    const cutoffTimestamp = Timestamp.fromDate(cutoffDate);
+
+    const messagesRef = collection(db, "gyms", gymId, "chatGroups", groupId, "messages");
+    const q = query(
+      messagesRef,
+      where("timestamp", "<", cutoffTimestamp),
+      orderBy("timestamp", "asc")
+    );
+
+    const snapshot = await getDocs(q);
+
+    // Filter to only messages with media
+    const expiredMediaMessages = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter(msg => msg.media && msg.media.url && !msg.deletedAt);
+
+    return { success: true, messages: expiredMediaMessages };
+  } catch (error) {
+    console.error("Error getting expired media messages:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Soft-delete media from a message (removes media but keeps text)
+ * Used for storage governance to clean up old media
+ * @param {string} gymId - The gym ID
+ * @param {string} groupId - The chat group ID
+ * @param {string} messageId - The message ID
+ * @returns {Promise<{success: boolean, mediaUrl?: string, error?: string}>}
+ */
+export const removeMediaFromMessage = async (gymId, groupId, messageId) => {
+  try {
+    const messageRef = doc(db, "gyms", gymId, "chatGroups", groupId, "messages", messageId);
+    const messageSnap = await getDoc(messageRef);
+
+    if (!messageSnap.exists()) {
+      return { success: false, error: "Message not found" };
+    }
+
+    const messageData = messageSnap.data();
+    const mediaUrl = messageData.media?.url;
+
+    // Update message to remove media but keep text
+    await updateDoc(messageRef, {
+      media: deleteField(),
+      mediaExpired: true,
+      mediaExpiredAt: serverTimestamp()
+    });
+
+    return { success: true, mediaUrl };
+  } catch (error) {
+    console.error("Error removing media from message:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Get all chat groups for a gym (for batch cleanup operations)
+ * @param {string} gymId - The gym ID
+ * @returns {Promise<{success: boolean, groups?: Array, error?: string}>}
+ */
+export const getAllChatGroupIds = async (gymId) => {
+  try {
+    const chatGroupsRef = collection(db, "gyms", gymId, "chatGroups");
+    const snapshot = await getDocs(chatGroupsRef);
+
+    const groupIds = snapshot.docs.map(doc => doc.id);
+    return { success: true, groupIds };
+  } catch (error) {
+    console.error("Error getting chat group IDs:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Get storage governance settings for a gym
+ * @param {string} gymId - The gym ID
+ * @returns {Promise<{success: boolean, settings?: object, error?: string}>}
+ */
+export const getStorageGovernanceSettings = async (gymId) => {
+  try {
+    const gymRef = doc(db, "gyms", gymId);
+    const gymSnap = await getDoc(gymRef);
+
+    if (!gymSnap.exists()) {
+      return { success: false, error: "Gym not found" };
+    }
+
+    const gymData = gymSnap.data();
+    const settings = {
+      chatMediaRetentionDays: gymData.chatMediaRetentionDays ?? 30,
+      communityMediaRetentionDays: gymData.communityMediaRetentionDays ?? 90,
+      maxStoragePerTierMB: gymData.maxStoragePerTierMB ?? {
+        free: 500,
+        basic: 2000,
+        pro: 10000,
+        enterprise: -1 // unlimited
+      },
+      currentTier: gymData.subscriptionTier ?? 'free'
+    };
+
+    return { success: true, settings };
+  } catch (error) {
+    console.error("Error getting storage governance settings:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Update storage governance settings for a gym
+ * @param {string} gymId - The gym ID
+ * @param {object} settings - Settings to update
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+export const updateStorageGovernanceSettings = async (gymId, settings) => {
+  try {
+    const gymRef = doc(db, "gyms", gymId);
+
+    const updateData = {};
+    if (settings.chatMediaRetentionDays !== undefined) {
+      updateData.chatMediaRetentionDays = settings.chatMediaRetentionDays;
+    }
+    if (settings.communityMediaRetentionDays !== undefined) {
+      updateData.communityMediaRetentionDays = settings.communityMediaRetentionDays;
+    }
+
+    await updateDoc(gymRef, updateData);
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating storage governance settings:", error);
+    return { success: false, error: error.message };
+  }
 };

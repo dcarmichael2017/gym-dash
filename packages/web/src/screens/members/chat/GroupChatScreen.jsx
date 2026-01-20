@@ -1,24 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, ArrowLeft, MessageSquare } from 'lucide-react';
+import { Send, ArrowLeft, MessageSquare, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { useGym } from '../../../context/GymContext';
 import {
   subscribeToChatGroups,
   subscribeToMessages,
   sendMessage,
-  markChatAsRead
+  markChatAsRead,
+  filterMessagesForMember,
+  getMemberCount,
+  getMemberJoinedAt
 } from '@shared/api/firestore';
+import { uploadChatImage } from '@shared/api/storage';
 import { doc, getDoc } from 'firebase/firestore';
 import { db, auth } from '@shared/api/firebaseConfig';
 import { ProfilePopup } from '../../../components/common/ProfilePopup';
-
-// ============================================================================
-// HELPER FUNCTIONS (Moved outside components to prevent recreation)
-// ============================================================================
-
-const getMemberCount = (group) => {
-  if (!group.members) return 0;
-  return Object.keys(group.members).length;
-};
 
 const getInitials = (name) => {
   const parts = name.split(' ');
@@ -55,12 +50,20 @@ const getUnreadCount = (group, userId) => {
   // If no messages yet
   if (!lastMessageAt) return 0;
 
-  // If never read, there's at least one unread message
+  const lastMsgTime = lastMessageAt.toDate ? lastMessageAt.toDate() : new Date(lastMessageAt);
+
+  // Check if user has a joinedAt timestamp (new format)
+  // If the last message was sent before the user joined, they have no unread messages
+  const joinedAt = getMemberJoinedAt(group, userId);
+  if (joinedAt && lastMsgTime < joinedAt) {
+    return 0; // Last message was before user joined, so nothing to show as unread
+  }
+
+  // If never read, there's at least one unread message (but only if it's after joinedAt)
   if (!lastReadAt) return 1;
 
   // Compare timestamps
   const lastReadTime = lastReadAt.toDate ? lastReadAt.toDate() : new Date(lastReadAt);
-  const lastMsgTime = lastMessageAt.toDate ? lastMessageAt.toDate() : new Date(lastMessageAt);
 
   // If last message is after last read time, and it's not from the current user
   if (lastMsgTime > lastReadTime && group.lastMessageSender !== userId) {
@@ -74,7 +77,7 @@ const getUnreadCount = (group, userId) => {
 // CHAT LIST COMPONENT (Moved outside to prevent recreation)
 // ============================================================================
 
-const ChatList = ({ chats, onSelectChat, currentUserId }) => (
+const ChatList = ({ chats, onSelectChat, currentUserId, theme }) => (
   <div className="w-full flex flex-col bg-white h-full">
     <div className="p-4 border-b bg-white sticky top-0 z-10">
       <h1 className="text-xl font-bold text-gray-800">Messages</h1>
@@ -90,7 +93,10 @@ const ChatList = ({ chats, onSelectChat, currentUserId }) => (
               onClick={() => onSelectChat(chat)}
               className="p-3 flex items-center gap-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 active:bg-gray-100 transition-colors"
             >
-              <div className="w-12 h-12 rounded-full bg-blue-200 flex items-center justify-center font-bold text-blue-600 shrink-0">
+              <div
+                className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-white shrink-0"
+                style={{ backgroundColor: theme.primaryColor }}
+              >
                 {getInitials(chat.name)}
               </div>
               <div className="flex-1 min-w-0">
@@ -107,7 +113,10 @@ const ChatList = ({ chats, onSelectChat, currentUserId }) => (
                     {chat.lastMessageText || 'No messages yet'}
                   </p>
                   {unreadCount > 0 && (
-                    <div className="ml-2 shrink-0 bg-blue-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                    <div
+                      className="ml-2 shrink-0 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center"
+                      style={{ backgroundColor: theme.primaryColor }}
+                    >
                       {unreadCount}
                     </div>
                   )}
@@ -139,11 +148,25 @@ const ActiveChat = ({
   messageText,
   onMessageChange,
   onSendMessage,
+  onSendImage,
   onBack,
-  userProfile,
-  messagesEndRef
+  theme,
+  messagesEndRef,
+  uploadingImage
 }) => {
   const user = auth.currentUser;
+  const imageInputRef = useRef(null);
+
+  const handleImageSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      await onSendImage(file);
+    }
+    // Reset input so same file can be selected again
+    if (imageInputRef.current) {
+      imageInputRef.current.value = '';
+    }
+  };
 
   return (
     <div className="w-full flex flex-col h-full bg-gray-50">
@@ -180,13 +203,14 @@ const ActiveChat = ({
                   className={`flex gap-2 ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}
                 >
                   <div
-                    className={`w-8 h-8 rounded-full shrink-0 mt-1 flex items-center justify-center text-white text-xs font-bold ${
-                      isCurrentUser
-                        ? 'bg-green-600'
+                    className="w-8 h-8 rounded-full shrink-0 mt-1 flex items-center justify-center text-white text-xs font-bold"
+                    style={{
+                      backgroundColor: isCurrentUser
+                        ? theme.primaryColor
                         : isAdmin
-                        ? 'bg-blue-600'
-                        : 'bg-gray-400'
-                    }`}
+                        ? theme.primaryColor
+                        : '#9ca3af'
+                    }}
                   >
                     {getInitials(msg.senderName)}
                   </div>
@@ -207,20 +231,36 @@ const ActiveChat = ({
                         />
                       )}
                       {isAdmin && !isCurrentUser && (
-                        <span className="text-xs text-blue-600 font-medium">Admin</span>
+                        <span className="text-xs font-medium" style={{ color: theme.primaryColor }}>Admin</span>
                       )}
                       <span className="text-xs text-gray-400">
                         {formatTimestamp(msg.timestamp)}
                       </span>
                     </div>
                     <div
-                      className={`p-3 rounded-lg text-sm inline-block max-w-md ${
-                        isCurrentUser
-                          ? 'bg-green-500 text-white'
-                          : 'bg-white text-gray-800 border border-gray-200'
-                      }`}
+                      className={`rounded-lg text-sm inline-block max-w-md ${msg.media ? 'p-1' : 'p-3'}`}
+                      style={{
+                        backgroundColor: isCurrentUser ? theme.primaryColor : '#ffffff',
+                        color: isCurrentUser ? '#ffffff' : '#1f2937',
+                        border: isCurrentUser ? 'none' : '1px solid #e5e7eb'
+                      }}
                     >
-                      {msg.text}
+                      {/* Media content */}
+                      {msg.media && msg.media.url && (
+                        <div className="mb-1">
+                          <img
+                            src={msg.media.url}
+                            alt="Chat image"
+                            className="rounded-lg max-w-full max-h-64 object-contain cursor-pointer"
+                            onClick={() => window.open(msg.media.url, '_blank')}
+                            loading="lazy"
+                          />
+                        </div>
+                      )}
+                      {/* Text content */}
+                      {msg.text && (
+                        <p className={msg.media ? 'px-2 pb-1' : ''}>{msg.text}</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -232,23 +272,51 @@ const ActiveChat = ({
 
       {/* Input Area - Fixed at bottom */}
       <div className="p-4 bg-white border-t sticky bottom-0">
-        <div className="relative">
+        <div className="flex items-center gap-2">
+          {/* Image Upload Button */}
           <input
-            type="text"
-            value={messageText}
-            onChange={(e) => onMessageChange(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && onSendMessage()}
-            placeholder="Type a message..."
-            className="w-full p-3 pr-12 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
-            autoComplete="off"
+            type="file"
+            ref={imageInputRef}
+            onChange={handleImageSelect}
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            className="hidden"
+            disabled={uploadingImage}
           />
           <button
-            onClick={onSendMessage}
-            disabled={!messageText.trim()}
-            className="absolute right-2 top-1/2 -translate-y-1/2 bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed active:scale-95 transition-transform"
+            onClick={() => imageInputRef.current?.click()}
+            disabled={uploadingImage}
+            className="p-2 text-gray-500 hover:text-gray-700 active:scale-95 transition-all disabled:opacity-50"
+            title="Send image or GIF"
           >
-            <Send size={18} />
+            {uploadingImage ? (
+              <Loader2 size={20} className="animate-spin" />
+            ) : (
+              <ImageIcon size={20} />
+            )}
           </button>
+
+          {/* Text Input */}
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={messageText}
+              onChange={(e) => onMessageChange(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && onSendMessage()}
+              placeholder="Type a message..."
+              className="w-full p-3 pr-12 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2"
+              style={{ '--tw-ring-color': theme.primaryColor }}
+              autoComplete="off"
+              disabled={uploadingImage}
+            />
+            <button
+              onClick={onSendMessage}
+              disabled={!messageText.trim() || uploadingImage}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-white p-2 rounded-lg hover:opacity-90 disabled:bg-gray-300 disabled:cursor-not-allowed active:scale-95 transition-all"
+              style={{ backgroundColor: messageText.trim() && !uploadingImage ? theme.primaryColor : undefined }}
+            >
+              <Send size={18} />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -266,8 +334,11 @@ const GroupChatScreen = () => {
   const [messages, setMessages] = useState([]);
   const [messageText, setMessageText] = useState('');
   const [userProfile, setUserProfile] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const messagesEndRef = useRef(null);
   const prevMessageCountRef = useRef(0);
+
+  const theme = currentGym?.theme || { primaryColor: '#2563eb', secondaryColor: '#4f46e5' };
 
   // Fetch user profile
   useEffect(() => {
@@ -298,15 +369,20 @@ const GroupChatScreen = () => {
   }, [currentGym?.id]);
 
   // Subscribe to messages for active chat
+  // Filter messages to only show those sent after the user joined
   useEffect(() => {
-    if (!currentGym?.id || !activeChat?.id) return;
+    const user = auth.currentUser;
+    if (!currentGym?.id || !activeChat?.id || !user?.uid) return;
 
     const unsubscribe = subscribeToMessages(currentGym.id, activeChat.id, (msgs) => {
-      setMessages(msgs);
+      // Filter messages based on when the user joined the chat
+      // Users cannot see messages from before they joined (or before they were re-added)
+      const visibleMessages = filterMessagesForMember(msgs, activeChat, user.uid);
+      setMessages(visibleMessages);
     });
 
     return () => unsubscribe();
-  }, [currentGym?.id, activeChat?.id]);
+  }, [currentGym?.id, activeChat?.id, activeChat?.members]);
 
   // Auto-scroll to bottom only when NEW messages arrive
   useEffect(() => {
@@ -349,6 +425,63 @@ const GroupChatScreen = () => {
     }
   };
 
+  const handleSendImage = async (file) => {
+    const user = auth.currentUser;
+    if (!currentGym?.id || !activeChat?.id || !user || !userProfile) return;
+
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      alert('Please select an image (JPEG, PNG, GIF, or WebP)');
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Image must be less than 10MB');
+      return;
+    }
+
+    setUploadingImage(true);
+
+    try {
+      // Upload image to Firebase Storage
+      const uploadResult = await uploadChatImage(currentGym.id, activeChat.id, file);
+
+      if (!uploadResult.success) {
+        alert(`Error uploading image: ${uploadResult.error}`);
+        setUploadingImage(false);
+        return;
+      }
+
+      // Send message with media
+      const result = await sendMessage(
+        currentGym.id,
+        activeChat.id,
+        user.uid,
+        `${userProfile.firstName} ${userProfile.lastName}`,
+        userProfile.role || 'member',
+        '', // Empty text - image only
+        {
+          type: uploadResult.type,
+          url: uploadResult.url,
+          width: uploadResult.width,
+          height: uploadResult.height,
+          size: uploadResult.size
+        }
+      );
+
+      if (!result.success) {
+        alert(`Error sending message: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error sending image:', error);
+      alert('Error sending image. Please try again.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   const handleSelectChat = (chat) => {
     setActiveChat(chat);
     setMessages([]); // Clear old messages while loading
@@ -368,15 +501,18 @@ const GroupChatScreen = () => {
           messageText={messageText}
           onMessageChange={setMessageText}
           onSendMessage={handleSendMessage}
+          onSendImage={handleSendImage}
           onBack={handleBack}
-          userProfile={userProfile}
+          theme={theme}
           messagesEndRef={messagesEndRef}
+          uploadingImage={uploadingImage}
         />
       ) : (
         <ChatList
           chats={chatGroups}
           onSelectChat={handleSelectChat}
           currentUserId={auth.currentUser?.uid}
+          theme={theme}
         />
       )}
     </div>

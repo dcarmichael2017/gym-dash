@@ -72,3 +72,4 @@ node_modules/
 .env.*
 .aider*
 .claude/settings.local.json
+nul

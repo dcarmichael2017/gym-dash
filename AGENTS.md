@@ -2038,45 +2038,110 @@ match /users/{userId} {
 
 ---
 
-## 📊 Summary & Recommendations
+🟠 P1: Community & Chat Enhancements (Sprint 7.5)
+Refining the features you just built to make them production-ready.
 
-### ✅ Your Database IS Ready for Multi-Gym
+[x] Image Optimization (Feed): ✅ COMPLETED
 
-- Subcollection architecture supports unlimited gym associations
-- GymContext already handles gym switching
-- Permissions already scoped by gymId
+Action: Implemented react-easy-crop for image cropping before upload.
 
-### ⚠️ But You Need These Changes First
+Implementation Details:
+- Added `react-easy-crop` library to packages/web
+- Created `ImageCropModal.jsx` component with support for 1:1, 4:3, and 16:9 aspect ratios
+- Created `imageUtils.js` with cropping and compression utilities (max 1200px, 85% quality)
+- Updated `CommunityFeedScreen.jsx` to show crop modal before image upload
+- Images are now consistently sized and optimized before upload
 
-**Priority 1: Per-Gym Credits** (Next branch)
-- **Why:** Blocks all multi-gym testing
-- **Complexity:** Medium
-- **Timeline:** 1-2 days
-- **Impact:** HIGH - Enables multi-gym bookings
+[x] Rich Media in Group Chat: ✅ COMPLETED
 
-Community & Communication
-Managed Community Chat: In-app group chats and 1-on-1 messaging with automated data-purging to control costs.
-Revenue Gyms: Persistent history (purged at high threshold).
-Ghost Gyms: 48-hour rolling window (auto-delete) to minimize storage costs.
-Push Notification Engine: Broadcast alerts for closures and automated "Birthday/Milestone" greetings.
-Sparring/Roll Log: Digital journal for members to record rounds and techniques.
-still permission issues for marking as read, make names clickable to see full names as a little popup
+Action: Added ability to send Images and GIFs in chat.
 
+Implementation Details:
+- Added `uploadChatImage()` function to storage.js with support for JPEG, PNG, GIF, WebP (max 10MB)
+- Extended `sendMessage()` API to accept optional media object `{ type, url, width, height, size }`
+- Updated both admin and member chat screens with image upload button
+- Messages display inline images with click-to-open-fullscreen
+- Chat previews show "📷 Sent an image" or "📎 Sent a GIF" for media messages
+- Storage path: `gyms/{gymId}/chatGroups/{groupId}/media/{timestamp}_{filename}`
 
-**Priority 2: Multi-Role Support**
-- **Why:** Enables admins to manage multiple gyms
-- **Complexity:** High (touches permissions)
-- **Timeline:** 2-3 days
-- **Impact:** HIGH - Enables multi-gym admin
+[x] Storage Governance (Revenue Integrity): ✅ COMPLETED
 
-**Priority 3: Gym Switcher UI**
-- **Why:** Makes multi-gym usable
-- **Complexity:** Medium (mostly UI)
-- **Timeline:** 1 day
-- **Impact:** Medium - UX improvement
+Action: Implemented "Ghost Gym" logic for auto-delete media.
 
-**Priority 4: Gym Creation Flow**
-- **Why:** Allows creating additional gyms
-- **Complexity:** Medium
-- **Timeline:** 1-2 days
-- **Impact:** Medium - New feature
+Implementation Details:
+- Created `cleanupExpiredChatMedia` scheduled Cloud Function (runs daily at 2 AM UTC)
+- Configurable per-gym retention via `chatMediaRetentionDays` field (default 30 days, -1 for unlimited)
+- Messages keep text but media is soft-deleted (marked as `mediaExpired: true`)
+- Created `triggerMediaCleanup` callable function for manual admin cleanup
+- Created `getStorageStats` callable function for storage usage monitoring
+- Added helper functions in chat.js: `getExpiredMediaMessages()`, `removeMediaFromMessage()`, `getStorageGovernanceSettings()`, `updateStorageGovernanceSettings()`
+
+[ ] Mobile QA Across entire application:
+
+Action: Verify both Admin and Member chat screens on actual mobile viewports (adjust padding/safe-areas). Confirm that admin and member screens work for both web and mobile views.
+
+🟡 P2: Commerce & Payments (Phase 8 - "The Store")
+This is the next major module according to your docs. You cannot do "Stripe Integration" without the Store UI.
+
+[ ] Admin Shop Dashboard:
+
+Action: Create the UI for Admins to add "Physical Products" (Gear, Water) vs "Digital Services" (Class Packs).
+
+Logic: Implement the "Variant" logic (Size/Color) mentioned in Phase 8.1.
+
+[ ] Stripe Connect Integration:
+
+Action: Complete the onboarding flow where Gym Owners connect their Stripe accounts to your platform so you can take the 1% application fee. This includes the stripe integration for subscriptions, coupons, discounts, refunds, etc.
+
+[ ] Payment Methods:
+
+Action: Allow members to save cards on file.
+
+Complexity: Support "Global" cards (user wallet) vs "Gym-Specific" cards if a user belongs to multiple gyms (Security/Privacy compliance required).
+
+🔵 P3: Marketing & Broadcasts (Phase 9)
+Tools to help gyms grow.
+
+[ ] Broadcast Center:
+
+Integration: Set up Twilio (SMS) and SendGrid/Resend (Email).
+
+UI: Create a "Compose Message" screen with audience selectors (All Active Members, Leads, Inactive).
+
+[ ] Reports Screen Update:
+
+Action: Update charts to reflect real revenue (once Stripe is linked) and granular attendance stats.
+
+🟣 P4: Architectural Planning (Requires Thinking before Coding)
+These are the "Big Questions" you noted. Do not code these until the logic is mapped out.
+
+[ ] Multi-Location / Admin Switcher:
+
+Decision Needed: Do combined gyms share a single database of members, or are they distinct "Silos" that a Super-Admin can toggle between?
+
+Recommendation: Start with "Toggle." An Admin has an array of manageableGymIds. They select a gym from a dropdown, and the app context switches entirely to that Gym ID. Merging databases is extremely complex.
+
+[ ] Staff Implementation (RBAC):
+
+Decision Needed: How to handle payroll?
+
+Recommendation: Start simple.
+
+Invite Flow: Admin sends email -> Link to Signup -> User created with role: 'coach'.
+
+Hours: Simple "Clock In/Out" button on Coach Dashboard.
+
+W2/Payroll: Do not build a payroll engine. Integrate with a dedicated provider (like Gusto embedded) or simply export CSV hours for the owner to pay manually. Building a tax-compliant payroll system is a startup in itself.
+
+[ ] Pricing Model Strategy:
+
+Action: Finalize if you are strictly taking 1% of transactions, or if there is a SaaS subscription fee for the gym owner as well.
+
+⚪ General Optimization
+[ ] Reduce Complexity:
+
+Audit: Go through screens. Can the "Community" and "Broadcast" be merged? Can "Members" and "Leads" be the same table with a filter?
+
+[ ] Onboarding Verification:
+
+Action: Run through the full "New Gym Owner" flow and "New Member" flow. Ensure no data is missing (specifically waivers and emergency contacts).

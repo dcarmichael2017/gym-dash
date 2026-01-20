@@ -6,6 +6,7 @@ import { useGym } from '../../../context/GymContext';
 import { signWaiver, getGymWaiver } from '../../../../../../packages/shared/api/firestore/gym';
 import { disconnectGym } from '../../../../../../packages/shared/api/firestore/members';
 import { getMemberAttendanceHistory } from '../../../../../../packages/shared/api/firestore/bookings';
+import { subscribeToLatestPost } from '../../../../../../packages/shared/api/firestore/community';
 import { doc, getDoc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
 
 // --- SUB-COMPONENTS ---
@@ -42,6 +43,9 @@ const MemberHomeScreen = () => {
 
     // --- CHAT UNREAD COUNT STATE ---
     const [totalUnreadCount, setTotalUnreadCount] = useState(0);
+
+    // --- COMMUNITY FEED STATE ---
+    const [latestPost, setLatestPost] = useState(null);
 
     // Derived state
     const theme = currentGym?.theme || { primaryColor: '#2563eb', secondaryColor: '#4f46e5' };
@@ -186,6 +190,20 @@ const MemberHomeScreen = () => {
 
         return () => unsubscribe();
     }, [currentGym?.id, user?.uid]);
+
+    // --- EFFECT: SUBSCRIBE TO LATEST COMMUNITY POST ---
+    useEffect(() => {
+        if (!currentGym?.id) {
+            setLatestPost(null);
+            return;
+        }
+
+        const unsubscribe = subscribeToLatestPost(currentGym.id, (post) => {
+            setLatestPost(post);
+        });
+
+        return () => unsubscribe();
+    }, [currentGym?.id]);
 
     // --- Filtering Logic for History Modal ---
     const programs = currentGym?.grading?.programs || [];
@@ -451,10 +469,14 @@ const MemberHomeScreen = () => {
                         <div className="bg-orange-100 p-3 rounded-full">
                             <Users className="text-orange-600" size={20} />
                         </div>
-                        <div>
+                        <div className="flex-1 min-w-0">
                             <p className="font-bold text-gray-800">Community Feed</p>
-                            <p className="text-xs text-gray-500 mt-1">
-                                Latest: Great job to everyone who competed this weekend!
+                            <p className="text-xs text-gray-500 mt-1 truncate">
+                                {latestPost ? (
+                                    <>Latest: {latestPost.content.substring(0, 50)}{latestPost.content.length > 50 ? '...' : ''}</>
+                                ) : (
+                                    'View updates from your gym'
+                                )}
                             </p>
                         </div>
                     </Link>

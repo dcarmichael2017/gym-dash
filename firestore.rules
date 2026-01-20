@@ -188,9 +188,10 @@ service cloud.firestore {
          allow read: if request.auth != null && isStaffOrOwner(gymId);
 
          // Members can only read groups they're in
+         // FIX: Removed strict '== true' check to support object structure
          allow get: if request.auth != null && (
             isStaffOrOwner(gymId) ||
-            (resource.data.members != null && request.auth.uid in resource.data.members && resource.data.members[request.auth.uid] == true)
+            (resource.data.members != null && request.auth.uid in resource.data.members)
          );
 
          // Members can query groups they're in
@@ -206,13 +207,13 @@ service cloud.firestore {
          allow update: if request.auth != null && (
             isStaffOrOwner(gymId) ||
             (
-               // Check member is in the group
-               (resource.data.members != null && request.auth.uid in resource.data.members && resource.data.members[request.auth.uid] == true) &&
-               // Only allow updating lastReadAt for themselves
-               // The diff check ensures only lastReadAt is being modified
+               // FIX: Check member is in the group (supports both 'true' and objects)
+               (resource.data.members != null && request.auth.uid in resource.data.members) &&
+               
+               // Only allow updating lastReadAt
                request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastReadAt']) &&
+               
                // Check that the user is only updating their own lastReadAt entry
-               // Compare the old and new lastReadAt maps - only the current user's key should differ
                (
                   // Case 1: lastReadAt didn't exist before, new one only has current user
                   (resource.data.lastReadAt == null && request.resource.data.lastReadAt.keys().hasOnly([request.auth.uid])) ||
@@ -242,6 +243,45 @@ service cloud.firestore {
 
             // No hard deletes allowed
             allow delete: if false;
+         }
+      }
+      
+      // --- COMMUNITY POSTS ---
+      match /communityPosts/{postId} {
+         // Anyone logged in can read posts
+         allow read: if request.auth != null;
+
+         // Only staff/owners can create or delete actual posts
+         allow create, delete: if request.auth != null && isStaffOrOwner(gymId);
+
+         // UPDATE RULES:
+         // 1. Staff/Owners can update anything
+         // 2. Members can ONLY update specific fields when adding a comment (counter & timestamps)
+         allow update: if request.auth != null && (
+            isStaffOrOwner(gymId) ||
+            (
+               // Ensure member is only touching these 3 specific fields
+               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount', 'lastCommentAt', 'updatedAt'])
+            )
+         );
+
+         // --- COMMENTS SUBCOLLECTION ---
+         match /comments/{commentId} {
+            // Anyone can read comments
+            allow read: if request.auth != null;
+
+            // Members can create comments if they are the author
+            allow create: if request.auth != null && request.resource.data.authorId == request.auth.uid;
+
+            // Members can soft-delete (update) their own comments
+            // Staff can update/moderate any comment
+            allow update: if request.auth != null && (
+               isStaffOrOwner(gymId) ||
+               (resource.data.authorId == request.auth.uid)
+            );
+            
+            // No hard deletes allowed (based on your soft-delete logic)
+            allow delete: if false; 
          }
       }
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UserPlus, Trash2, Send, PlusCircle, ArrowLeft, Users, X, MessageSquare } from 'lucide-react';
+import { UserPlus, Trash2, Send, PlusCircle, ArrowLeft, Users, X, MessageSquare, Image as ImageIcon, Loader2 } from 'lucide-react';
 import {
   subscribeToChatGroups,
   subscribeToMessages,
@@ -12,6 +12,7 @@ import {
   getGymMembers,
   markChatAsRead
 } from '@shared/api/firestore';
+import { uploadChatImage } from '@shared/api/storage';
 import { doc, getDoc } from 'firebase/firestore';
 import { db, auth } from '@shared/api/firebaseConfig';
 import { useConfirm } from '../../context/ConfirmationContext';
@@ -59,13 +60,14 @@ const formatTimestamp = (timestamp) => {
 // CHAT LIST COMPONENT (Moved outside to prevent recreation)
 // ============================================================================
 
-const ChatList = ({ chatGroups, onSelectChat, onCreateGroup }) => (
+const ChatList = ({ chatGroups, onSelectChat, onCreateGroup, theme }) => (
   <div className="w-full flex flex-col bg-white h-full">
     <div className="p-4 border-b bg-white sticky top-0 z-10 flex justify-between items-center">
       <h1 className="text-xl font-bold text-gray-800">Group Chats</h1>
       <button
         onClick={onCreateGroup}
-        className="text-blue-600 hover:text-blue-800 active:scale-95 transition-transform"
+        className="hover:opacity-80 active:scale-95 transition-all"
+        style={{ color: theme.primaryColor }}
         title="Create New Group Chat"
       >
         <PlusCircle size={22} />
@@ -87,7 +89,10 @@ const ChatList = ({ chatGroups, onSelectChat, onCreateGroup }) => (
             onClick={() => onSelectChat(group)}
             className="p-3 flex items-center gap-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 active:bg-gray-100 transition-colors"
           >
-            <div className="w-12 h-12 rounded-full bg-blue-200 flex items-center justify-center font-bold text-blue-600 shrink-0">
+            <div
+              className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-white shrink-0"
+              style={{ backgroundColor: theme.primaryColor }}
+            >
               {getInitials(group.name)}
             </div>
             <div className="flex-1 min-w-0">
@@ -123,15 +128,30 @@ const ActiveChat = ({
   messageText,
   onMessageChange,
   onSendMessage,
+  onSendImage,
   onDeleteMessage,
   onBack,
   onAddMember,
   onManageMembers,
   onDeleteGroup,
   onViewMemberProfile,
-  messagesEndRef
+  theme,
+  messagesEndRef,
+  uploadingImage
 }) => {
   const user = auth.currentUser;
+  const imageInputRef = useRef(null);
+
+  const handleImageSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      await onSendImage(file);
+    }
+    // Reset input so same file can be selected again
+    if (imageInputRef.current) {
+      imageInputRef.current.value = '';
+    }
+  };
 
   return (
     <div className="w-full flex flex-col h-full bg-gray-50">
@@ -152,14 +172,16 @@ const ActiveChat = ({
         <div className="flex items-center gap-2 md:gap-3 shrink-0">
           <button
             onClick={onAddMember}
-            className="flex items-center gap-1 text-xs md:text-sm font-medium text-gray-600 hover:text-blue-600 active:scale-95 transition-transform"
+            className="flex items-center gap-1 text-xs md:text-sm font-medium text-gray-600 hover:opacity-80 active:scale-95 transition-all"
+            style={{ color: theme.primaryColor }}
             title="Add Member"
           >
             <UserPlus size={16} /> <span className="hidden md:inline">Add</span>
           </button>
           <button
             onClick={onManageMembers}
-            className="text-gray-600 hover:text-blue-600 active:scale-95 transition-transform"
+            className="hover:opacity-80 active:scale-95 transition-all"
+            style={{ color: theme.primaryColor }}
             title="Manage Members"
           >
             <Users size={18} />
@@ -193,9 +215,8 @@ const ActiveChat = ({
                   className={`flex gap-2 group ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}
                 >
                   <div
-                    className={`w-8 h-8 rounded-full shrink-0 mt-1 flex items-center justify-center text-white text-xs font-bold ${
-                      isAdmin ? 'bg-blue-600' : 'bg-gray-400'
-                    }`}
+                    className="w-8 h-8 rounded-full shrink-0 mt-1 flex items-center justify-center text-white text-xs font-bold"
+                    style={{ backgroundColor: isAdmin ? theme.primaryColor : '#9ca3af' }}
                   >
                     {getInitials(msg.senderName)}
                   </div>
@@ -214,20 +235,36 @@ const ActiveChat = ({
                           />
                         )}
                         {isAdmin && !isCurrentUser && (
-                          <span className="text-xs text-blue-600 font-medium">Admin</span>
+                          <span className="text-xs font-medium" style={{ color: theme.primaryColor }}>Admin</span>
                         )}
                         <span className="text-xs text-gray-400">
                           {formatTimestamp(msg.timestamp)}
                         </span>
                       </div>
                       <div
-                        className={`p-3 rounded-lg text-sm inline-block max-w-md ${
-                          isCurrentUser
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-white text-gray-800 border border-gray-200'
-                        }`}
+                        className={`rounded-lg text-sm inline-block max-w-md ${msg.media ? 'p-1' : 'p-3'}`}
+                        style={{
+                          backgroundColor: isCurrentUser ? theme.primaryColor : '#ffffff',
+                          color: isCurrentUser ? '#ffffff' : '#1f2937',
+                          border: isCurrentUser ? 'none' : '1px solid #e5e7eb'
+                        }}
                       >
-                        {msg.text}
+                        {/* Media content */}
+                        {msg.media && msg.media.url && (
+                          <div className="mb-1">
+                            <img
+                              src={msg.media.url}
+                              alt="Chat image"
+                              className="rounded-lg max-w-full max-h-64 object-contain cursor-pointer"
+                              onClick={() => window.open(msg.media.url, '_blank')}
+                              loading="lazy"
+                            />
+                          </div>
+                        )}
+                        {/* Text content */}
+                        {msg.text && (
+                          <p className={msg.media ? 'px-2 pb-1' : ''}>{msg.text}</p>
+                        )}
                       </div>
                     </div>
                     <button
@@ -247,23 +284,51 @@ const ActiveChat = ({
 
       {/* Input Area - Fixed at bottom */}
       <div className="p-4 bg-white border-t sticky bottom-0">
-        <div className="relative">
+        <div className="flex items-center gap-2">
+          {/* Image Upload Button */}
           <input
-            type="text"
-            value={messageText}
-            onChange={(e) => onMessageChange(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && onSendMessage()}
-            placeholder="Type a message..."
-            className="w-full p-3 pr-12 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
-            autoComplete="off"
+            type="file"
+            ref={imageInputRef}
+            onChange={handleImageSelect}
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            className="hidden"
+            disabled={uploadingImage}
           />
           <button
-            onClick={onSendMessage}
-            disabled={!messageText.trim()}
-            className="absolute right-2 top-1/2 -translate-y-1/2 bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed active:scale-95 transition-transform"
+            onClick={() => imageInputRef.current?.click()}
+            disabled={uploadingImage}
+            className="p-2 text-gray-500 hover:text-gray-700 active:scale-95 transition-all disabled:opacity-50"
+            title="Send image or GIF"
           >
-            <Send size={18} />
+            {uploadingImage ? (
+              <Loader2 size={20} className="animate-spin" />
+            ) : (
+              <ImageIcon size={20} />
+            )}
           </button>
+
+          {/* Text Input */}
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={messageText}
+              onChange={(e) => onMessageChange(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && onSendMessage()}
+              placeholder="Type a message..."
+              className="w-full p-3 pr-12 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2"
+              style={{ '--tw-ring-color': theme.primaryColor }}
+              autoComplete="off"
+              disabled={uploadingImage}
+            />
+            <button
+              onClick={onSendMessage}
+              disabled={!messageText.trim() || uploadingImage}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-white p-2 rounded-lg hover:opacity-90 disabled:bg-gray-300 disabled:cursor-not-allowed active:scale-95 transition-all"
+              style={{ backgroundColor: messageText.trim() && !uploadingImage ? theme.primaryColor : undefined }}
+            >
+              <Send size={18} />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -288,10 +353,12 @@ const GroupChatScreen = () => {
   const [allMembers, setAllMembers] = useState([]);
   const [selectedMemberForModal, setSelectedMemberForModal] = useState(null);
   const [showMemberModal, setShowMemberModal] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [theme, setTheme] = useState({ primaryColor: '#2563eb', secondaryColor: '#4f46e5' });
   const messagesEndRef = useRef(null);
   const prevMessageCountRef = useRef(0);
 
-  // Fetch user profile and gymId
+  // Fetch user profile, gymId, and gym theme
   useEffect(() => {
     const fetchUserData = async () => {
       const user = auth.currentUser;
@@ -304,6 +371,12 @@ const GroupChatScreen = () => {
         setUserProfile(userData);
         if (userData.gymId) {
           setGymId(userData.gymId);
+          // Fetch gym theme
+          const gymRef = doc(db, 'gyms', userData.gymId);
+          const gymSnap = await getDoc(gymRef);
+          if (gymSnap.exists() && gymSnap.data().theme) {
+            setTheme(gymSnap.data().theme);
+          }
         }
       }
     };
@@ -317,6 +390,15 @@ const GroupChatScreen = () => {
 
     const unsubscribe = subscribeToChatGroups(gymId, null, (groups) => {
       setChatGroups(groups);
+
+      // Sync activeChat with updated group data to reflect member changes
+      setActiveChat((currentActive) => {
+        if (!currentActive) return null;
+        const updatedGroup = groups.find((g) => g.id === currentActive.id);
+        // If the group was deleted, clear activeChat
+        if (!updatedGroup) return null;
+        return updatedGroup;
+      });
     });
 
     return () => unsubscribe();
@@ -384,6 +466,63 @@ const GroupChatScreen = () => {
 
     if (result.success) {
       setMessageText('');
+    }
+  };
+
+  const handleSendImage = async (file) => {
+    const user = auth.currentUser;
+    if (!gymId || !activeChat?.id || !user || !userProfile) return;
+
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      alert('Please select an image (JPEG, PNG, GIF, or WebP)');
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Image must be less than 10MB');
+      return;
+    }
+
+    setUploadingImage(true);
+
+    try {
+      // Upload image to Firebase Storage
+      const uploadResult = await uploadChatImage(gymId, activeChat.id, file);
+
+      if (!uploadResult.success) {
+        alert(`Error uploading image: ${uploadResult.error}`);
+        setUploadingImage(false);
+        return;
+      }
+
+      // Send message with media
+      const result = await sendMessage(
+        gymId,
+        activeChat.id,
+        user.uid,
+        `${userProfile.firstName} ${userProfile.lastName}`,
+        userProfile.role || 'staff',
+        '', // Empty text - image only
+        {
+          type: uploadResult.type,
+          url: uploadResult.url,
+          width: uploadResult.width,
+          height: uploadResult.height,
+          size: uploadResult.size
+        }
+      );
+
+      if (!result.success) {
+        alert(`Error sending message: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error sending image:', error);
+      alert('Error sending image. Please try again.');
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -472,19 +611,23 @@ const GroupChatScreen = () => {
             messageText={messageText}
             onMessageChange={setMessageText}
             onSendMessage={handleSendMessage}
+            onSendImage={handleSendImage}
             onDeleteMessage={handleDeleteMessage}
             onBack={handleBack}
             onViewMemberProfile={handleViewMemberProfile}
             onAddMember={() => setShowAddMemberModal(true)}
             onManageMembers={() => setShowManageMembersModal(true)}
             onDeleteGroup={handleDeleteGroup}
+            theme={theme}
             messagesEndRef={messagesEndRef}
+            uploadingImage={uploadingImage}
           />
         ) : (
           <ChatList
             chatGroups={chatGroups}
             onSelectChat={handleSelectChat}
             onCreateGroup={() => setShowCreateModal(true)}
+            theme={theme}
           />
         )}
       </div>
