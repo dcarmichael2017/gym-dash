@@ -70,6 +70,7 @@ node_modules/
 
 # Ignore environment-specific files
 .env.*
+!.env.example
 .aider*
 .claude/settings.local.json
 nul

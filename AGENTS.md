@@ -2214,15 +2214,709 @@ gyms/{gymId}/products/{productId} {
 - Member store automatically fetches real products from Firestore
 - Sale badges display on member store for discounted items
 
-[ ] Stripe Connect Integration:
+## 🔴 P2.5: Stripe Integration (Phase 8.5 - "Payments & Subscriptions")
 
-Action: Complete the onboarding flow where Gym Owners connect their Stripe accounts to your platform so you can take the 1% application fee. This includes the stripe integration for subscriptions, coupons, discounts, refunds, etc.
+**Branch**: `feat/stripe-integration`
+**Status**: 🟡 Planning Complete - Ready for Implementation
+**Estimated Complexity**: High (Multi-Sprint Effort)
 
-[ ] Payment Methods:
+---
 
-Action: Allow members to save cards on file.
+### Executive Summary
 
-Complexity: Support "Global" cards (user wallet) vs "Gym-Specific" cards if a user belongs to multiple gyms (Security/Privacy compliance required).
+Implement Stripe as the payment backbone for GymDash. This includes:
+- Gym owners connecting their Stripe accounts (Stripe Connect)
+- Members purchasing memberships, class packs, and shop products
+- Subscription management with webhooks for status changes
+- Application fee collection (configurable, starting at 1%)
+- Coupon/promo code system for discounts
+
+---
+
+### Architecture Decisions
+
+#### 1. Stripe Connect Model: **Express Accounts** (Recommended)
+
+**Why Express over Standard/Custom?**
+- Express handles identity verification, tax reporting (1099s), and compliance
+- Users manage their own payout schedules via Stripe Dashboard
+- Minimal liability for GymDash
+- Faster onboarding (Stripe-hosted flow)
+
+**Flow:**
+```
+Gym Owner → "Connect Stripe" Button → Stripe OAuth Flow →
+Stripe Creates Express Account → Returns account_id → Store in gyms/{gymId}
+```
+
+#### 2. Payment Flow Model: **Stripe Checkout Sessions** (Recommended for MVP)
+
+**Why Checkout Sessions over Payment Intents + Elements?**
+- Stripe-hosted, PCI-compliant payment page
+- Handles 3D Secure, Apple Pay, Google Pay automatically
+- Less code to maintain
+- Easier to pass security audits
+- Can upgrade to embedded Elements later for seamless UX
+
+**For Subscriptions:**
+```
+Member clicks "Subscribe" → Create Checkout Session → Redirect to Stripe →
+Stripe handles payment → Webhook fires → Update membership subcollection
+```
+
+**For One-Time Purchases (Shop, Class Packs):**
+```
+Member adds to cart → Create Checkout Session → Redirect to Stripe →
+Payment completes → Webhook fires → Fulfill order / Add credits
+```
+
+#### 3. Payment Method Storage: **Stripe Customer Portal**
+
+**Why Stripe-hosted Portal over Custom UI?**
+- Members manage their own cards via Stripe's secure portal
+- No sensitive card data in our database
+- Automatic compliance with PCI DSS
+- Members can update payment methods without our code changes
+
+**Flow:**
+```
+Member clicks "Manage Payment Methods" → Create Portal Session →
+Redirect to Stripe Portal → Member manages cards → Returns to app
+```
+
+**Per-Gym Card Selection:**
+- Store `stripeDefaultPaymentMethodId` in `users/{userId}/memberships/{gymId}`
+- When member has multiple gyms, they can set different default cards per gym
+- Card display shows last 4 digits fetched from Stripe API (no sensitive data stored)
+
+#### 4. Application Fee Strategy
+
+**Configurable Fee Structure:**
+```javascript
+// In gyms/{gymId}/settings/stripe
+{
+  applicationFeePercent: 1.0,  // 1% default, can be adjusted
+}
+
+// Platform-wide default (can be in Firebase Remote Config or hardcoded)
+const DEFAULT_APPLICATION_FEE_PERCENT = 1.0;
+```
+
+**Fee Collection:**
+```javascript
+// When creating Checkout Session for connected account
+const session = await stripe.checkout.sessions.create({
+  // ...other config
+  payment_intent_data: {
+    application_fee_amount: Math.round(totalAmount * (feePercent / 100)),
+    transfer_data: {
+      destination: gymStripeAccountId,
+    },
+  },
+});
+```
+
+#### 5. Webhook Strategy
+
+**Critical Webhooks to Handle:**
+
+| Event | Action |
+|-------|--------|
+| `checkout.session.completed` | Fulfill order (add credits, create membership, process shop order) |
+| `invoice.paid` | Confirm subscription renewal, log to membership history |
+| `invoice.payment_failed` | Update membership status, notify member, apply grace period |
+| `customer.subscription.updated` | Sync plan changes, handle upgrades/downgrades |
+| `customer.subscription.deleted` | Cancel membership, revoke access |
+| `charge.refunded` | Process refund, update order status |
+| `account.updated` | Update gym's Stripe account status |
+
+#### 6. Grace Period Strategy for Failed Payments
+
+**Configurable per gym:**
+
+```javascript
+// In gyms/{gymId}/settings/billing
+{
+  gracePeriodDays: 3,              // Days member can still book after failed payment
+  suspendAfterFailedPayments: 1,   // Number of consecutive failures before suspension
+  notifyOnFailure: true,
+  notifyDaysBeforeRenewal: [7, 1]  // Email reminders before renewal
+}
+```
+
+**Status Flow:**
+1. First failed payment → `status: 'past_due'` (can still book during grace period)
+2. After grace period → `status: 'suspended'` (cannot book, prominent "Reactivate" CTA)
+3. Member updates payment → Retry charge → If successful, `status: 'active'`
+
+---
+
+### Implementation Phases
+
+#### Phase 1: Foundation & Stripe Connect
+
+**[ ] 1.1 Environment Setup**
+- [ ] Create `.env.example` with placeholder Stripe keys
+- [ ] Document: `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`
+- [ ] Install Stripe SDK: `npm install stripe @stripe/stripe-js` in relevant packages
+- [ ] Create `packages/shared/api/stripe/` directory structure
+- [ ] **TODO**: Move secrets to Firebase Secret Manager for Cloud Functions (document procedure)
+
+**[ ] 1.2 Stripe Connect Onboarding**
+- [ ] Create `connectStripeAccount(gymId)` Cloud Function
+  - Generates Stripe OAuth link for Express account creation
+  - Stores pending status in gym document
+- [ ] Create `handleStripeOAuthCallback()` Cloud Function
+  - Exchanges authorization code for account ID
+  - Stores `stripeAccountId` in gym document
+- [ ] Update gym document schema:
+  ```javascript
+  gyms/{gymId} {
+    // ...existing fields
+    stripeAccountId: string | null,
+    stripeAccountStatus: 'pending' | 'active' | 'restricted' | 'not_connected',
+    stripeOnboardingComplete: boolean,
+    stripeAccountCreatedAt: timestamp | null
+  }
+  ```
+- [ ] Create admin UI: "Connect Stripe Account" button in Settings > Billing tab
+- [ ] Create admin UI: Show Stripe account status card with:
+  - Connection status indicator
+  - "Complete Onboarding" link if incomplete
+  - "View Stripe Dashboard" link if connected
+- [ ] Handle `account.updated` webhook to sync status changes
+
+**[ ] 1.3 Webhook Infrastructure**
+- [ ] Create `stripeWebhook` Cloud Function endpoint
+- [ ] Implement webhook signature verification (CRITICAL for security)
+- [ ] Create webhook event router/dispatcher pattern
+- [ ] Add webhook event logging:
+  ```javascript
+  gyms/{gymId}/stripeEvents/{eventId} {
+    eventType: string,
+    stripeEventId: string,    // For idempotency checks
+    processed: boolean,
+    processedAt: timestamp | null,
+    error: string | null,
+    createdAt: timestamp
+  }
+  ```
+- [ ] Configure webhook endpoint in Stripe Dashboard (test + live)
+
+---
+
+#### Phase 2: Products & Prices Sync
+
+**[ ] 2.1 Membership Tier → Stripe Product Sync**
+- [ ] When admin creates membership tier:
+  - Create Stripe Product with tier name/description
+  - Create Stripe Price(s) for each interval (monthly/yearly/one-time)
+- [ ] Store in membership tier document:
+  ```javascript
+  gyms/{gymId}/membershipTiers/{tierId} {
+    // ...existing fields
+    stripeProductId: string | null,
+    stripePriceId: string | null,           // Monthly price
+    stripePriceIdYearly: string | null,     // Yearly price (if applicable)
+  }
+  ```
+- [ ] When admin edits tier pricing → Update Stripe Price (create new price, archive old)
+- [ ] When admin deletes tier → Archive Stripe Product (don't delete for audit trail)
+
+**[ ] 2.2 Shop Product → Stripe Product Sync**
+- [ ] When admin creates shop product:
+  - Create Stripe Product
+  - For each variant, create Stripe Price
+- [ ] Store in product document:
+  ```javascript
+  gyms/{gymId}/products/{productId} {
+    // ...existing fields
+    stripeProductId: string | null,
+    variants: [{
+      // ...existing variant fields
+      stripePriceId: string | null
+    }]
+  }
+  ```
+- [ ] Handle price updates when admin edits product/variant pricing
+
+**[ ] 2.3 Class Pack → Stripe Product Sync**
+- [ ] When admin creates class pack:
+  - Create Stripe Product
+  - Create Stripe Price (one-time)
+- [ ] Store in class pack document:
+  ```javascript
+  gyms/{gymId}/classPacks/{packId} {
+    // ...existing fields
+    stripeProductId: string | null,
+    stripePriceId: string | null
+  }
+  ```
+
+---
+
+#### Phase 3: Subscription Checkout
+
+**[ ] 3.1 Member Subscription Flow**
+- [ ] Create `createSubscriptionCheckout(userId, gymId, tierId, interval)` Cloud Function
+  - Validates gym has connected Stripe account
+  - Creates or retrieves Stripe Customer for member
+  - Creates Checkout Session in subscription mode
+  - Applies application fee
+  - Returns checkout URL
+- [ ] Frontend implementation:
+  - Member views available plans on `MembershipPlansScreen`
+  - Clicks "Subscribe" → Calls Cloud Function → Redirects to Stripe Checkout
+  - Success URL: `/membership/success?session_id={CHECKOUT_SESSION_ID}`
+  - Cancel URL: `/membership/plans`
+
+**[ ] 3.2 Subscription Success Handling**
+- [ ] Handle `checkout.session.completed` webhook (mode: subscription):
+  - Extract subscription ID, customer ID from session
+  - Create/update membership subcollection:
+    ```javascript
+    users/{userId}/memberships/{gymId} {
+      status: 'active',
+      membershipId: tierId,
+      membershipName: tierName,
+      price: tierPrice,
+      interval: 'month' | 'year',
+      stripeSubscriptionId: string,
+      stripeCustomerId: string,
+      currentPeriodStart: timestamp,
+      currentPeriodEnd: timestamp,
+      cancelAtPeriodEnd: false,
+      // ...other existing fields
+    }
+    ```
+  - Log to membership history: "Subscribed to {planName} for ${price}/{interval}"
+  - (Optional) Send welcome email via SendGrid
+
+**[ ] 3.3 Member Subscription UI**
+- [ ] Create `MembershipPlansScreen.jsx`:
+  - Fetches available tiers from `gyms/{gymId}/membershipTiers`
+  - Shows pricing with monthly/yearly toggle (if applicable)
+  - Highlights current plan if already subscribed
+  - "Subscribe" button for each tier
+  - "Current Plan" badge for active subscription
+- [ ] Update member navigation to include "Membership" option
+- [ ] Show subscription status in member profile/billing tab
+
+---
+
+#### Phase 4: One-Time Purchases
+
+**[ ] 4.1 Class Pack Purchase Flow**
+- [ ] Create `createClassPackCheckout(userId, gymId, packId)` Cloud Function
+  - Creates Checkout Session in payment mode
+  - Includes pack details in metadata
+  - Applies application fee
+- [ ] Handle `checkout.session.completed` webhook (mode: payment, type: class_pack):
+  - Add credits to `users/{userId}/credits/{gymId}` (using existing per-gym credits system)
+  - Log to creditLogs subcollection
+  - Log to membership history: "Purchased {packName} - {creditCount} credits added"
+- [ ] Create Class Pack purchase UI:
+  - List available packs on member screen
+  - Show credits included, pricing
+  - "Buy Now" button initiates checkout
+
+**[ ] 4.2 Shop Product Purchase Flow**
+- [ ] Create `createShopCheckout(userId, gymId, cartItems)` Cloud Function
+  - Accepts array of `{ productId, variantId?, quantity }`
+  - Validates stock availability
+  - Creates Checkout Session with multiple line items
+  - Applies application fee
+- [ ] Handle `checkout.session.completed` webhook (mode: payment, type: shop_order):
+  - Create order document:
+    ```javascript
+    gyms/{gymId}/orders/{orderId} {
+      memberId: string,
+      memberName: string,
+      memberEmail: string,
+      items: [{
+        productId: string,
+        productName: string,
+        variantId: string | null,
+        variantName: string | null,
+        quantity: number,
+        unitPrice: number,
+        totalPrice: number
+      }],
+      subtotal: number,
+      applicationFee: number,
+      total: number,
+      status: 'pending' | 'paid' | 'fulfilled' | 'shipped' | 'refunded' | 'cancelled',
+      stripePaymentIntentId: string,
+      stripeCheckoutSessionId: string,
+      fulfillmentNotes: string | null,
+      createdAt: timestamp,
+      paidAt: timestamp | null,
+      fulfilledAt: timestamp | null
+    }
+    ```
+  - Deduct stock from products/variants
+  - Send order confirmation email
+- [ ] Update member store with cart functionality and checkout button
+
+**[ ] 4.3 Admin Order Management**
+- [ ] Create `OrdersScreen.jsx` for admin:
+  - List all orders with filters (status, date range)
+  - Order detail view with items, customer info
+  - "Mark as Fulfilled" action
+  - "Issue Refund" action (links to refund flow)
+- [ ] Add "Orders" to admin navigation
+
+---
+
+#### Phase 5: Subscription Lifecycle Management
+
+**[ ] 5.1 Renewal Handling**
+- [ ] Handle `invoice.paid` webhook:
+  - Update `currentPeriodStart` and `currentPeriodEnd` in membership
+  - Log to membership history: "Subscription renewed - next billing: {date}"
+  - (Optional) Send renewal confirmation email
+
+**[ ] 5.2 Failed Payment Handling**
+- [ ] Handle `invoice.payment_failed` webhook:
+  - Update membership `status: 'past_due'`
+  - Store `lastPaymentFailedAt: timestamp`
+  - Log to membership history: "Payment failed - please update payment method"
+  - Send notification to member (email/push)
+  - Show banner in app: "Payment failed - Update payment method"
+- [ ] Implement grace period logic:
+  - Create scheduled function to check past_due memberships
+  - After `gracePeriodDays` → Update to `status: 'suspended'`
+  - Suspended members cannot book classes (update `canUserBook` check)
+  - Log: "Membership suspended due to unpaid invoice"
+
+**[ ] 5.3 Cancellation Handling**
+- [ ] Create `cancelSubscription(userId, gymId, cancelImmediately)` Cloud Function:
+  - `cancelImmediately: true` → Cancel now, revoke access
+  - `cancelImmediately: false` → Set `cancel_at_period_end: true`, retain access until period end
+- [ ] Handle `customer.subscription.updated` webhook (cancel_at_period_end changed):
+  - Update membership `cancelAtPeriodEnd: true`
+  - Log: "Subscription set to cancel on {date}"
+- [ ] Handle `customer.subscription.deleted` webhook:
+  - Update membership `status: 'cancelled'`
+  - Log: "Subscription ended"
+- [ ] Add "Cancel Subscription" option in member billing UI
+- [ ] Show cancellation status: "Your membership will end on {date}"
+
+**[ ] 5.4 Plan Changes (Upgrades/Downgrades)**
+- [ ] Create `changeSubscriptionPlan(userId, gymId, newTierId, newInterval)` Cloud Function:
+  - Uses Stripe's subscription update with proration
+  - Returns preview of prorated amount
+- [ ] Handle `customer.subscription.updated` webhook (plan changed):
+  - Update membership document with new plan details
+  - Log: "Changed from {oldPlan} to {newPlan}"
+- [ ] Create upgrade/downgrade UI on membership plans screen
+
+---
+
+#### Phase 6: Customer Portal & Payment Methods
+
+**[ ] 6.1 Stripe Customer Portal Integration**
+- [ ] Configure Customer Portal in Stripe Dashboard:
+  - Enable payment method management
+  - Enable subscription cancellation (optional - or handle in-app)
+  - Enable invoice history viewing
+- [ ] Create `createCustomerPortalSession(userId, gymId)` Cloud Function:
+  - Creates portal session for the member's Stripe Customer
+  - Returns portal URL with return_url back to app
+- [ ] Add "Manage Billing" button in member profile that opens portal
+
+**[ ] 6.2 Payment Method Display (Read-Only in App)**
+- [ ] Create `getPaymentMethods(userId, gymId)` Cloud Function:
+  - Fetches payment methods from Stripe API
+  - Returns sanitized data: `{ id, brand, last4, expMonth, expYear, isDefault }`
+  - **NEVER return full card numbers**
+- [ ] Display in member billing tab:
+  - List saved cards with brand icons (Visa, Mastercard, etc.)
+  - Show which is default
+  - "Manage" button links to Customer Portal
+
+**[ ] 6.3 Per-Gym Default Payment Method**
+- [ ] Store `stripeDefaultPaymentMethodId` in membership subcollection
+- [ ] When member has multiple gyms, show payment method per gym
+- [ ] Allow selection of which card to use per gym (via portal or custom UI)
+
+---
+
+#### Phase 7: Coupons & Promo Codes
+
+**[ ] 7.1 Admin Coupon Creation**
+- [ ] Create `CouponsScreen.jsx` for admin:
+  - List existing coupons with usage stats
+  - "Create Coupon" form
+- [ ] Create `createCoupon(gymId, couponData)` Cloud Function:
+  - Creates Stripe Coupon + Promotion Code
+  - Stores locally for quick lookup:
+    ```javascript
+    gyms/{gymId}/coupons/{couponId} {
+      code: string,              // User-facing code (e.g., "SUMMER20")
+      stripeCouponId: string,
+      stripePromotionCodeId: string,
+      type: 'percent' | 'fixed',
+      value: number,             // 20 for 20% or 1000 for $10.00
+      appliesToTiers: string[] | 'all',
+      appliesToProducts: 'memberships' | 'shop' | 'class_packs' | 'all',
+      firstTimeOnly: boolean,
+      maxRedemptions: number | null,
+      currentRedemptions: number,
+      expiresAt: timestamp | null,
+      active: boolean,
+      createdAt: timestamp,
+      createdBy: string
+    }
+    ```
+- [ ] Coupon options:
+  - Percentage off (e.g., 20% off)
+  - Fixed amount off (e.g., $10 off)
+  - Duration: once, repeating (X months), forever
+  - Restrictions: first-time only, specific plans, min purchase, expiration, usage limit
+
+**[ ] 7.2 Coupon Application at Checkout**
+- [ ] Add promo code input field on checkout screens
+- [ ] Create `validateCoupon(gymId, code, cartType)` Cloud Function:
+  - Checks if coupon exists, is active, not expired, has redemptions left
+  - Returns discount amount/percent for display
+- [ ] Apply promotion code to Checkout Session:
+  ```javascript
+  const session = await stripe.checkout.sessions.create({
+    // ...
+    discounts: [{
+      promotion_code: promoCodeId,
+    }],
+  });
+  ```
+- [ ] Show discount in order summary before redirect
+
+**[ ] 7.3 Admin-Applied Discounts**
+- [ ] Allow admin to apply coupon to member's account
+- [ ] Allow admin to give manual credit adjustment (already exists in credits system)
+
+---
+
+#### Phase 8: Refunds & Disputes
+
+**[ ] 8.1 Admin Refund Flow**
+- [ ] Add refund functionality to Order detail screen:
+  - Full refund option
+  - Partial refund with amount input
+  - Reason selection (requested by customer, defective, etc.)
+- [ ] Create `processRefund(gymId, paymentIntentId, amount, reason)` Cloud Function:
+  - Calls Stripe Refunds API
+  - **Note**: Application fee is NOT refunded by default (platform keeps fee)
+  - Option to refund application fee: `refund_application_fee: true`
+- [ ] Handle `charge.refunded` webhook:
+  - Update order status to `refunded` or `partially_refunded`
+  - Log refund details
+
+**[ ] 8.2 Subscription Refunds**
+- [ ] For subscription cancellations with refund:
+  - Calculate prorated amount
+  - Process refund for unused portion
+- [ ] Update membership history log
+
+**[ ] 8.3 Class Pack Refunds**
+- [ ] When refunding class pack purchase:
+  - Check if credits have been used
+  - If credits used < total → Partial refund
+  - Deduct credits from member's balance
+  - Log to creditLogs: "Refund processed - {X} credits removed"
+
+**[ ] 8.4 Dispute Handling (Basic)**
+- [ ] Handle `charge.dispute.created` webhook:
+  - Log dispute to stripeEvents
+  - Notify gym owner via email
+  - Show dispute indicator on order
+- [ ] (Future) Provide evidence submission UI
+
+---
+
+#### Phase 9: Reporting & Analytics
+
+**[ ] 9.1 Revenue Dashboard Integration**
+- [ ] Update existing Reports screen with Stripe data:
+  - Total revenue (period)
+  - Subscription revenue vs one-time purchases
+  - Refunds issued
+  - Application fees collected (GymDash revenue)
+- [ ] Data source options:
+  - Option A: Aggregate from local order/subscription data
+  - Option B: Use Stripe Reporting API for accuracy
+
+**[ ] 9.2 Subscription Metrics**
+- [ ] Active subscribers count
+- [ ] Monthly Recurring Revenue (MRR) calculation
+- [ ] Churn rate (cancellations / total subscribers)
+- [ ] Failed payment rate
+
+**[ ] 9.3 Shop Metrics**
+- [ ] Total orders / revenue
+- [ ] Top selling products
+- [ ] Revenue by category
+
+---
+
+### Environment Variables Setup
+
+**Create `.env.example`:**
+```bash
+# ===========================================
+# STRIPE CONFIGURATION
+# ===========================================
+# Get API keys from: https://dashboard.stripe.com/apikeys
+
+# Secret key (NEVER expose to frontend)
+STRIPE_SECRET_KEY=sk_test_xxx
+
+# Publishable key (safe for frontend)
+STRIPE_PUBLISHABLE_KEY=pk_test_xxx
+
+# Webhook signing secret
+# Get this when creating webhook endpoint in Stripe Dashboard
+STRIPE_WEBHOOK_SECRET=whsec_xxx
+
+# ===========================================
+# APPLICATION SETTINGS
+# ===========================================
+
+# Default application fee percentage (can be overridden per gym)
+STRIPE_APPLICATION_FEE_PERCENT=1.0
+```
+
+**Security TODO:**
+- [ ] Move `STRIPE_SECRET_KEY` to Firebase Secret Manager for Cloud Functions
+- [ ] Use Firebase Functions config for webhook secret
+- [ ] Document secret rotation procedure
+- [ ] Set up separate keys for test vs production environments
+
+---
+
+### Database Schema Additions Summary
+
+**Gym Document Updates:**
+```javascript
+gyms/{gymId} {
+  // Stripe Connect
+  stripeAccountId: string | null,
+  stripeAccountStatus: 'pending' | 'active' | 'restricted' | 'not_connected',
+  stripeOnboardingComplete: boolean,
+}
+
+gyms/{gymId}/settings/billing {
+  gracePeriodDays: number,           // Default: 3
+  suspendAfterFailedPayments: number, // Default: 1
+  notifyOnFailure: boolean,
+  notifyDaysBeforeRenewal: number[],
+}
+
+gyms/{gymId}/settings/stripe {
+  applicationFeePercent: number,     // Default: 1.0
+}
+```
+
+**New Collections:**
+```javascript
+gyms/{gymId}/orders/{orderId} { /* shop orders */ }
+gyms/{gymId}/coupons/{couponId} { /* promo codes */ }
+gyms/{gymId}/stripeEvents/{eventId} { /* webhook audit log */ }
+```
+
+**Updated Collections:**
+```javascript
+gyms/{gymId}/membershipTiers/{tierId} {
+  stripeProductId, stripePriceId, stripePriceIdYearly
+}
+
+gyms/{gymId}/products/{productId} {
+  stripeProductId,
+  variants: [{ stripePriceId }]
+}
+
+gyms/{gymId}/classPacks/{packId} {
+  stripeProductId, stripePriceId
+}
+
+users/{userId}/memberships/{gymId} {
+  stripeSubscriptionId, stripeCustomerId,
+  currentPeriodStart, currentPeriodEnd,
+  cancelAtPeriodEnd, lastPaymentFailedAt
+}
+```
+
+---
+
+### Security Checklist
+
+- [ ] **Never store full card numbers** - Use Stripe tokenization
+- [ ] **Verify webhook signatures** - Prevent spoofed events
+- [ ] **Use idempotency keys** - Prevent duplicate charges
+- [ ] **Validate amounts server-side** - Never trust client-sent prices
+- [ ] **Scope API calls** - Use `stripeAccount` header for connected accounts
+- [ ] **Audit log financial operations** - Required for compliance
+- [ ] **PCI DSS** - Stripe Checkout handles this; document compliance
+
+---
+
+### Testing Strategy
+
+1. **Use Stripe Test Mode** throughout development (`sk_test_` keys)
+2. **Test Cards:**
+   - `4242424242424242` - Successful payment
+   - `4000000000000341` - Attach fails
+   - `4000000000009995` - Insufficient funds
+   - `4000002500003155` - Requires 3D Secure
+3. **Webhook Testing:**
+   - Use Stripe CLI: `stripe listen --forward-to localhost:5001/gym-dash/us-central1/stripeWebhook`
+   - Test each webhook event type
+4. **Test Connect:**
+   - Create test connected accounts in Stripe Dashboard
+   - Test onboarding flow end-to-end
+
+---
+
+### Files to Create
+
+**Shared API Layer:**
+- `packages/shared/api/stripe/config.js` - Stripe initialization
+- `packages/shared/api/stripe/connect.js` - Connect account functions
+- `packages/shared/api/stripe/checkout.js` - Checkout session creation
+- `packages/shared/api/stripe/subscriptions.js` - Subscription management
+- `packages/shared/api/stripe/customers.js` - Customer management
+- `packages/shared/api/stripe/products.js` - Product/price sync helpers
+- `packages/shared/api/stripe/coupons.js` - Coupon management
+- `packages/shared/api/stripe/refunds.js` - Refund processing
+
+**Cloud Functions:**
+- `firebase/functions/src/stripe/connect.js` - OAuth handlers
+- `firebase/functions/src/stripe/checkout.js` - Checkout session endpoints
+- `firebase/functions/src/stripe/webhooks.js` - Webhook handler
+- `firebase/functions/src/stripe/portal.js` - Customer portal sessions
+
+**Admin UI:**
+- `packages/web/src/screens/admin/settings/BillingSettingsTab.jsx` - Connect UI
+- `packages/web/src/screens/admin/CouponsScreen/` - Coupon management
+- `packages/web/src/screens/admin/OrdersScreen/` - Order management
+
+**Member UI:**
+- `packages/web/src/screens/members/MembershipPlansScreen.jsx` - Subscription selection
+- `packages/web/src/screens/members/ClassPacksScreen.jsx` - Class pack purchase
+- `packages/web/src/components/members/MemberBillingTab.jsx` - Payment methods display
+- `packages/web/src/components/checkout/CheckoutButton.jsx` - Reusable checkout trigger
+
+---
+
+### Implementation Priority Order
+
+1. **Sprint 1**: Phase 1 (Connect + Webhooks) + Phase 2 (Product Sync)
+2. **Sprint 2**: Phase 3 (Subscriptions) + Phase 4 (One-Time Purchases)
+3. **Sprint 3**: Phase 5 (Lifecycle) + Phase 6 (Portal)
+4. **Sprint 4**: Phase 7 (Coupons) + Phase 8 (Refunds)
+5. **Sprint 5**: Phase 9 (Reporting) + Testing + Polish
+
+---
 
 🔵 P3: Marketing & Broadcasts (Phase 9)
 Tools to help gyms grow.
