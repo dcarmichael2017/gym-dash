@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { CreditCard, Pencil, DollarSign, Tag, Coins, Plus, Minus, History, Save, X, ArrowRight, Calendar, RefreshCw, AlertCircle, XCircle } from 'lucide-react';
-import { doc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
+import { CreditCard, Pencil, DollarSign, Tag, Coins, Plus, Minus, History, Save, X, ArrowRight, Calendar, RefreshCw, AlertCircle, XCircle, Link2, Copy, Check, ExternalLink, Loader2 } from 'lucide-react';
+import { doc, onSnapshot, collection, query, where, orderBy, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../../../../shared/api/firebaseConfig';
-import { adjustUserCredits, getUserCreditHistory, adminCancelUserMembership, cancelUserMembership, logMembershipHistory, getMembershipHistory } from '../../../../../shared/api/firestore';
+import { adjustUserCredits, getUserCreditHistory, adminCancelUserMembership, cancelUserMembership, logMembershipHistory, getMembershipHistory, createAdminCheckoutLink } from '../../../../../shared/api/firestore';
 import { useConfirm } from '../../../context/ConfirmationContext';
-import { useGym } from '../../../context/GymContext'; // ✅ NEW: Import useGym hook
+import { useGym } from '../../../context/GymContext';
 
 export const MemberBillingTab = ({
     formData,
@@ -20,14 +20,34 @@ export const MemberBillingTab = ({
 }) => {
     const { confirm } = useConfirm();
     const [liveUserData, setLiveUserData] = useState(null);
-    const [currentMembership, setCurrentMembership] = useState(null); // ✅ Separate state
+    const [currentMembership, setCurrentMembership] = useState(null);
     const [isEditing, setIsEditing] = useState(false);
+
+    // Payment link state
+    const [paymentLinkLoading, setPaymentLinkLoading] = useState(false);
+    const [paymentLinkUrl, setPaymentLinkUrl] = useState(null);
+    const [paymentLinkCopied, setPaymentLinkCopied] = useState(false);
+    const [paymentLinkError, setPaymentLinkError] = useState(null);
+    const [stripeEnabled, setStripeEnabled] = useState(false);
+
+    // Check if gym has Stripe enabled
+    useEffect(() => {
+        if (!gymId) return;
+        const checkStripe = async () => {
+            const gymRef = doc(db, 'gyms', gymId);
+            const gymSnap = await getDoc(gymRef);
+            if (gymSnap.exists()) {
+                setStripeEnabled(gymSnap.data().stripeAccountStatus === 'ACTIVE');
+            }
+        };
+        checkStripe();
+    }, [gymId]);
 
     // --- Real-time Data Listener ---
     useEffect(() => {
         if (!memberData?.id) return;
-        const unsub = onSnapshot(doc(db, 'users', memberData.id), (doc) => {
-            setLiveUserData({ id: doc.id, ...doc.data() });
+        const unsub = onSnapshot(doc(db, 'users', memberData.id), (docSnap) => {
+            setLiveUserData({ id: docSnap.id, ...docSnap.data() });
         });
         return () => unsub();
     }, [memberData?.id]);
@@ -220,6 +240,47 @@ export const MemberBillingTab = ({
                     alert(`Error: ${result.error}`);
                 }
             }
+        }
+    };
+
+    // Generate payment link for member
+    const handleGeneratePaymentLink = async () => {
+        if (!memberData?.id || !formData.membershipId || !gymId) {
+            setPaymentLinkError('Please select a membership plan first.');
+            return;
+        }
+
+        const selectedTier = tiers.find(t => t.id === formData.membershipId);
+        if (!selectedTier?.stripePriceId) {
+            setPaymentLinkError('This plan is not synced to Stripe. Please sync it first in the Memberships settings.');
+            return;
+        }
+
+        setPaymentLinkLoading(true);
+        setPaymentLinkError(null);
+        setPaymentLinkUrl(null);
+
+        try {
+            const result = await createAdminCheckoutLink(gymId, formData.membershipId, memberData.id);
+
+            if (result.success && result.url) {
+                setPaymentLinkUrl(result.url);
+            } else {
+                setPaymentLinkError(result.error || 'Failed to generate payment link.');
+            }
+        } catch (err) {
+            console.error('Payment link error:', err);
+            setPaymentLinkError('An unexpected error occurred.');
+        } finally {
+            setPaymentLinkLoading(false);
+        }
+    };
+
+    const handleCopyPaymentLink = async () => {
+        if (paymentLinkUrl) {
+            await navigator.clipboard.writeText(paymentLinkUrl);
+            setPaymentLinkCopied(true);
+            setTimeout(() => setPaymentLinkCopied(false), 2000);
         }
     };
 
@@ -495,6 +556,106 @@ export const MemberBillingTab = ({
                                                 }
                                             </p>
                                         </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Payment Link Section - Only show for existing members with Stripe-enabled tiers */}
+                        {memberData && formData.membershipId && stripeEnabled && (
+                            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-t border-blue-200">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <Link2 size={16} className="text-blue-600" />
+                                        <label className="text-xs font-semibold text-blue-900 uppercase">Send Payment Link</label>
+                                    </div>
+                                    {selectedPlan?.stripePriceId && (
+                                        <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                                            Stripe Ready
+                                        </span>
+                                    )}
+                                </div>
+
+                                {!selectedPlan?.stripePriceId ? (
+                                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800">
+                                        <div className="flex items-start gap-2">
+                                            <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                                            <div>
+                                                <p className="font-semibold">Plan not synced to Stripe</p>
+                                                <p className="mt-0.5 text-yellow-700">
+                                                    Edit this plan in Memberships and enable "Online Payments" to generate payment links.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : paymentLinkUrl ? (
+                                    <div className="space-y-2">
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                readOnly
+                                                value={paymentLinkUrl}
+                                                className="flex-1 text-xs p-2.5 bg-white border border-gray-300 rounded-lg text-gray-600 truncate"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={handleCopyPaymentLink}
+                                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                                            >
+                                                {paymentLinkCopied ? <Check size={14} /> : <Copy size={14} />}
+                                                {paymentLinkCopied ? 'Copied!' : 'Copy'}
+                                            </button>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <a
+                                                href={paymentLinkUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex-1 text-center p-2 bg-white border border-gray-200 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-1.5 transition-colors"
+                                            >
+                                                <ExternalLink size={12} /> Open Link
+                                            </a>
+                                            <button
+                                                type="button"
+                                                onClick={() => setPaymentLinkUrl(null)}
+                                                className="px-3 py-2 text-gray-500 hover:text-gray-700 text-xs"
+                                            >
+                                                Clear
+                                            </button>
+                                        </div>
+                                        <p className="text-[10px] text-blue-600 text-center">
+                                            Share this link with the member to complete payment
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        <button
+                                            type="button"
+                                            onClick={handleGeneratePaymentLink}
+                                            disabled={paymentLinkLoading}
+                                            className="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-60"
+                                        >
+                                            {paymentLinkLoading ? (
+                                                <>
+                                                    <Loader2 size={16} className="animate-spin" />
+                                                    Generating...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Link2 size={16} />
+                                                    Generate Payment Link
+                                                </>
+                                            )}
+                                        </button>
+                                        <p className="text-[10px] text-gray-500 text-center">
+                                            Create a checkout link that you can share with the member via email or text
+                                        </p>
+                                    </div>
+                                )}
+
+                                {paymentLinkError && (
+                                    <div className="mt-2 bg-red-50 border border-red-200 rounded-lg p-2 text-xs text-red-700">
+                                        {paymentLinkError}
                                     </div>
                                 )}
                             </div>

@@ -2531,17 +2531,44 @@ const session = await stripe.checkout.sessions.create({
 - [x] Added `createCustomerPortalSession()` to shared API
 - [x] Integrated into MembershipSection "Payment Method" button
 
+**[x] 3.5 Admin Stripe Integration** ✅
+- [x] Added "Enable Online Payments" toggle to `RecurringForm.jsx`:
+  - Toggle enables/disables Stripe sync when creating/editing plans
+  - Shows sync status for already-synced tiers
+  - Auto-enabled for public plans when Stripe is connected
+- [x] Added "Enable Online Payments" toggle to `ClassPackForm.jsx`:
+  - Same functionality as RecurringForm
+  - Supports one-time class pack purchases
+- [x] Updated `MembershipsScreen.jsx`:
+  - Fetches gym's `stripeAccountStatus` on load
+  - Passes `stripeEnabled` prop to forms
+- [x] Created `createAdminCheckoutLink(gymId, tierId, memberId)` Cloud Function:
+  - Generates a Stripe Checkout URL for admin-assigned memberships
+  - Pre-fills customer email from member's user record
+  - Stores member ID in session metadata for webhook processing
+  - Returns shareable payment link for admin to send to member
+- [x] Updated `MemberBillingTab.jsx` with payment link generation:
+  - "Generate Payment Link" button for Stripe-synced tiers
+  - Copy-to-clipboard functionality for generated URLs
+  - Validation that tier has `stripePriceId` before allowing link generation
+  - Error states for non-synced tiers with guidance to enable online payments
+
 **Cloud Functions Deployed (Phase 3):**
-- `createSubscriptionCheckout` - Creates Stripe Checkout Session for subscriptions
+- `createSubscriptionCheckout` - Creates Stripe Checkout Session for member self-checkout
 - `createCustomerPortalSession` - Opens Stripe Customer Portal for billing management
+- `createAdminCheckoutLink` - Generates payment link for admin-assigned memberships
 
 **Files Modified:**
-- `functions/index.js` - Added checkout and portal functions, webhook handler
-- `packages/shared/api/firestore/memberships.js` - Added checkout and portal API functions
+- `functions/index.js` - Added checkout, portal, and admin link functions, webhook handler
+- `packages/shared/api/firestore/memberships.js` - Added checkout, portal, and admin link API functions
 - `packages/web/src/screens/members/store/tabs/MembershipListTab.jsx` - Checkout flow integration
 - `packages/web/src/screens/members/membership/SubscriptionSuccessScreen.jsx` - NEW
 - `packages/web/src/screens/members/profile/MembershipSection.jsx` - Portal integration
 - `packages/web/src/App.jsx` - Added success route
+- `packages/web/src/components/admin/memberships/RecurringForm.jsx` - Stripe sync toggle
+- `packages/web/src/components/admin/memberships/ClassPackForm.jsx` - Stripe sync toggle
+- `packages/web/src/screens/admin/MembershipsScreen/index.jsx` - Stripe enabled state
+- `packages/web/src/components/admin/MemberFormModal/MemberBillingTab.jsx` - Payment link generation
 
 ---
 

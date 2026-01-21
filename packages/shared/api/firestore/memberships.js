@@ -225,6 +225,37 @@ export const createSubscriptionCheckout = async (gymId, tierId) => {
 };
 
 /**
+ * Create a Stripe checkout session for admin to share with member
+ * Used when admin wants to send a payment link to a member
+ * @param {string} gymId - Gym ID
+ * @param {string} tierId - Membership tier ID
+ * @param {string} memberId - Target member's user ID
+ * @returns {Promise<{success: boolean, url?: string, error?: string}>}
+ */
+export const createAdminCheckoutLink = async (gymId, tierId, memberId) => {
+  try {
+    const functions = getFunctions();
+    const createCheckout = httpsCallable(functions, 'createAdminCheckoutLink');
+
+    const result = await createCheckout({
+      gymId,
+      tierId,
+      memberId,
+      origin: window.location.origin
+    });
+
+    if (result.data.url) {
+      return { success: true, url: result.data.url };
+    }
+
+    return { success: false, error: "No checkout URL returned" };
+  } catch (error) {
+    const errorMessage = error.message || "Failed to create checkout link";
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
  * Create a Stripe Customer Portal session for managing billing
  * Opens the Stripe portal where members can update payment methods and view invoices
  * @param {string} gymId - Gym ID

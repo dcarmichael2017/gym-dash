@@ -1922,3 +1922,225 @@ exports.createSubscriptionCheckout = onCall(
       }
     },
 );
+
+/**
+ * Create a checkout link for admin to share with a member
+ * Allows admin to generate a payment link for a specific member
+ *
+ * @param {string} gymId - The gym ID
+ * @param {string} tierId - The membership tier ID
+ * @param {string} memberId - The target member's user ID
+ * @param {string} origin - The origin URL for redirects
+ * @returns {Object} - { url: string } - The shareable checkout URL
+ */
+exports.createAdminCheckoutLink = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, tierId, memberId, origin} = request.data;
+
+      if (!gymId || !tierId || !memberId || !origin) {
+        throw new HttpsError(
+            "invalid-argument",
+            "gymId, tierId, memberId, and origin are required.",
+        );
+      }
+
+      // Validate origin
+      const isAllowed = ALLOWED_ORIGINS.some((pattern) =>
+        typeof pattern === "string" ? pattern === origin : pattern.test(origin),
+      );
+      if (!isAllowed) {
+        throw new HttpsError("permission-denied", "Origin not allowed.");
+      }
+
+      try {
+        const adminUserId = request.auth.uid;
+
+        // Verify admin has permission (must be owner or staff of the gym)
+        const adminRef = db.collection("users").doc(adminUserId);
+        const adminDoc = await adminRef.get();
+
+        if (!adminDoc.exists) {
+          throw new HttpsError("permission-denied", "Admin user not found.");
+        }
+
+        const adminData = adminDoc.data();
+        if (adminData.gymId !== gymId && adminData.role !== "owner" && adminData.role !== "staff") {
+          throw new HttpsError("permission-denied", "You don't have permission to do this.");
+        }
+
+        // Get gym data
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId) {
+          throw new HttpsError(
+              "failed-precondition",
+              "Gym has no connected Stripe account.",
+          );
+        }
+
+        if (gymData.stripeAccountStatus !== "ACTIVE") {
+          throw new HttpsError(
+              "failed-precondition",
+              "Gym's payment system is not active.",
+          );
+        }
+
+        // Get membership tier
+        const tierRef = gymRef.collection("membershipTiers").doc(tierId);
+        const tierDoc = await tierRef.get();
+
+        if (!tierDoc.exists) {
+          throw new HttpsError("not-found", "Membership tier not found.");
+        }
+
+        const tierData = tierDoc.data();
+
+        if (!tierData.active) {
+          throw new HttpsError(
+              "failed-precondition",
+              "This membership tier is no longer available.",
+          );
+        }
+
+        if (!tierData.stripePriceId) {
+          throw new HttpsError(
+              "failed-precondition",
+              "This membership tier is not set up for payments yet. Please sync it to Stripe first.",
+          );
+        }
+
+        // Get member data
+        const memberRef = db.collection("users").doc(memberId);
+        const memberDoc = await memberRef.get();
+
+        if (!memberDoc.exists) {
+          throw new HttpsError("not-found", "Member not found.");
+        }
+
+        const memberData = memberDoc.data();
+
+        // Check or create Stripe Customer for this member on the connected account
+        const membershipRef = memberRef.collection("memberships").doc(gymId);
+        const membershipDoc = await membershipRef.get();
+        let stripeCustomerId = null;
+
+        if (membershipDoc.exists && membershipDoc.data().stripeCustomerId) {
+          stripeCustomerId = membershipDoc.data().stripeCustomerId;
+        } else {
+          // Create a new customer on the connected account
+          const customer = await stripeClient.customers.create(
+              {
+                email: memberData.email,
+                name: memberData.displayName || memberData.name || memberData.email,
+                metadata: {
+                  userId: memberId,
+                  gymId: gymId,
+                },
+              },
+              {stripeAccount: stripeAccountId},
+          );
+          stripeCustomerId = customer.id;
+
+          // Store the customer ID
+          await membershipRef.set({
+            stripeCustomerId: stripeCustomerId,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, {merge: true});
+        }
+
+        // Build line items
+        const lineItems = [
+          {
+            price: tierData.stripePriceId,
+            quantity: 1,
+          },
+        ];
+
+        // Add initiation fee if applicable
+        if (tierData.initiationFee && tierData.initiationFee > 0) {
+          const initiationFeePrice = await stripeClient.prices.create(
+              {
+                product_data: {
+                  name: `${tierData.name} - Initiation Fee`,
+                },
+                unit_amount: Math.round(tierData.initiationFee * 100),
+                currency: "usd",
+              },
+              {stripeAccount: stripeAccountId},
+          );
+
+          lineItems.push({
+            price: initiationFeePrice.id,
+            quantity: 1,
+          });
+        }
+
+        // Build checkout session
+        const sessionConfig = {
+          customer: stripeCustomerId,
+          mode: "subscription",
+          line_items: lineItems,
+          success_url: `${origin}/members/membership/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${origin}/members/store?category=memberships`,
+          metadata: {
+            type: "membership",
+            gymId: gymId,
+            tierId: tierId,
+            userId: memberId,
+            tierName: tierData.name,
+            createdByAdmin: adminUserId,
+          },
+          subscription_data: {
+            metadata: {
+              gymId: gymId,
+              tierId: tierId,
+              userId: memberId,
+              tierName: tierData.name,
+            },
+          },
+        };
+
+        // Add trial period if applicable
+        if (tierData.hasTrial && tierData.trialDays > 0) {
+          sessionConfig.subscription_data.trial_period_days = tierData.trialDays;
+        }
+
+        // Create the Checkout Session
+        const session = await stripeClient.checkout.sessions.create(
+            sessionConfig,
+            {stripeAccount: stripeAccountId},
+        );
+
+        console.log(`Admin ${adminUserId} created checkout link for member ${memberId} on gym ${gymId}`);
+
+        return {url: session.url};
+      } catch (error) {
+        console.error("Error creating admin checkout link:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to create checkout link: " + error.message);
+      }
+    },
+);

@@ -26,7 +26,8 @@ const MembershipsScreen = () => {
   const [loading, setLoading] = useState(true);
   const [gymId, setGymId] = useState(null);
   const [tiers, setTiers] = useState([]);
-  
+  const [stripeEnabled, setStripeEnabled] = useState(false);
+
   // UI State
   const [activeTab, setActiveTab] = useState('recurring'); // 'recurring' | 'pack'
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -76,9 +77,18 @@ const MembershipsScreen = () => {
         if (userSnap.exists() && userSnap.data().gymId) {
           const gId = userSnap.data().gymId;
           setGymId(gId);
+
+          // Check if gym has Stripe enabled
+          const gymRef = doc(db, 'gyms', gId);
+          const gymSnap = await getDoc(gymRef);
+          if (gymSnap.exists()) {
+            const gymData = gymSnap.data();
+            setStripeEnabled(gymData.stripeAccountStatus === 'ACTIVE');
+          }
+
           await refreshData(gId);
         }
-      } catch (error) { console.error(error); } 
+      } catch (error) { console.error(error); }
       finally { setLoading(false); }
     };
     initData();
@@ -189,6 +199,7 @@ const MembershipsScreen = () => {
                   onSave={() => refreshData(gymId)}
                   onClose={() => setIsModalOpen(false)}
                   theme={theme}
+                  stripeEnabled={stripeEnabled}
               />
           ) : (
               <ClassPackForm
@@ -197,6 +208,7 @@ const MembershipsScreen = () => {
                   onSave={() => refreshData(gymId)}
                   onClose={() => setIsModalOpen(false)}
                   theme={theme}
+                  stripeEnabled={stripeEnabled}
               />
           )}
       </Modal>

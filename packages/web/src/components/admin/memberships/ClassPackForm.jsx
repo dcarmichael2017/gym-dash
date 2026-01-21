@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Ticket, Plus, Trash2, Check, Globe, Users, Lock, Coins } from 'lucide-react';
+import { Ticket, Plus, Trash2, Check, Globe, Users, Lock, Coins, CreditCard, CheckCircle } from 'lucide-react';
 import { createMembershipTier, updateMembershipTier } from '../../../../../../packages/shared/api/firestore';
 
-const ClassPackForm = ({ gymId, tierData, onSave, onClose, theme }) => {
+const ClassPackForm = ({ gymId, tierData, onSave, onClose, theme, stripeEnabled = false }) => {
   const primaryColor = theme?.primaryColor || '#2563eb';
   const [loading, setLoading] = useState(false);
+  const [syncToStripe, setSyncToStripe] = useState(stripeEnabled && (tierData?.visibility === 'public' || !tierData));
   const [formData, setFormData] = useState({
     name: '',
     price: '',
@@ -47,16 +48,24 @@ const ClassPackForm = ({ gymId, tierData, onSave, onClose, theme }) => {
 
     let result;
     if (tierData) {
-      result = await updateMembershipTier(gymId, tierData.id, cleanData);
+      result = await updateMembershipTier(gymId, tierData.id, cleanData, syncToStripe && stripeEnabled);
     } else {
-      result = await createMembershipTier(gymId, cleanData);
+      result = await createMembershipTier(gymId, cleanData, syncToStripe && stripeEnabled);
     }
 
     setLoading(false);
 
     if (result.success) {
-      onSave();
-      onClose();
+      if (syncToStripe && stripeEnabled) {
+        // Brief delay to show success before closing
+        setTimeout(() => {
+          onSave();
+          onClose();
+        }, 800);
+      } else {
+        onSave();
+        onClose();
+      }
     } else {
       alert("Failed to save: " + result.error);
     }
@@ -167,6 +176,50 @@ const ClassPackForm = ({ gymId, tierData, onSave, onClose, theme }) => {
                 <span className="text-[10px] text-gray-400">Visible to members in the app</span>
             </div>
             <textarea rows="2" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="w-full p-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. Valid for any Muay Thai class..." />
+        </div>
+
+        {/* Stripe Sync Toggle */}
+        <div className={`p-4 rounded-xl border transition-all ${stripeEnabled ? '' : 'opacity-60'}`} style={syncToStripe && stripeEnabled ? { backgroundColor: '#f0fdf4', borderColor: '#86efac' } : { backgroundColor: '#f9fafb', borderColor: '#e5e7eb' }}>
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <CreditCard className="h-5 w-5" style={{ color: syncToStripe && stripeEnabled ? '#16a34a' : '#9ca3af' }} />
+              <div>
+                <p className="text-sm font-bold" style={{ color: syncToStripe && stripeEnabled ? '#16a34a' : '#4b5563' }}>
+                  Enable Online Payments
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {stripeEnabled
+                    ? 'Allow members to purchase this pack from the app'
+                    : 'Connect Stripe in Settings to enable'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={!stripeEnabled}
+              onClick={() => setSyncToStripe(!syncToStripe)}
+              className="w-11 h-6 rounded-full relative transition-colors disabled:cursor-not-allowed"
+              style={{ backgroundColor: syncToStripe && stripeEnabled ? '#16a34a' : '#d1d5db' }}
+            >
+              <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${syncToStripe && stripeEnabled ? 'translate-x-5' : ''}`} />
+            </button>
+          </div>
+          {syncToStripe && stripeEnabled && (
+            <div className="mt-3 pt-3 border-t border-green-200">
+              <div className="flex items-start gap-2 text-xs text-green-700">
+                <CheckCircle size={14} className="mt-0.5 shrink-0" />
+                <span>This pack will be synced to Stripe and available for members to purchase online.</span>
+              </div>
+            </div>
+          )}
+          {tierData?.stripePriceId && (
+            <div className="mt-3 pt-3 border-t border-gray-200">
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <CheckCircle size={14} className="text-green-500" />
+                <span>Already synced to Stripe</span>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="pt-6 mt-4 border-t border-gray-100 flex justify-end gap-3">
