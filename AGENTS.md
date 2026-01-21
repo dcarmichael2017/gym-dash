@@ -2397,13 +2397,13 @@ const session = await stripe.checkout.sessions.create({
 
 ---
 
-#### Phase 2: Products & Prices Sync
+#### Phase 2: Products & Prices Sync ✅ COMPLETE
 
-**[ ] 2.1 Membership Tier → Stripe Product Sync**
-- [ ] When admin creates membership tier:
+**[x] 2.1 Membership Tier → Stripe Product Sync**
+- [x] When admin creates membership tier:
   - Create Stripe Product with tier name/description
   - Create Stripe Price(s) for each interval (monthly/yearly/one-time)
-- [ ] Store in membership tier document:
+- [x] Store in membership tier document:
   ```javascript
   gyms/{gymId}/membershipTiers/{tierId} {
     // ...existing fields
@@ -2412,34 +2412,44 @@ const session = await stripe.checkout.sessions.create({
     stripePriceIdYearly: string | null,     // Yearly price (if applicable)
   }
   ```
-- [ ] When admin edits tier pricing → Update Stripe Price (create new price, archive old)
-- [ ] When admin deletes tier → Archive Stripe Product (don't delete for audit trail)
+- [x] When admin edits tier pricing → Update Stripe Price (create new price, archive old)
+- [x] When admin deletes tier → Archive Stripe Product (don't delete for audit trail)
 
-**[ ] 2.2 Shop Product → Stripe Product Sync**
-- [ ] When admin creates shop product:
+**Implementation Details:**
+- Cloud Function: `syncMembershipTierToStripe` - Creates/updates Stripe Product and Price
+- Cloud Function: `archiveStripeProduct` - Archives products instead of deleting
+- API: `memberships.js` - Added `syncToStripe` parameter to create/update functions
+- Handles both recurring intervals (`month`, `year`) and one-time prices (`one_time`)
+- Archives old prices when price changes occur
+
+**[x] 2.2 Shop Product → Stripe Product Sync**
+- [x] When admin creates shop product:
   - Create Stripe Product
-  - For each variant, create Stripe Price
-- [ ] Store in product document:
+  - Create Stripe Price for base product
+- [x] Store in product document:
   ```javascript
   gyms/{gymId}/products/{productId} {
     // ...existing fields
     stripeProductId: string | null,
-    variants: [{
-      // ...existing variant fields
-      stripePriceId: string | null
-    }]
+    stripePriceId: string | null
   }
   ```
-- [ ] Handle price updates when admin edits product/variant pricing
+- [x] Handle price updates when admin edits product pricing
 
-**[ ] 2.3 Class Pack → Stripe Product Sync**
-- [ ] When admin creates class pack:
-  - Create Stripe Product
-  - Create Stripe Price (one-time)
-- [ ] Store in class pack document:
+**Implementation Details:**
+- Cloud Function: `syncShopProductToStripe` - Creates/updates Stripe Product and Price
+- API: `products.js` - Added `syncToStripe` parameter to create/update functions
+- Archives old prices when price changes occur
+- Syncs product name, description, and images to Stripe
+
+**[x] 2.3 Class Pack → Stripe Product Sync**
+- [x] Class packs are handled as membership tiers with `interval: 'one_time'`
+- [x] Uses same `syncMembershipTierToStripe` function
+- [x] Store in class pack document:
   ```javascript
-  gyms/{gymId}/classPacks/{packId} {
+  gyms/{gymId}/membershipTiers/{packId} {
     // ...existing fields
+    interval: 'one_time',
     stripeProductId: string | null,
     stripePriceId: string | null
   }

@@ -308,6 +308,418 @@ exports.createStripeLoginLink = onCall(
     },
 );
 
+// ============================================================================
+// STRIPE PRODUCT & PRICE SYNC (Phase 2)
+// ============================================================================
+
+/**
+ * Sync a membership tier to Stripe (create Product + Price)
+ * Called when admin creates or updates a membership tier
+ */
+exports.syncMembershipTierToStripe = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, tierId, tierData} = request.data;
+
+      if (!gymId || !tierId || !tierData) {
+        throw new HttpsError(
+            "invalid-argument",
+            "gymId, tierId, and tierData are required.",
+        );
+      }
+
+      try {
+        // Get gym's Stripe account
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId) {
+          throw new HttpsError(
+              "failed-precondition",
+              "Gym has no connected Stripe account.",
+          );
+        }
+
+        // Check if Stripe account is active
+        if (gymData.stripeAccountStatus !== "ACTIVE") {
+          throw new HttpsError(
+              "failed-precondition",
+              "Stripe account is not active. Please complete onboarding first.",
+          );
+        }
+
+        const tierRef = gymRef.collection("membershipTiers").doc(tierId);
+        const tierDoc = await tierRef.get();
+        const existingTier = tierDoc.exists ? tierDoc.data() : null;
+
+        // Prepare Stripe product metadata
+        const productMetadata = {
+          gymId: gymId,
+          tierId: tierId,
+          type: tierData.interval === "one_time" ? "class_pack" : "membership",
+        };
+
+        let stripeProductId = existingTier?.stripeProductId;
+        let stripePriceId = null;
+
+        // Create or update Stripe Product
+        if (stripeProductId) {
+          // Update existing product
+          await stripeClient.products.update(
+              stripeProductId,
+              {
+                name: tierData.name,
+                description: tierData.description || `${tierData.name} membership`,
+                metadata: productMetadata,
+              },
+              {stripeAccount: stripeAccountId},
+          );
+        } else {
+          // Create new product
+          const product = await stripeClient.products.create(
+              {
+                name: tierData.name,
+                description: tierData.description || `${tierData.name} membership`,
+                metadata: productMetadata,
+              },
+              {stripeAccount: stripeAccountId},
+          );
+          stripeProductId = product.id;
+        }
+
+        // Create new Stripe Price (prices are immutable, so we always create new ones)
+        const priceInCents = Math.round(parseFloat(tierData.price) * 100);
+
+        if (tierData.interval === "one_time") {
+          // One-time price for class packs
+          const price = await stripeClient.prices.create(
+              {
+                product: stripeProductId,
+                unit_amount: priceInCents,
+                currency: "usd",
+                metadata: {
+                  gymId: gymId,
+                  tierId: tierId,
+                  credits: tierData.credits?.toString() || "0",
+                },
+              },
+              {stripeAccount: stripeAccountId},
+          );
+          stripePriceId = price.id;
+        } else {
+          // Recurring price for subscriptions
+          const intervalMap = {
+            "week": "week",
+            "2weeks": "week", // Stripe doesn't support 2 weeks, we'll use week * 2
+            "month": "month",
+            "year": "year",
+          };
+
+          const stripeInterval = intervalMap[tierData.interval] || "month";
+          const intervalCount = tierData.interval === "2weeks" ? 2 : 1;
+
+          const price = await stripeClient.prices.create(
+              {
+                product: stripeProductId,
+                unit_amount: priceInCents,
+                currency: "usd",
+                recurring: {
+                  interval: stripeInterval,
+                  interval_count: intervalCount,
+                },
+                metadata: {
+                  gymId: gymId,
+                  tierId: tierId,
+                },
+              },
+              {stripeAccount: stripeAccountId},
+          );
+          stripePriceId = price.id;
+        }
+
+        // Archive old price if it exists and is different
+        if (existingTier?.stripePriceId && existingTier.stripePriceId !== stripePriceId) {
+          try {
+            await stripeClient.prices.update(
+                existingTier.stripePriceId,
+                {active: false},
+                {stripeAccount: stripeAccountId},
+            );
+          } catch (archiveErr) {
+            console.log("Could not archive old price:", archiveErr.message);
+          }
+        }
+
+        // Update Firestore with Stripe IDs
+        await tierRef.update({
+          stripeProductId: stripeProductId,
+          stripePriceId: stripePriceId,
+          stripeSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        return {
+          success: true,
+          stripeProductId: stripeProductId,
+          stripePriceId: stripePriceId,
+        };
+      } catch (error) {
+        console.error("Error syncing membership tier to Stripe:", error);
+        throw new HttpsError("internal", "Failed to sync: " + error.message);
+      }
+    },
+);
+
+/**
+ * Sync a shop product to Stripe (create Product + Prices for variants)
+ * Called when admin creates or updates a shop product
+ */
+exports.syncShopProductToStripe = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, productId, productData} = request.data;
+
+      if (!gymId || !productId || !productData) {
+        throw new HttpsError(
+            "invalid-argument",
+            "gymId, productId, and productData are required.",
+        );
+      }
+
+      try {
+        // Get gym's Stripe account
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId) {
+          throw new HttpsError(
+              "failed-precondition",
+              "Gym has no connected Stripe account.",
+          );
+        }
+
+        if (gymData.stripeAccountStatus !== "ACTIVE") {
+          throw new HttpsError(
+              "failed-precondition",
+              "Stripe account is not active.",
+          );
+        }
+
+        const productRef = gymRef.collection("products").doc(productId);
+        const productDoc = await productRef.get();
+        const existingProduct = productDoc.exists ? productDoc.data() : null;
+
+        // Prepare Stripe product
+        const productMetadata = {
+          gymId: gymId,
+          productId: productId,
+          type: "shop_product",
+          category: productData.category || "gear",
+        };
+
+        let stripeProductId = existingProduct?.stripeProductId;
+
+        // Create or update Stripe Product
+        const productPayload = {
+          name: productData.name,
+          description: productData.description || "",
+          metadata: productMetadata,
+        };
+
+        // Add images if available
+        if (productData.images && productData.images.length > 0) {
+          productPayload.images = productData.images.slice(0, 8); // Stripe limits to 8 images
+        }
+
+        if (stripeProductId) {
+          await stripeClient.products.update(
+              stripeProductId,
+              productPayload,
+              {stripeAccount: stripeAccountId},
+          );
+        } else {
+          const product = await stripeClient.products.create(
+              productPayload,
+              {stripeAccount: stripeAccountId},
+          );
+          stripeProductId = product.id;
+        }
+
+        // Handle pricing based on variants
+        let stripePriceId = null;
+        let variantPrices = [];
+
+        if (productData.hasVariants && productData.variants?.length > 0) {
+          // Create prices for each variant
+          for (const variant of productData.variants) {
+            const variantPriceInCents = Math.round(parseFloat(variant.price) * 100);
+
+            const price = await stripeClient.prices.create(
+                {
+                  product: stripeProductId,
+                  unit_amount: variantPriceInCents,
+                  currency: "usd",
+                  nickname: variant.name,
+                  metadata: {
+                    gymId: gymId,
+                    productId: productId,
+                    variantId: variant.id,
+                    variantName: variant.name,
+                  },
+                },
+                {stripeAccount: stripeAccountId},
+            );
+
+            variantPrices.push({
+              variantId: variant.id,
+              stripePriceId: price.id,
+            });
+          }
+        } else {
+          // Single price for non-variant products
+          const priceInCents = Math.round(parseFloat(productData.price) * 100);
+
+          const price = await stripeClient.prices.create(
+              {
+                product: stripeProductId,
+                unit_amount: priceInCents,
+                currency: "usd",
+                metadata: {
+                  gymId: gymId,
+                  productId: productId,
+                },
+              },
+              {stripeAccount: stripeAccountId},
+          );
+          stripePriceId = price.id;
+        }
+
+        // Update Firestore with Stripe IDs
+        const updatePayload = {
+          stripeProductId: stripeProductId,
+          stripeSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        if (stripePriceId) {
+          updatePayload.stripePriceId = stripePriceId;
+        }
+
+        // If variants, update each variant with its price ID
+        if (variantPrices.length > 0) {
+          const updatedVariants = productData.variants.map((variant) => {
+            const priceInfo = variantPrices.find((vp) => vp.variantId === variant.id);
+            return {
+              ...variant,
+              stripePriceId: priceInfo?.stripePriceId || null,
+            };
+          });
+          updatePayload.variants = updatedVariants;
+        }
+
+        await productRef.update(updatePayload);
+
+        return {
+          success: true,
+          stripeProductId: stripeProductId,
+          stripePriceId: stripePriceId,
+          variantPrices: variantPrices,
+        };
+      } catch (error) {
+        console.error("Error syncing shop product to Stripe:", error);
+        throw new HttpsError("internal", "Failed to sync: " + error.message);
+      }
+    },
+);
+
+/**
+ * Archive a Stripe product (when deleting from our system)
+ * We archive instead of delete to maintain Stripe records
+ */
+exports.archiveStripeProduct = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, stripeProductId} = request.data;
+
+      if (!gymId || !stripeProductId) {
+        throw new HttpsError(
+            "invalid-argument",
+            "gymId and stripeProductId are required.",
+        );
+      }
+
+      try {
+        // Get gym's Stripe account
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const stripeAccountId = gymDoc.data().stripeAccountId;
+        if (!stripeAccountId) {
+          return {success: true, message: "No Stripe account connected."};
+        }
+
+        // Archive the product (set active: false)
+        await stripeClient.products.update(
+            stripeProductId,
+            {active: false},
+            {stripeAccount: stripeAccountId},
+        );
+
+        return {success: true};
+      } catch (error) {
+        console.error("Error archiving Stripe product:", error);
+        // Don't throw - if it fails, it's not critical
+        return {success: false, error: error.message};
+      }
+    },
+);
+
 // --- FUNCTION 2: WAITLIST PROMOTION TRIGGER (v2) ---
 /**
  * Detects changes in Attendance documents.

@@ -1,9 +1,17 @@
-import { doc, addDoc, collection, updateDoc, getDocs, deleteDoc } from "firebase/firestore";
+import { doc, addDoc, collection, updateDoc, getDocs, deleteDoc, getDoc } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../firebaseConfig";
 
 // --- MEMBERSHIP TIERS ---
 
-export const createMembershipTier = async (gymId, tierData) => {
+/**
+ * Create a new membership tier
+ * @param {string} gymId - Gym ID
+ * @param {object} tierData - Tier data
+ * @param {boolean} syncToStripe - Whether to sync to Stripe (default: false)
+ * @returns {Promise<{success: boolean, tier?: object, error?: string}>}
+ */
+export const createMembershipTier = async (gymId, tierData, syncToStripe = false) => {
   try {
     const collectionRef = collection(db, "gyms", gymId, "membershipTiers");
     const payload = {
@@ -14,12 +22,39 @@ export const createMembershipTier = async (gymId, tierData) => {
       createdAt: new Date()
     };
     const docRef = await addDoc(collectionRef, payload);
-    return { success: true, tier: { id: docRef.id, ...payload } };
+    const tier = { id: docRef.id, ...payload };
+
+    // Optionally sync to Stripe
+    if (syncToStripe) {
+      try {
+        const functions = getFunctions();
+        const syncMembershipTierToStripe = httpsCallable(functions, 'syncMembershipTierToStripe');
+        const result = await syncMembershipTierToStripe({
+          gymId,
+          tierId: docRef.id,
+          tierData: payload
+        });
+        if (result.data.success) {
+          tier.stripeProductId = result.data.stripeProductId;
+          tier.stripePriceId = result.data.stripePriceId;
+        }
+      } catch (stripeErr) {
+        console.warn("Stripe sync failed (non-blocking):", stripeErr.message);
+        // Don't fail the operation, tier was created successfully
+      }
+    }
+
+    return { success: true, tier };
   } catch (error) {
     return { success: false, error: error.message };
   }
 };
 
+/**
+ * Get all membership tiers for a gym
+ * @param {string} gymId - Gym ID
+ * @returns {Promise<{success: boolean, tiers?: array, error?: string}>}
+ */
 export const getMembershipTiers = async (gymId) => {
   try {
     const collectionRef = collection(db, "gyms", gymId, "membershipTiers");
@@ -31,21 +66,127 @@ export const getMembershipTiers = async (gymId) => {
   }
 };
 
-export const updateMembershipTier = async (gymId, tierId, data) => {
+/**
+ * Get a single membership tier
+ * @param {string} gymId - Gym ID
+ * @param {string} tierId - Tier ID
+ * @returns {Promise<{success: boolean, tier?: object, error?: string}>}
+ */
+export const getMembershipTier = async (gymId, tierId) => {
   try {
     const docRef = doc(db, "gyms", gymId, "membershipTiers", tierId);
-    await updateDoc(docRef, data);
+    const docSnap = await getDoc(docRef);
+
+    if (!docSnap.exists()) {
+      return { success: false, error: "Tier not found" };
+    }
+
+    return { success: true, tier: { id: docSnap.id, ...docSnap.data() } };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Update a membership tier
+ * @param {string} gymId - Gym ID
+ * @param {string} tierId - Tier ID
+ * @param {object} data - Updated fields
+ * @param {boolean} syncToStripe - Whether to sync to Stripe (default: false)
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+export const updateMembershipTier = async (gymId, tierId, data, syncToStripe = false) => {
+  try {
+    const docRef = doc(db, "gyms", gymId, "membershipTiers", tierId);
+    await updateDoc(docRef, {
+      ...data,
+      updatedAt: new Date()
+    });
+
+    // Optionally sync to Stripe
+    if (syncToStripe) {
+      try {
+        // Get the full tier data for sync
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const functions = getFunctions();
+          const syncMembershipTierToStripe = httpsCallable(functions, 'syncMembershipTierToStripe');
+          await syncMembershipTierToStripe({
+            gymId,
+            tierId,
+            tierData: { id: docSnap.id, ...docSnap.data() }
+          });
+        }
+      } catch (stripeErr) {
+        console.warn("Stripe sync failed (non-blocking):", stripeErr.message);
+      }
+    }
+
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
   }
 };
 
-export const deleteMembershipTier = async (gymId, tierId) => {
+/**
+ * Delete a membership tier
+ * @param {string} gymId - Gym ID
+ * @param {string} tierId - Tier ID
+ * @param {boolean} archiveInStripe - Whether to archive in Stripe (default: false)
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+export const deleteMembershipTier = async (gymId, tierId, archiveInStripe = false) => {
   try {
     const docRef = doc(db, "gyms", gymId, "membershipTiers", tierId);
+
+    // Get the tier first to check for Stripe product
+    if (archiveInStripe) {
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists() && docSnap.data().stripeProductId) {
+        try {
+          const functions = getFunctions();
+          const archiveStripeProduct = httpsCallable(functions, 'archiveStripeProduct');
+          await archiveStripeProduct({
+            gymId,
+            stripeProductId: docSnap.data().stripeProductId
+          });
+        } catch (stripeErr) {
+          console.warn("Stripe archive failed (non-blocking):", stripeErr.message);
+        }
+      }
+    }
+
     await deleteDoc(docRef);
     return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Manually sync a membership tier to Stripe
+ * @param {string} gymId - Gym ID
+ * @param {string} tierId - Tier ID
+ * @returns {Promise<{success: boolean, stripeProductId?: string, stripePriceId?: string, error?: string}>}
+ */
+export const syncMembershipTierToStripe = async (gymId, tierId) => {
+  try {
+    const docRef = doc(db, "gyms", gymId, "membershipTiers", tierId);
+    const docSnap = await getDoc(docRef);
+
+    if (!docSnap.exists()) {
+      return { success: false, error: "Tier not found" };
+    }
+
+    const functions = getFunctions();
+    const syncFn = httpsCallable(functions, 'syncMembershipTierToStripe');
+    const result = await syncFn({
+      gymId,
+      tierId,
+      tierData: { id: docSnap.id, ...docSnap.data() }
+    });
+
+    return result.data;
   } catch (error) {
     return { success: false, error: error.message };
   }

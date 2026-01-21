@@ -1,4 +1,5 @@
 import { doc, addDoc, collection, updateDoc, getDocs, deleteDoc, getDoc, query, where } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { db, auth } from "../firebaseConfig";
 
 // --- PRODUCT CATEGORIES (Predefined) ---
@@ -16,9 +17,10 @@ export const PRODUCT_CATEGORIES = [
  * Create a new product
  * @param {string} gymId - Gym ID
  * @param {object} productData - Product data
+ * @param {boolean} syncToStripe - Whether to sync to Stripe (default: false)
  * @returns {Promise<{success: boolean, product?: object, error?: string}>}
  */
-export const createProduct = async (gymId, productData) => {
+export const createProduct = async (gymId, productData, syncToStripe = false) => {
   try {
     const collectionRef = collection(db, "gyms", gymId, "products");
 
@@ -47,6 +49,10 @@ export const createProduct = async (gymId, productData) => {
       visibility: productData.visibility || 'public',
       featured: productData.featured || false,
 
+      // Stripe (will be populated if synced)
+      stripeProductId: null,
+      stripePriceId: null,
+
       // Metadata
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -54,7 +60,28 @@ export const createProduct = async (gymId, productData) => {
     };
 
     const docRef = await addDoc(collectionRef, payload);
-    return { success: true, product: { id: docRef.id, ...payload } };
+    const product = { id: docRef.id, ...payload };
+
+    // Optionally sync to Stripe
+    if (syncToStripe) {
+      try {
+        const functions = getFunctions();
+        const syncShopProductToStripe = httpsCallable(functions, 'syncShopProductToStripe');
+        const result = await syncShopProductToStripe({
+          gymId,
+          productId: docRef.id,
+          productData: payload
+        });
+        if (result.data.success) {
+          product.stripeProductId = result.data.stripeProductId;
+          product.stripePriceId = result.data.stripePriceId;
+        }
+      } catch (stripeErr) {
+        console.warn("Stripe sync failed (non-blocking):", stripeErr.message);
+      }
+    }
+
+    return { success: true, product };
   } catch (error) {
     console.error("[createProduct] Error:", error);
     return { success: false, error: error.message };
@@ -125,9 +152,10 @@ export const getProductById = async (gymId, productId) => {
  * @param {string} gymId - Gym ID
  * @param {string} productId - Product ID
  * @param {object} data - Updated fields
+ * @param {boolean} syncToStripe - Whether to sync to Stripe (default: false)
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-export const updateProduct = async (gymId, productId, data) => {
+export const updateProduct = async (gymId, productId, data, syncToStripe = false) => {
   try {
     const docRef = doc(db, "gyms", gymId, "products", productId);
 
@@ -155,6 +183,25 @@ export const updateProduct = async (gymId, productId, data) => {
       updatedAt: new Date()
     });
 
+    // Optionally sync to Stripe
+    if (syncToStripe) {
+      try {
+        // Get the full product data for sync
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const functions = getFunctions();
+          const syncShopProductToStripe = httpsCallable(functions, 'syncShopProductToStripe');
+          await syncShopProductToStripe({
+            gymId,
+            productId,
+            productData: { id: docSnap.id, ...docSnap.data() }
+          });
+        }
+      } catch (stripeErr) {
+        console.warn("Stripe sync failed (non-blocking):", stripeErr.message);
+      }
+    }
+
     return { success: true };
   } catch (error) {
     console.error("[updateProduct] Error:", error);
@@ -166,15 +213,63 @@ export const updateProduct = async (gymId, productId, data) => {
  * Delete a product
  * @param {string} gymId - Gym ID
  * @param {string} productId - Product ID
+ * @param {boolean} archiveInStripe - Whether to archive in Stripe (default: false)
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-export const deleteProduct = async (gymId, productId) => {
+export const deleteProduct = async (gymId, productId, archiveInStripe = false) => {
   try {
     const docRef = doc(db, "gyms", gymId, "products", productId);
+
+    // Get the product first to check for Stripe product
+    if (archiveInStripe) {
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists() && docSnap.data().stripeProductId) {
+        try {
+          const functions = getFunctions();
+          const archiveStripeProduct = httpsCallable(functions, 'archiveStripeProduct');
+          await archiveStripeProduct({
+            gymId,
+            stripeProductId: docSnap.data().stripeProductId
+          });
+        } catch (stripeErr) {
+          console.warn("Stripe archive failed (non-blocking):", stripeErr.message);
+        }
+      }
+    }
+
     await deleteDoc(docRef);
     return { success: true };
   } catch (error) {
     console.error("[deleteProduct] Error:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Manually sync a shop product to Stripe
+ * @param {string} gymId - Gym ID
+ * @param {string} productId - Product ID
+ * @returns {Promise<{success: boolean, stripeProductId?: string, stripePriceId?: string, error?: string}>}
+ */
+export const syncProductToStripe = async (gymId, productId) => {
+  try {
+    const docRef = doc(db, "gyms", gymId, "products", productId);
+    const docSnap = await getDoc(docRef);
+
+    if (!docSnap.exists()) {
+      return { success: false, error: "Product not found" };
+    }
+
+    const functions = getFunctions();
+    const syncFn = httpsCallable(functions, 'syncShopProductToStripe');
+    const result = await syncFn({
+      gymId,
+      productId,
+      productData: { id: docSnap.id, ...docSnap.data() }
+    });
+
+    return result.data;
+  } catch (error) {
     return { success: false, error: error.message };
   }
 };

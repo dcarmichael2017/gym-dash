@@ -107,6 +107,30 @@ export const PaymentsSettingsTab = ({
     }
   };
 
+  const handleConnectStripe = async () => {
+    if (!gymId) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const functions = getFunctions();
+      // Use createStripeAccountLink for fresh connections
+      const createStripeAccountLink = httpsCallable(functions, 'createStripeAccountLink');
+      const result = await createStripeAccountLink({
+        gymId,
+        origin: window.location.origin
+      });
+
+      // Redirect to Stripe
+      window.location.href = result.data.url;
+    } catch (err) {
+      console.error('Error creating Stripe link:', err);
+      setError('Failed to create Stripe connection. Please try again.');
+      setIsLoading(false);
+    }
+  };
+
   const handleCompleteOnboarding = async () => {
     if (!gymId) return;
 
@@ -172,45 +196,63 @@ export const PaymentsSettingsTab = ({
 
       {/* Action Buttons */}
       <div className="flex flex-col sm:flex-row gap-3 justify-center">
-        {/* Show appropriate action based on status */}
+        {/* Connect button for NOT_CONNECTED status */}
         {stripeStatus === 'NOT_CONNECTED' && (
-          <p className="text-gray-500 text-sm">
-            Stripe connection was set up during onboarding. Contact support if you need to reconnect.
-          </p>
-        )}
-
-        {(stripeStatus === 'PENDING' || stripeStatus === 'RESTRICTED') && stripeId && (
           <button
-            onClick={handleCompleteOnboarding}
+            onClick={handleConnectStripe}
             disabled={isLoading}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-white font-medium transition-colors disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-white font-medium transition-all hover:opacity-90 disabled:opacity-50 shadow-sm"
             style={{ backgroundColor: primaryColor }}
           >
             {isLoading ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Connecting...
+              </>
+            ) : (
+              <>
+                <CreditCard className="h-5 w-5" />
+                Connect with Stripe
+              </>
+            )}
+          </button>
+        )}
+
+        {/* Complete setup button for PENDING or RESTRICTED with existing account */}
+        {(stripeStatus === 'PENDING' || stripeStatus === 'RESTRICTED') && stripeId && (
+          <button
+            onClick={handleCompleteOnboarding}
+            disabled={isLoading}
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-white font-medium transition-all hover:opacity-90 disabled:opacity-50 shadow-sm"
+            style={{ backgroundColor: primaryColor }}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
                 Redirecting...
               </>
             ) : (
               <>
-                <CreditCard className="h-4 w-4" />
+                <CreditCard className="h-5 w-5" />
                 Complete Stripe Setup
               </>
             )}
           </button>
         )}
 
+        {/* Stripe Dashboard button for ACTIVE accounts */}
         {stripeStatus === 'ACTIVE' && (
           <button
             onClick={handleOpenStripeDashboard}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-white font-medium transition-all hover:opacity-90"
+            style={{ backgroundColor: primaryColor }}
           >
             <ExternalLink className="h-4 w-4" />
             Open Stripe Dashboard
           </button>
         )}
 
-        {/* Refresh Status Button */}
+        {/* Refresh Status Button - only show when there's an account */}
         {stripeId && (
           <button
             onClick={verifyAccount}
