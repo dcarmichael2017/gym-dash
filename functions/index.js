@@ -1361,8 +1361,7 @@ async function handleCheckoutSessionCompleted(db, event) {
   // Process based on type
   switch (purchaseType) {
     case "membership":
-      // Will be implemented in Phase 3
-      console.log("Membership purchase - handler to be implemented");
+      await handleMembershipCheckoutCompleted(db, session, metadata);
       break;
 
     case "class_pack":
@@ -1393,6 +1392,142 @@ async function handleCheckoutSessionCompleted(db, event) {
     },
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
+}
+
+/**
+ * Handle completed checkout for membership subscription
+ * Creates/updates membership document in Firestore
+ */
+async function handleMembershipCheckoutCompleted(db, session, metadata) {
+  const {gymId, tierId, userId, tierName} = metadata;
+
+  if (!userId || !gymId || !tierId) {
+    console.error("Missing required metadata for membership checkout:", metadata);
+    return;
+  }
+
+  console.log(`Processing membership subscription for user ${userId} at gym ${gymId}`);
+
+  // Get subscription details from the session
+  const subscriptionId = session.subscription;
+  const customerId = session.customer;
+
+  if (!subscriptionId) {
+    console.error("No subscription ID in checkout session");
+    return;
+  }
+
+  // Get the membership tier data for additional details
+  const tierRef = db.collection("gyms").doc(gymId).collection("membershipTiers").doc(tierId);
+  const tierDoc = await tierRef.get();
+  const tierData = tierDoc.exists ? tierDoc.data() : null;
+
+  // Calculate period dates
+  // Note: For trials, currentPeriodStart might be the trial start
+  // The actual subscription details come from the subscription object
+  const now = new Date();
+
+  // Build membership document
+  const membershipData = {
+    status: "active",
+    membershipId: tierId,
+    membershipName: tierName || tierData?.name || "Membership",
+    price: tierData?.price || 0,
+    interval: tierData?.interval || "month",
+    stripeSubscriptionId: subscriptionId,
+    stripeCustomerId: customerId,
+    stripeCheckoutSessionId: session.id,
+    startDate: admin.firestore.FieldValue.serverTimestamp(),
+    currentPeriodStart: admin.firestore.FieldValue.serverTimestamp(),
+    // currentPeriodEnd will be updated by invoice.paid webhook or subscription.updated
+    cancelAtPeriodEnd: false,
+    // Features from tier
+    features: tierData?.features || [],
+    // Credits allocation if tier grants credits
+    monthlyCredits: tierData?.monthlyCredits || 0,
+    // Track if came from trial
+    hadTrial: tierData?.hasTrial || false,
+    trialDays: tierData?.trialDays || 0,
+    // Timestamps
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  // If this was a trialing subscription
+  if (session.mode === "subscription" && tierData?.hasTrial && tierData?.trialDays > 0) {
+    membershipData.status = "trialing";
+    const trialEnd = new Date(now);
+    trialEnd.setDate(trialEnd.getDate() + tierData.trialDays);
+    membershipData.trialEndDate = admin.firestore.Timestamp.fromDate(trialEnd);
+  }
+
+  // Update/create membership document
+  const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+  await membershipRef.set(membershipData, {merge: true});
+
+  // Log to membership history
+  const historyRef = membershipRef.collection("history").doc();
+  const historyEntry = {
+    action: "subscribed",
+    description: `Subscribed to ${tierName || tierData?.name}`,
+    price: tierData?.price || 0,
+    interval: tierData?.interval || "month",
+    stripeSubscriptionId: subscriptionId,
+    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (membershipData.status === "trialing") {
+    historyEntry.description = `Started free trial for ${tierName || tierData?.name}`;
+    historyEntry.trialDays = tierData.trialDays;
+  }
+
+  await historyRef.set(historyEntry);
+
+  // Update user document with gym membership reference if needed
+  const userRef = db.collection("users").doc(userId);
+  const userDoc = await userRef.get();
+
+  if (userDoc.exists) {
+    const userData = userDoc.data();
+    // If user doesn't have a primary gym, set this one
+    if (!userData.gymId) {
+      await userRef.update({
+        gymId: gymId,
+        role: "member",
+      });
+    }
+
+    // Add to gym's members array if not already
+    const gymRef = db.collection("gyms").doc(gymId);
+    await gymRef.update({
+      memberCount: admin.firestore.FieldValue.increment(1),
+    });
+  }
+
+  // Allocate initial credits if the tier includes them
+  if (tierData?.monthlyCredits > 0) {
+    const creditsRef = db.collection("users").doc(userId).collection("credits").doc(gymId);
+    const creditsDoc = await creditsRef.get();
+
+    const currentCredits = creditsDoc.exists ? (creditsDoc.data().balance || 0) : 0;
+
+    await creditsRef.set({
+      balance: currentCredits + tierData.monthlyCredits,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+
+    // Log credit allocation
+    const creditLogRef = creditsRef.collection("logs").doc();
+    await creditLogRef.set({
+      amount: tierData.monthlyCredits,
+      changeType: "membership_allocation",
+      description: `Monthly credits from ${tierName || tierData?.name} subscription`,
+      balance: currentCredits + tierData.monthlyCredits,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  console.log(`Successfully created membership for user ${userId} at gym ${gymId}`);
 }
 
 /**
@@ -1454,3 +1589,336 @@ async function handleChargeRefunded(db, event) {
   // Will be implemented in Phase 8
   // Update order status to 'refunded', log refund
 }
+
+// ============================================================================
+// PHASE 3: SUBSCRIPTION CHECKOUT
+// ============================================================================
+
+/**
+ * Create a Stripe Checkout Session for membership subscription
+ * Called when member wants to subscribe to a membership tier
+ *
+ * @param {string} gymId - The gym ID
+ * @param {string} tierId - The membership tier ID
+ * @param {string} origin - The origin URL for success/cancel redirects
+ * @returns {Object} - { url: string } - The Stripe Checkout URL
+ */
+/**
+ * Create a Stripe Customer Portal session for managing billing
+ * Allows members to view invoices, update payment methods, and cancel subscriptions
+ *
+ * @param {string} gymId - The gym ID
+ * @returns {Object} - { url: string } - The Customer Portal URL
+ */
+exports.createCustomerPortalSession = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, origin} = request.data;
+
+      if (!gymId || !origin) {
+        throw new HttpsError(
+            "invalid-argument",
+            "gymId and origin are required.",
+        );
+      }
+
+      // Validate origin
+      const isAllowed = ALLOWED_ORIGINS.some((pattern) =>
+        typeof pattern === "string" ? pattern === origin : pattern.test(origin),
+      );
+      if (!isAllowed) {
+        throw new HttpsError("permission-denied", "Origin not allowed.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Get gym data
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId) {
+          throw new HttpsError(
+              "failed-precondition",
+              "Gym has no connected Stripe account.",
+          );
+        }
+
+        // Get user's membership to find the Stripe Customer ID
+        const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+        const membershipDoc = await membershipRef.get();
+
+        if (!membershipDoc.exists || !membershipDoc.data().stripeCustomerId) {
+          throw new HttpsError(
+              "failed-precondition",
+              "No billing information found. You may not have an active subscription.",
+          );
+        }
+
+        const stripeCustomerId = membershipDoc.data().stripeCustomerId;
+
+        // Create Customer Portal session
+        const portalSession = await stripeClient.billingPortal.sessions.create(
+            {
+              customer: stripeCustomerId,
+              return_url: `${origin}/members/profile`,
+            },
+            {stripeAccount: stripeAccountId},
+        );
+
+        console.log(`Created customer portal session for user ${userId} at gym ${gymId}`);
+
+        return {url: portalSession.url};
+      } catch (error) {
+        console.error("Error creating customer portal session:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to create portal session: " + error.message);
+      }
+    },
+);
+
+exports.createSubscriptionCheckout = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, tierId, origin} = request.data;
+
+      if (!gymId || !tierId || !origin) {
+        throw new HttpsError(
+            "invalid-argument",
+            "gymId, tierId, and origin are required.",
+        );
+      }
+
+      // Validate origin
+      const isAllowed = ALLOWED_ORIGINS.some((pattern) =>
+        typeof pattern === "string" ? pattern === origin : pattern.test(origin),
+      );
+      if (!isAllowed) {
+        throw new HttpsError("permission-denied", "Origin not allowed.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Get gym data
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId) {
+          throw new HttpsError(
+              "failed-precondition",
+              "Gym has no connected Stripe account.",
+          );
+        }
+
+        if (gymData.stripeAccountStatus !== "ACTIVE") {
+          throw new HttpsError(
+              "failed-precondition",
+              "Gym's payment system is not active.",
+          );
+        }
+
+        // Get membership tier
+        const tierRef = gymRef.collection("membershipTiers").doc(tierId);
+        const tierDoc = await tierRef.get();
+
+        if (!tierDoc.exists) {
+          throw new HttpsError("not-found", "Membership tier not found.");
+        }
+
+        const tierData = tierDoc.data();
+
+        if (!tierData.active) {
+          throw new HttpsError(
+              "failed-precondition",
+              "This membership tier is no longer available.",
+          );
+        }
+
+        if (!tierData.stripePriceId) {
+          throw new HttpsError(
+              "failed-precondition",
+              "This membership tier is not set up for payments yet.",
+          );
+        }
+
+        // Check if this is a one-time (class pack) or subscription
+        if (tierData.interval === "one_time") {
+          throw new HttpsError(
+              "invalid-argument",
+              "Use createClassPackCheckout for one-time purchases.",
+          );
+        }
+
+        // Get user data
+        const userRef = db.collection("users").doc(userId);
+        const userDoc = await userRef.get();
+
+        if (!userDoc.exists) {
+          throw new HttpsError("not-found", "User not found.");
+        }
+
+        const userData = userDoc.data();
+
+        // Check for existing active subscription for this gym
+        const membershipRef = userRef.collection("memberships").doc(gymId);
+        const membershipDoc = await membershipRef.get();
+
+        if (membershipDoc.exists) {
+          const membershipData = membershipDoc.data();
+          if (membershipData.status === "active" &&
+              membershipData.stripeSubscriptionId) {
+            throw new HttpsError(
+                "already-exists",
+                "You already have an active subscription. Please manage or cancel your current subscription first.",
+            );
+          }
+        }
+
+        // Check or create Stripe Customer for this user on the connected account
+        let stripeCustomerId = null;
+
+        // First, check if user already has a customer on this connected account
+        if (membershipDoc.exists && membershipDoc.data().stripeCustomerId) {
+          stripeCustomerId = membershipDoc.data().stripeCustomerId;
+        } else {
+          // Create a new customer on the connected account
+          const customer = await stripeClient.customers.create(
+              {
+                email: userData.email,
+                name: userData.displayName || userData.name || userData.email,
+                metadata: {
+                  userId: userId,
+                  gymId: gymId,
+                },
+              },
+              {stripeAccount: stripeAccountId},
+          );
+          stripeCustomerId = customer.id;
+
+          // Store the customer ID in the membership subcollection
+          await membershipRef.set({
+            stripeCustomerId: stripeCustomerId,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, {merge: true});
+        }
+
+        // Build line items for checkout
+        const lineItems = [
+          {
+            price: tierData.stripePriceId,
+            quantity: 1,
+          },
+        ];
+
+        // Add initiation fee as a one-time line item if applicable
+        if (tierData.initiationFee && tierData.initiationFee > 0) {
+          // Create a one-time price for the initiation fee
+          const initiationFeePrice = await stripeClient.prices.create(
+              {
+                product_data: {
+                  name: `${tierData.name} - Initiation Fee`,
+                },
+                unit_amount: Math.round(tierData.initiationFee * 100),
+                currency: "usd",
+              },
+              {stripeAccount: stripeAccountId},
+          );
+
+          lineItems.push({
+            price: initiationFeePrice.id,
+            quantity: 1,
+          });
+        }
+
+        // Build checkout session options
+        const sessionConfig = {
+          customer: stripeCustomerId,
+          mode: "subscription",
+          line_items: lineItems,
+          success_url: `${origin}/members/membership/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${origin}/members/store?category=memberships`,
+          metadata: {
+            type: "membership",
+            gymId: gymId,
+            tierId: tierId,
+            userId: userId,
+            tierName: tierData.name,
+          },
+          subscription_data: {
+            metadata: {
+              gymId: gymId,
+              tierId: tierId,
+              userId: userId,
+              tierName: tierData.name,
+            },
+          },
+          // Application fee (platform fee) - charged on recurring payments
+          // Note: This requires the gym to have the appropriate Stripe Connect setup
+          // application_fee_percent: 5, // Uncomment to enable platform fees
+        };
+
+        // Add trial period if applicable
+        if (tierData.hasTrial && tierData.trialDays > 0) {
+          sessionConfig.subscription_data.trial_period_days = tierData.trialDays;
+        }
+
+        // Create the Checkout Session on the connected account
+        const session = await stripeClient.checkout.sessions.create(
+            sessionConfig,
+            {stripeAccount: stripeAccountId},
+        );
+
+        console.log(`Created checkout session ${session.id} for user ${userId} on gym ${gymId}`);
+
+        return {url: session.url};
+      } catch (error) {
+        console.error("Error creating subscription checkout:", error);
+
+        // Re-throw HttpsErrors as-is
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to create checkout: " + error.message);
+      }
+    },
+);

@@ -191,3 +191,62 @@ export const syncMembershipTierToStripe = async (gymId, tierId) => {
     return { success: false, error: error.message };
   }
 };
+
+// --- SUBSCRIPTION CHECKOUT (Phase 3) ---
+
+/**
+ * Create a Stripe checkout session for membership subscription
+ * Redirects user to Stripe Checkout page
+ * @param {string} gymId - Gym ID
+ * @param {string} tierId - Membership tier ID
+ * @returns {Promise<{success: boolean, url?: string, error?: string}>}
+ */
+export const createSubscriptionCheckout = async (gymId, tierId) => {
+  try {
+    const functions = getFunctions();
+    const createCheckout = httpsCallable(functions, 'createSubscriptionCheckout');
+
+    const result = await createCheckout({
+      gymId,
+      tierId,
+      origin: window.location.origin
+    });
+
+    if (result.data.url) {
+      return { success: true, url: result.data.url };
+    }
+
+    return { success: false, error: "No checkout URL returned" };
+  } catch (error) {
+    // Extract error message from Firebase function error
+    const errorMessage = error.message || "Failed to create checkout session";
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Create a Stripe Customer Portal session for managing billing
+ * Opens the Stripe portal where members can update payment methods and view invoices
+ * @param {string} gymId - Gym ID
+ * @returns {Promise<{success: boolean, url?: string, error?: string}>}
+ */
+export const createCustomerPortalSession = async (gymId) => {
+  try {
+    const functions = getFunctions();
+    const createPortal = httpsCallable(functions, 'createCustomerPortalSession');
+
+    const result = await createPortal({
+      gymId,
+      origin: window.location.origin
+    });
+
+    if (result.data.url) {
+      return { success: true, url: result.data.url };
+    }
+
+    return { success: false, error: "No portal URL returned" };
+  } catch (error) {
+    const errorMessage = error.message || "Failed to open billing portal";
+    return { success: false, error: errorMessage };
+  }
+};

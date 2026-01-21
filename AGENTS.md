@@ -2457,52 +2457,91 @@ const session = await stripe.checkout.sessions.create({
 
 ---
 
-#### Phase 3: Subscription Checkout
+#### Phase 3: Subscription Checkout ✅ COMPLETED
 
-**[ ] 3.1 Member Subscription Flow**
-- [ ] Create `createSubscriptionCheckout(userId, gymId, tierId, interval)` Cloud Function
-  - Validates gym has connected Stripe account
-  - Creates or retrieves Stripe Customer for member
+**[x] 3.1 Member Subscription Flow** ✅
+- [x] Created `createSubscriptionCheckout(gymId, tierId, origin)` Cloud Function
+  - Validates gym has connected & active Stripe account
+  - Creates or retrieves Stripe Customer for member on connected account
   - Creates Checkout Session in subscription mode
-  - Applies application fee
-  - Returns checkout URL
-- [ ] Frontend implementation:
-  - Member views available plans on `MembershipPlansScreen`
-  - Clicks "Subscribe" → Calls Cloud Function → Redirects to Stripe Checkout
-  - Success URL: `/membership/success?session_id={CHECKOUT_SESSION_ID}`
-  - Cancel URL: `/membership/plans`
+  - Handles initiation fees as one-time line items
+  - Supports trial periods from tier configuration
+  - Returns checkout URL for redirect
+- [x] Frontend implementation:
+  - Member views available plans in Store → Memberships tab (`MembershipListTab.jsx`)
+  - Clicks "Select Plan" / "Start Free Trial" → Calls Cloud Function → Redirects to Stripe Checkout
+  - Success URL: `/members/membership/success?session_id={CHECKOUT_SESSION_ID}`
+  - Cancel URL: `/members/store?category=memberships`
+  - Loading states and error handling implemented
 
-**[ ] 3.2 Subscription Success Handling**
-- [ ] Handle `checkout.session.completed` webhook (mode: subscription):
-  - Extract subscription ID, customer ID from session
-  - Create/update membership subcollection:
+**[x] 3.2 Subscription Success Handling** ✅
+- [x] Handle `checkout.session.completed` webhook (mode: subscription):
+  - Extracts subscription ID, customer ID from session via `handleMembershipCheckoutCompleted()`
+  - Creates/updates membership subcollection:
     ```javascript
     users/{userId}/memberships/{gymId} {
-      status: 'active',
+      status: 'active' | 'trialing',
       membershipId: tierId,
       membershipName: tierName,
       price: tierPrice,
-      interval: 'month' | 'year',
+      interval: 'month' | 'year' | 'week',
       stripeSubscriptionId: string,
       stripeCustomerId: string,
+      stripeCheckoutSessionId: string,
+      startDate: timestamp,
       currentPeriodStart: timestamp,
-      currentPeriodEnd: timestamp,
       cancelAtPeriodEnd: false,
-      // ...other existing fields
+      features: string[],
+      monthlyCredits: number,
+      hadTrial: boolean,
+      trialDays: number,
+      trialEndDate: timestamp (if trialing),
+      createdAt: timestamp,
+      updatedAt: timestamp
     }
     ```
-  - Log to membership history: "Subscribed to {planName} for ${price}/{interval}"
-  - (Optional) Send welcome email via SendGrid
+  - Logs to membership history subcollection
+  - Updates user's gymId and role if first gym
+  - Increments gym's memberCount
+  - Allocates initial credits if tier includes them
 
-**[ ] 3.3 Member Subscription UI**
-- [ ] Create `MembershipPlansScreen.jsx`:
-  - Fetches available tiers from `gyms/{gymId}/membershipTiers`
-  - Shows pricing with monthly/yearly toggle (if applicable)
-  - Highlights current plan if already subscribed
-  - "Subscribe" button for each tier
-  - "Current Plan" badge for active subscription
-- [ ] Update member navigation to include "Membership" option
-- [ ] Show subscription status in member profile/billing tab
+**[x] 3.3 Member Subscription UI** ✅
+- [x] Updated `MembershipListTab.jsx`:
+  - Shows loading spinner during checkout creation
+  - Disables all buttons while processing
+  - Error messages with dismiss option
+  - Checks for `stripePriceId` before allowing checkout
+- [x] Created `SubscriptionSuccessScreen.jsx`:
+  - Shows success message with gym branding
+  - "What's Next" section with CTAs
+  - Links to schedule and profile
+  - Refreshes membership data on mount
+- [x] Updated `MembershipSection.jsx` in member profile:
+  - Added `createCustomerPortalSession` function call
+  - Shows "Opening Billing Portal..." loading state
+  - Opens Stripe Customer Portal for managing billing
+  - Shows external link icon for Stripe subscriptions
+  - Fallback handling for non-Stripe memberships
+
+**[x] 3.4 Customer Portal Integration** ✅ (Bonus)
+- [x] Created `createCustomerPortalSession(gymId, origin)` Cloud Function
+  - Retrieves Stripe Customer ID from user's membership
+  - Creates Stripe Billing Portal session on connected account
+  - Returns portal URL for redirect
+- [x] Added `createCustomerPortalSession()` to shared API
+- [x] Integrated into MembershipSection "Payment Method" button
+
+**Cloud Functions Deployed (Phase 3):**
+- `createSubscriptionCheckout` - Creates Stripe Checkout Session for subscriptions
+- `createCustomerPortalSession` - Opens Stripe Customer Portal for billing management
+
+**Files Modified:**
+- `functions/index.js` - Added checkout and portal functions, webhook handler
+- `packages/shared/api/firestore/memberships.js` - Added checkout and portal API functions
+- `packages/web/src/screens/members/store/tabs/MembershipListTab.jsx` - Checkout flow integration
+- `packages/web/src/screens/members/membership/SubscriptionSuccessScreen.jsx` - NEW
+- `packages/web/src/screens/members/profile/MembershipSection.jsx` - Portal integration
+- `packages/web/src/App.jsx` - Added success route
 
 ---
 

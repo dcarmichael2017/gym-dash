@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { CreditCard, ChevronRight, Calendar, DollarSign, RefreshCw, Clock, XCircle, Bug, AlertCircle } from 'lucide-react';
+import { CreditCard, ChevronRight, Calendar, DollarSign, RefreshCw, Clock, XCircle, Bug, AlertCircle, Loader2, ExternalLink } from 'lucide-react';
 import { useConfirm } from '../../../context/ConfirmationContext';
 import { doc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
-import { getMembershipTiers, cancelUserMembership, logMembershipHistory, runPermissionDiagnostics } from '../../../../../shared/api/firestore';
+import { getMembershipTiers, cancelUserMembership, logMembershipHistory, runPermissionDiagnostics, createCustomerPortalSession } from '../../../../../shared/api/firestore';
 import { auth, db } from '../../../../../shared/api/firebaseConfig';
 import { useGym } from '../../../context/GymContext';
 
 export const MembershipSection = ({ membership, onManageBilling }) => {
   const { confirm } = useConfirm();
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isOpeningPortal, setIsOpeningPortal] = useState(false);
+  const [portalError, setPortalError] = useState(null);
   const [liveMembership, setLiveMembership] = useState(membership);
   const [tiers, setTiers] = useState([]);
   const { currentGym } = useGym();
@@ -22,6 +24,43 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
       await runPermissionDiagnostics(currentGym.id);
     } else {
       console.error("No current gym ID available for diagnostic");
+    }
+  };
+
+  // Handle opening Stripe Customer Portal
+  const handleManageBilling = async () => {
+    if (!currentGym?.id) {
+      setPortalError('Unable to open billing portal.');
+      return;
+    }
+
+    // Check if user has Stripe customer ID
+    if (!liveMembership?.stripeCustomerId) {
+      // Fallback to the original onManageBilling prop if no Stripe subscription
+      if (onManageBilling) {
+        onManageBilling();
+      } else {
+        setPortalError('No billing information found. Subscribe to a plan first.');
+      }
+      return;
+    }
+
+    setIsOpeningPortal(true);
+    setPortalError(null);
+
+    try {
+      const result = await createCustomerPortalSession(currentGym.id);
+
+      if (result.success && result.url) {
+        window.location.href = result.url;
+      } else {
+        setPortalError(result.error || 'Failed to open billing portal.');
+        setIsOpeningPortal(false);
+      }
+    } catch (err) {
+      console.error('Portal error:', err);
+      setPortalError('An unexpected error occurred.');
+      setIsOpeningPortal(false);
     }
   };
 
@@ -260,28 +299,44 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
 
         {/* Billing Action */}
         <button
-          onClick={onManageBilling}
-          className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors border-t border-gray-100 group"
+          onClick={handleManageBilling}
+          disabled={isOpeningPortal}
+          className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors border-t border-gray-100 group disabled:opacity-60 disabled:cursor-wait"
         >
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isActive || isTrialing ? 'bg-blue-50 text-blue-600 group-hover:bg-blue-100' : 'bg-gray-100 text-gray-400'
               }`}>
-              <CreditCard size={20} />
+              {isOpeningPortal ? <Loader2 size={20} className="animate-spin" /> : <CreditCard size={20} />}
             </div>
             <div className="text-left">
-              <p className="text-sm font-bold text-gray-900">Payment Method</p>
+              <p className="text-sm font-bold text-gray-900">
+                {isOpeningPortal ? 'Opening Billing Portal...' : 'Payment Method'}
+              </p>
               <p className="text-xs text-gray-500">
                 {isTrialing
                   ? 'Add card before trial ends'
-                  : isActive
+                  : isActive && liveMembership?.stripeSubscriptionId
                     ? 'Update card or view invoices'
-                    : 'Add a payment method'
+                    : isActive
+                      ? 'View billing details'
+                      : 'Add a payment method'
                 }
               </p>
             </div>
           </div>
-          <ChevronRight size={16} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
+          {liveMembership?.stripeSubscriptionId ? (
+            <ExternalLink size={16} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
+          ) : (
+            <ChevronRight size={16} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
+          )}
         </button>
+
+        {/* Portal Error Message */}
+        {portalError && (
+          <div className="px-4 py-3 bg-red-50 border-t border-red-100">
+            <p className="text-xs text-red-600">{portalError}</p>
+          </div>
+        )}
 
         {/* Cancellation Section */}
         {cancelAtPeriodEnd ? (
