@@ -2572,67 +2572,66 @@ const session = await stripe.checkout.sessions.create({
 
 ---
 
-#### Phase 4: One-Time Purchases
+#### Phase 4: One-Time Purchases ✅ COMPLETE
 
-**[ ] 4.1 Class Pack Purchase Flow**
-- [ ] Create `createClassPackCheckout(userId, gymId, packId)` Cloud Function
+**[x] 4.1 Class Pack Purchase Flow** ✅
+- [x] Created `createClassPackCheckout(gymId, packId)` Cloud Function
   - Creates Checkout Session in payment mode
-  - Includes pack details in metadata
-  - Applies application fee
-- [ ] Handle `checkout.session.completed` webhook (mode: payment, type: class_pack):
-  - Add credits to `users/{userId}/credits/{gymId}` (using existing per-gym credits system)
-  - Log to creditLogs subcollection
-  - Log to membership history: "Purchased {packName} - {creditCount} credits added"
-- [ ] Create Class Pack purchase UI:
-  - List available packs on member screen
-  - Show credits included, pricing
-  - "Buy Now" button initiates checkout
+  - Validates pack has `stripePriceId`
+  - Creates/retrieves Stripe Customer on connected account
+  - Returns checkout URL for redirect
+- [x] Implemented `handleClassPackCheckoutCompleted` webhook handler:
+  - Adds credits to `users/{userId}/credits/{gymId}`
+  - Logs to credit history with purchase details
+  - Logs to membership history
+- [x] Updated `MembershipDropInTab.jsx` with checkout integration:
+  - "Buy Pack" button initiates Stripe Checkout
+  - Shows credits badge on each pack
+  - Loading states and error handling
+  - Disabled state for packs not synced to Stripe
 
-**[ ] 4.2 Shop Product Purchase Flow**
-- [ ] Create `createShopCheckout(userId, gymId, cartItems)` Cloud Function
-  - Accepts array of `{ productId, variantId?, quantity }`
-  - Validates stock availability
-  - Creates Checkout Session with multiple line items
-  - Applies application fee
-- [ ] Handle `checkout.session.completed` webhook (mode: payment, type: shop_order):
-  - Create order document:
-    ```javascript
-    gyms/{gymId}/orders/{orderId} {
-      memberId: string,
-      memberName: string,
-      memberEmail: string,
-      items: [{
-        productId: string,
-        productName: string,
-        variantId: string | null,
-        variantName: string | null,
-        quantity: number,
-        unitPrice: number,
-        totalPrice: number
-      }],
-      subtotal: number,
-      applicationFee: number,
-      total: number,
-      status: 'pending' | 'paid' | 'fulfilled' | 'shipped' | 'refunded' | 'cancelled',
-      stripePaymentIntentId: string,
-      stripeCheckoutSessionId: string,
-      fulfillmentNotes: string | null,
-      createdAt: timestamp,
-      paidAt: timestamp | null,
-      fulfilledAt: timestamp | null
-    }
-    ```
-  - Deduct stock from products/variants
-  - Send order confirmation email
-- [ ] Update member store with cart functionality and checkout button
+**[x] 4.2 Shop Product Purchase Flow** ✅
+- [x] Created `createShopCheckout(gymId, cartItems)` Cloud Function
+  - Accepts array of `{ productId, variantId, quantity }`
+  - Validates stock availability for each item
+  - Creates ad-hoc prices for each product/variant
+  - Returns stock error messages if items unavailable
+- [x] Implemented `handleShopOrderCheckoutCompleted` webhook handler:
+  - Creates order document in `gyms/{gymId}/orders/{orderId}`
+  - Decrements stock for products and variants
+  - Logs to membership history
+- [x] Updated `CartDrawer.jsx` with Stripe Checkout:
+  - "Checkout" button redirects to Stripe
+  - Loading states and error handling
+  - Theme-aware styling
 
-**[ ] 4.3 Admin Order Management**
-- [ ] Create `OrdersScreen.jsx` for admin:
-  - List all orders with filters (status, date range)
-  - Order detail view with items, customer info
-  - "Mark as Fulfilled" action
-  - "Issue Refund" action (links to refund flow)
+**[x] 4.3 Success Screens** ✅
+- [x] Created `OrderSuccessScreen.jsx` for shop purchases
+- [x] Created `PackSuccessScreen.jsx` for class pack purchases
+- [x] Added routes in `App.jsx`
+
+**[ ] 4.4 Admin Order Management** (Deferred to future phase)
+- [ ] Create `OrdersScreen.jsx` for admin
 - [ ] Add "Orders" to admin navigation
+
+**Cloud Functions Deployed (Phase 4):**
+- `createClassPackCheckout` - Creates Stripe Checkout for class pack purchases
+- `createShopCheckout` - Creates Stripe Checkout for cart/shop purchases
+
+**Files Modified:**
+- `functions/index.js` - Added checkout functions and webhook handlers
+- `packages/shared/api/firestore/memberships.js` - Added checkout API functions
+- `packages/web/src/screens/members/store/CartDrawer.jsx` - Stripe checkout integration
+- `packages/web/src/screens/members/store/tabs/MembershipDropInTab.jsx` - Class pack checkout
+- `packages/web/src/screens/members/store/OrderSuccessScreen.jsx` - NEW
+- `packages/web/src/screens/members/store/PackSuccessScreen.jsx` - NEW
+- `packages/web/src/App.jsx` - Added success routes
+
+**Additional Bug Fixes in this Phase:**
+- Fixed mobile purchase button z-index (was hidden behind bottom nav)
+- Added cart access button to product detail screen header
+- Added stock warning for admins when creating products without stock
+- Fixed admin checkout link to use custom price instead of tier default
 
 ---
 

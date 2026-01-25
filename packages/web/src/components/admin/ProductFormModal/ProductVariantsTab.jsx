@@ -140,6 +140,19 @@ export const ProductVariantsTab = ({ formData, updateFormData, primaryColor }) =
               </p>
             </div>
           </div>
+
+          {/* No Stock Warning */}
+          {(!formData.stock || parseInt(formData.stock) === 0) && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex items-start gap-2">
+              <AlertCircle size={16} className="text-yellow-600 mt-0.5 shrink-0" />
+              <div className="text-xs text-yellow-800">
+                <p className="font-semibold">No stock set</p>
+                <p className="mt-0.5 text-yellow-700">
+                  This product will show as "Out of Stock" and won't be available for purchase until you add inventory.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
-import { X, ShoppingBag } from 'lucide-react'; // Removed unused imports
+import { X, ShoppingBag } from 'lucide-react';
 import { useStore } from './StoreContext';
+import { useGym } from '../../../context/GymContext';
 
 export const ProductDetailModal = ({ product, onClose }) => {
-    const { addToCart } = useStore();
+    const { addToCart, cartCount, setIsCartOpen } = useStore();
+    const { currentGym } = useGym();
+    const theme = currentGym?.theme || { primaryColor: '#2563eb' };
     const [selectedVariant, setSelectedVariant] = useState(null);
 
     const requiresSelection = product.hasVariants;
@@ -14,10 +17,15 @@ export const ProductDetailModal = ({ product, onClose }) => {
         onClose();
     };
 
+    const handleViewCart = () => {
+        onClose();
+        setIsCartOpen(true);
+    };
+
     return (
-        // CHANGED: z-50 -> z-[100] to beat the Bottom Nav Bar
+        // z-[100] to beat the Bottom Nav Bar
         <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center pointer-events-none">
-            
+
             {/* Backdrop */}
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm pointer-events-auto" onClick={onClose} />
 
@@ -25,15 +33,32 @@ export const ProductDetailModal = ({ product, onClose }) => {
             <div className="relative z-10 bg-white w-full max-w-md rounded-t-3xl sm:rounded-2xl p-6 pointer-events-auto animate-in slide-in-from-bottom-10 duration-200">
                 <div className="flex justify-between items-start mb-6">
                     <h2 className="text-xl font-bold text-gray-900 w-3/4">{product.name}</h2>
-                    <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-500">
-                        <X size={20} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {/* Cart Button */}
+                        {cartCount > 0 && (
+                            <button
+                                onClick={handleViewCart}
+                                className="relative p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200 transition-colors"
+                            >
+                                <ShoppingBag size={20} />
+                                <div
+                                    className="absolute -top-1 -right-1 w-5 h-5 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white"
+                                    style={{ backgroundColor: theme.primaryColor }}
+                                >
+                                    {cartCount}
+                                </div>
+                            </button>
+                        )}
+                        <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200 transition-colors">
+                            <X size={20} />
+                        </button>
+                    </div>
                 </div>
 
                 <div className="mb-8">
                     {/* Image Area */}
                     <div className="h-48 w-full bg-gray-50 rounded-2xl mb-6 overflow-hidden">
-                        {product.image && <img src={product.image} className="w-full h-full object-cover" />}
+                        {product.image && <img src={product.image} alt={product.name} className="w-full h-full object-cover" />}
                     </div>
 
                     {/* Variant Selector */}
@@ -52,12 +77,18 @@ export const ProductDetailModal = ({ product, onClose }) => {
                                             onClick={() => setSelectedVariant(variant)}
                                             className={`
                                                 relative p-3 rounded-xl border text-sm font-bold transition-all
-                                                ${isSelected 
-                                                    ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' 
-                                                    : 'border-gray-200 text-gray-700 hover:border-gray-300'
-                                                }
-                                                ${isOOS ? 'opacity-50 cursor-not-allowed bg-gray-50' : ''}
+                                                ${isSelected ? 'ring-1' : ''}
+                                                ${isOOS ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'hover:border-gray-300'}
                                             `}
+                                            style={isSelected ? {
+                                                borderColor: theme.primaryColor,
+                                                backgroundColor: `${theme.primaryColor}10`,
+                                                color: theme.primaryColor,
+                                                '--tw-ring-color': theme.primaryColor
+                                            } : {
+                                                borderColor: '#e5e7eb',
+                                                color: '#374151'
+                                            }}
                                         >
                                             {variant.label}
                                             {isOOS && (
@@ -77,14 +108,18 @@ export const ProductDetailModal = ({ product, onClose }) => {
                 <div className="flex items-center gap-4 pt-4 border-t border-gray-100">
                     <div className="flex flex-col">
                         <span className="text-xs text-gray-500 font-medium">Price</span>
-                        <span className="text-2xl font-bold text-gray-900">
+                        <span className="text-2xl font-bold" style={{ color: theme.primaryColor }}>
                             ${(selectedVariant ? selectedVariant.price : product.price)?.toFixed(2)}
                         </span>
                     </div>
-                    <button 
+                    <button
                         onClick={handleAddToCart}
                         disabled={!canAddToCart}
-                        className="flex-1 h-12 bg-blue-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-blue-200 disabled:opacity-50 disabled:shadow-none transition-all active:scale-95"
+                        className="flex-1 h-12 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg disabled:opacity-50 disabled:shadow-none transition-all active:scale-95"
+                        style={{
+                            backgroundColor: theme.primaryColor,
+                            boxShadow: canAddToCart ? `0 10px 25px -5px ${theme.primaryColor}40` : 'none'
+                        }}
                     >
                         <ShoppingBag size={18} />
                         Add to Cart

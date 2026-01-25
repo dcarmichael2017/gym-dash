@@ -1365,13 +1365,11 @@ async function handleCheckoutSessionCompleted(db, event) {
       break;
 
     case "class_pack":
-      // Will be implemented in Phase 4
-      console.log("Class pack purchase - handler to be implemented");
+      await handleClassPackCheckoutCompleted(db, session, metadata);
       break;
 
     case "shop_order":
-      // Will be implemented in Phase 4
-      console.log("Shop order - handler to be implemented");
+      await handleShopOrderCheckoutCompleted(db, session, metadata);
       break;
 
     default:
@@ -1528,6 +1526,162 @@ async function handleMembershipCheckoutCompleted(db, session, metadata) {
   }
 
   console.log(`Successfully created membership for user ${userId} at gym ${gymId}`);
+}
+
+/**
+ * Handle completed checkout for class pack purchase
+ * Adds credits to user's account
+ */
+async function handleClassPackCheckoutCompleted(db, session, metadata) {
+  const {gymId, userId, packId, packName, credits} = metadata;
+
+  if (!userId || !gymId || !packId) {
+    console.error("Missing required metadata for class pack checkout:", metadata);
+    return;
+  }
+
+  console.log(`Processing class pack purchase for user ${userId} at gym ${gymId}`);
+
+  const creditsToAdd = parseInt(credits) || 0;
+
+  if (creditsToAdd <= 0) {
+    console.error("No credits to add from class pack:", packId);
+    return;
+  }
+
+  // Get current credits balance
+  const creditsRef = db.collection("users").doc(userId).collection("credits").doc(gymId);
+  const creditsDoc = await creditsRef.get();
+  const currentCredits = creditsDoc.exists ? (creditsDoc.data().balance || 0) : 0;
+
+  // Add credits
+  await creditsRef.set({
+    balance: currentCredits + creditsToAdd,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  // Log credit allocation
+  const creditLogRef = creditsRef.collection("logs").doc();
+  await creditLogRef.set({
+    amount: creditsToAdd,
+    changeType: "class_pack_purchase",
+    description: `Purchased ${packName || "Class Pack"} - ${creditsToAdd} credits added`,
+    balance: currentCredits + creditsToAdd,
+    stripeCheckoutSessionId: session.id,
+    stripePaymentIntentId: session.payment_intent,
+    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  // Log to membership history if user has a membership
+  const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+  const membershipDoc = await membershipRef.get();
+
+  if (membershipDoc.exists) {
+    const historyRef = membershipRef.collection("history").doc();
+    await historyRef.set({
+      action: "class_pack_purchased",
+      description: `Purchased ${packName || "Class Pack"} - ${creditsToAdd} credits`,
+      creditsAdded: creditsToAdd,
+      stripeCheckoutSessionId: session.id,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  console.log(`Successfully added ${creditsToAdd} credits to user ${userId} at gym ${gymId}`);
+}
+
+/**
+ * Handle completed checkout for shop order
+ * Creates order document and decrements stock
+ */
+async function handleShopOrderCheckoutCompleted(db, session, metadata) {
+  const {gymId, userId, orderItems, subtotal} = metadata;
+
+  if (!userId || !gymId || !orderItems) {
+    console.error("Missing required metadata for shop order checkout:", metadata);
+    return;
+  }
+
+  console.log(`Processing shop order for user ${userId} at gym ${gymId}`);
+
+  // Parse order items from metadata (stored as JSON string)
+  let items;
+  try {
+    items = JSON.parse(orderItems);
+  } catch (e) {
+    console.error("Failed to parse orderItems:", e);
+    return;
+  }
+
+  // Get user data for order
+  const userRef = db.collection("users").doc(userId);
+  const userDoc = await userRef.get();
+  const userData = userDoc.exists ? userDoc.data() : {};
+
+  // Create order document
+  const gymRef = db.collection("gyms").doc(gymId);
+  const orderRef = gymRef.collection("orders").doc();
+
+  const orderData = {
+    id: orderRef.id,
+    memberId: userId,
+    memberName: userData.displayName || `${userData.firstName || ""} ${userData.lastName || ""}`.trim() || "Unknown",
+    memberEmail: userData.email || "",
+    items: items,
+    subtotal: parseFloat(subtotal) || 0,
+    total: session.amount_total / 100, // Convert from cents
+    status: "paid",
+    stripeCheckoutSessionId: session.id,
+    stripePaymentIntentId: session.payment_intent,
+    fulfillmentNotes: null,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    paidAt: admin.firestore.FieldValue.serverTimestamp(),
+    fulfilledAt: null,
+  };
+
+  await orderRef.set(orderData);
+
+  // Decrement stock for each item
+  for (const item of items) {
+    const productRef = gymRef.collection("products").doc(item.productId);
+    const productDoc = await productRef.get();
+
+    if (!productDoc.exists) continue;
+
+    const productData = productDoc.data();
+
+    if (productData.hasVariants && item.variantId) {
+      // Update variant stock
+      const updatedVariants = (productData.variants || []).map((v) => {
+        if (v.id === item.variantId) {
+          return {...v, stock: Math.max(0, (v.stock || 0) - item.quantity)};
+        }
+        return v;
+      });
+      await productRef.update({variants: updatedVariants});
+    } else if (!productData.hasVariants) {
+      // Update product stock
+      const newStock = Math.max(0, (productData.stock || 0) - item.quantity);
+      await productRef.update({stock: newStock});
+    }
+  }
+
+  // Log to membership history if user has a membership
+  const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+  const membershipDoc = await membershipRef.get();
+
+  if (membershipDoc.exists) {
+    const historyRef = membershipRef.collection("history").doc();
+    await historyRef.set({
+      action: "shop_purchase",
+      description: `Shop purchase - ${items.length} item(s) - $${(session.amount_total / 100).toFixed(2)}`,
+      orderId: orderRef.id,
+      stripeCheckoutSessionId: session.id,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  console.log(`Successfully created order ${orderRef.id} for user ${userId} at gym ${gymId}`);
 }
 
 /**
@@ -1946,7 +2100,7 @@ exports.createAdminCheckoutLink = onCall(
         throw new HttpsError("unauthenticated", "You must be logged in.");
       }
 
-      const {gymId, tierId, memberId, origin} = request.data;
+      const {gymId, tierId, memberId, origin, customPrice} = request.data;
 
       if (!gymId || !tierId || !memberId || !origin) {
         throw new HttpsError(
@@ -2067,10 +2221,43 @@ exports.createAdminCheckoutLink = onCall(
           }, {merge: true});
         }
 
+        // Determine the price to use (custom or default)
+        const useCustomPrice = customPrice !== undefined &&
+            customPrice !== null &&
+            customPrice !== "" &&
+            parseFloat(customPrice) !== tierData.price;
+
+        let priceId = tierData.stripePriceId;
+
+        // If custom price is provided, create an ad-hoc recurring price
+        if (useCustomPrice) {
+          const customPriceAmount = Math.round(parseFloat(customPrice) * 100);
+
+          // Create a new price using the existing Stripe product
+          const newPrice = await stripeClient.prices.create(
+              {
+                product: tierData.stripeProductId,
+                unit_amount: customPriceAmount,
+                currency: "usd",
+                recurring: {
+                  interval: tierData.interval === "year" ? "year" : "month",
+                },
+                metadata: {
+                  customPriceFor: memberId,
+                  originalTierId: tierId,
+                  createdByAdmin: adminUserId,
+                },
+              },
+              {stripeAccount: stripeAccountId},
+          );
+          priceId = newPrice.id;
+          console.log(`Created custom price ${priceId} for member ${memberId}: $${customPrice}/${tierData.interval}`);
+        }
+
         // Build line items
         const lineItems = [
           {
-            price: tierData.stripePriceId,
+            price: priceId,
             quantity: 1,
           },
         ];
@@ -2108,6 +2295,7 @@ exports.createAdminCheckoutLink = onCall(
             userId: memberId,
             tierName: tierData.name,
             createdByAdmin: adminUserId,
+            customPrice: useCustomPrice ? customPrice.toString() : "",
           },
           subscription_data: {
             metadata: {
@@ -2115,6 +2303,7 @@ exports.createAdminCheckoutLink = onCall(
               tierId: tierId,
               userId: memberId,
               tierName: tierData.name,
+              assignedPrice: useCustomPrice ? customPrice.toString() : tierData.price.toString(),
             },
           },
         };
@@ -2141,6 +2330,391 @@ exports.createAdminCheckoutLink = onCall(
         }
 
         throw new HttpsError("internal", "Failed to create checkout link: " + error.message);
+      }
+    },
+);
+
+// ============================================================================
+// PHASE 4: ONE-TIME PURCHASES - SHOP CHECKOUT
+// ============================================================================
+
+/**
+ * Create a Stripe Checkout session for shop product purchases (cart checkout)
+ * Handles physical products with variants and stock validation
+ */
+exports.createShopCheckout = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, cartItems, origin} = request.data;
+
+      if (!gymId || !cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
+        throw new HttpsError(
+            "invalid-argument",
+            "gymId and cartItems array are required.",
+        );
+      }
+
+      // Validate origin
+      const isAllowed = ALLOWED_ORIGINS.some((pattern) =>
+        typeof pattern === "string" ? pattern === origin : pattern.test(origin),
+      );
+      if (!isAllowed) {
+        throw new HttpsError("permission-denied", "Origin not allowed.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Get gym data
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId || gymData.stripeAccountStatus !== "ACTIVE") {
+          throw new HttpsError(
+              "failed-precondition",
+              "This gym is not set up to accept online payments yet.",
+          );
+        }
+
+        // Get user data
+        const userRef = db.collection("users").doc(userId);
+        const userDoc = await userRef.get();
+
+        if (!userDoc.exists) {
+          throw new HttpsError("not-found", "User not found.");
+        }
+
+        const userData = userDoc.data();
+
+        // Check or create Stripe Customer
+        const membershipRef = userRef.collection("memberships").doc(gymId);
+        const membershipDoc = await membershipRef.get();
+        let stripeCustomerId = null;
+
+        if (membershipDoc.exists && membershipDoc.data().stripeCustomerId) {
+          stripeCustomerId = membershipDoc.data().stripeCustomerId;
+        } else {
+          const customer = await stripeClient.customers.create(
+              {
+                email: userData.email,
+                name: userData.displayName || userData.firstName ?
+                    `${userData.firstName || ""} ${userData.lastName || ""}`.trim() :
+                    userData.email,
+                metadata: {
+                  userId: userId,
+                  gymId: gymId,
+                },
+              },
+              {stripeAccount: stripeAccountId},
+          );
+          stripeCustomerId = customer.id;
+
+          await membershipRef.set({
+            stripeCustomerId: stripeCustomerId,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, {merge: true});
+        }
+
+        // Validate cart items and build line items
+        const lineItems = [];
+        const orderItems = [];
+        let hasStockIssue = false;
+        const stockIssues = [];
+
+        for (const cartItem of cartItems) {
+          const {productId, variantId, quantity} = cartItem;
+
+          if (!productId || !quantity || quantity < 1) {
+            throw new HttpsError("invalid-argument", "Invalid cart item.");
+          }
+
+          const productRef = gymRef.collection("products").doc(productId);
+          const productDoc = await productRef.get();
+
+          if (!productDoc.exists) {
+            throw new HttpsError("not-found", `Product not found: ${productId}`);
+          }
+
+          const productData = productDoc.data();
+
+          if (!productData.active) {
+            throw new HttpsError("failed-precondition", `Product is no longer available: ${productData.name}`);
+          }
+
+          let price = productData.price;
+          let stockAvailable = productData.stock || 0;
+          let variantName = null;
+
+          // Handle variants
+          if (productData.hasVariants && variantId) {
+            const variant = productData.variants?.find((v) => v.id === variantId);
+            if (!variant) {
+              throw new HttpsError("not-found", `Variant not found for product: ${productData.name}`);
+            }
+            price = variant.price || productData.price;
+            stockAvailable = variant.stock || 0;
+            variantName = variant.name;
+          }
+
+          // Check stock
+          if (stockAvailable < quantity) {
+            hasStockIssue = true;
+            stockIssues.push(`${productData.name}${variantName ? ` (${variantName})` : ""}: only ${stockAvailable} available`);
+            continue;
+          }
+
+          // Create price for this item
+          const stripePrice = await stripeClient.prices.create(
+              {
+                product_data: {
+                  name: variantName ? `${productData.name} - ${variantName}` : productData.name,
+                  images: productData.images?.length > 0 ? [productData.images[0]] : [],
+                },
+                unit_amount: Math.round(price * 100),
+                currency: "usd",
+              },
+              {stripeAccount: stripeAccountId},
+          );
+
+          lineItems.push({
+            price: stripePrice.id,
+            quantity: quantity,
+          });
+
+          orderItems.push({
+            productId: productId,
+            productName: productData.name,
+            variantId: variantId || null,
+            variantName: variantName,
+            quantity: quantity,
+            unitPrice: price,
+            totalPrice: price * quantity,
+          });
+        }
+
+        if (hasStockIssue) {
+          throw new HttpsError(
+              "failed-precondition",
+              `Stock issues: ${stockIssues.join("; ")}`,
+          );
+        }
+
+        if (lineItems.length === 0) {
+          throw new HttpsError("invalid-argument", "No valid items in cart.");
+        }
+
+        // Calculate totals
+        const subtotal = orderItems.reduce((sum, item) => sum + item.totalPrice, 0);
+
+        // Create Checkout Session
+        const session = await stripeClient.checkout.sessions.create(
+            {
+              customer: stripeCustomerId,
+              mode: "payment",
+              line_items: lineItems,
+              success_url: `${origin}/members/store/order-success?session_id={CHECKOUT_SESSION_ID}`,
+              cancel_url: `${origin}/members/store`,
+              metadata: {
+                type: "shop_order",
+                gymId: gymId,
+                userId: userId,
+                orderItems: JSON.stringify(orderItems),
+                subtotal: subtotal.toString(),
+              },
+            },
+            {stripeAccount: stripeAccountId},
+        );
+
+        console.log(`Created shop checkout session ${session.id} for user ${userId} at gym ${gymId}`);
+
+        return {url: session.url};
+      } catch (error) {
+        console.error("Error creating shop checkout:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to create checkout: " + error.message);
+      }
+    },
+);
+
+/**
+ * Create a Stripe Checkout session for one-time class pack purchases
+ * Class packs are membership tiers with interval = 'one_time'
+ */
+exports.createClassPackCheckout = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, packId, origin} = request.data;
+
+      if (!gymId || !packId || !origin) {
+        throw new HttpsError(
+            "invalid-argument",
+            "gymId, packId, and origin are required.",
+        );
+      }
+
+      // Validate origin
+      const isAllowed = ALLOWED_ORIGINS.some((pattern) =>
+        typeof pattern === "string" ? pattern === origin : pattern.test(origin),
+      );
+      if (!isAllowed) {
+        throw new HttpsError("permission-denied", "Origin not allowed.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Get gym data
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId || gymData.stripeAccountStatus !== "ACTIVE") {
+          throw new HttpsError(
+              "failed-precondition",
+              "This gym is not set up to accept online payments yet.",
+          );
+        }
+
+        // Get class pack (membership tier with interval = 'one_time')
+        const packRef = gymRef.collection("membershipTiers").doc(packId);
+        const packDoc = await packRef.get();
+
+        if (!packDoc.exists) {
+          throw new HttpsError("not-found", "Class pack not found.");
+        }
+
+        const packData = packDoc.data();
+
+        if (!packData.active) {
+          throw new HttpsError("failed-precondition", "This class pack is no longer available.");
+        }
+
+        if (packData.interval !== "one_time") {
+          throw new HttpsError("invalid-argument", "This is not a class pack (one-time purchase).");
+        }
+
+        if (!packData.stripePriceId) {
+          throw new HttpsError(
+              "failed-precondition",
+              "This class pack is not set up for online payments.",
+          );
+        }
+
+        // Get user data
+        const userRef = db.collection("users").doc(userId);
+        const userDoc = await userRef.get();
+
+        if (!userDoc.exists) {
+          throw new HttpsError("not-found", "User not found.");
+        }
+
+        const userData = userDoc.data();
+
+        // Check or create Stripe Customer
+        const membershipRef = userRef.collection("memberships").doc(gymId);
+        const membershipDoc = await membershipRef.get();
+        let stripeCustomerId = null;
+
+        if (membershipDoc.exists && membershipDoc.data().stripeCustomerId) {
+          stripeCustomerId = membershipDoc.data().stripeCustomerId;
+        } else {
+          const customer = await stripeClient.customers.create(
+              {
+                email: userData.email,
+                name: userData.displayName || userData.firstName ?
+                    `${userData.firstName || ""} ${userData.lastName || ""}`.trim() :
+                    userData.email,
+                metadata: {
+                  userId: userId,
+                  gymId: gymId,
+                },
+              },
+              {stripeAccount: stripeAccountId},
+          );
+          stripeCustomerId = customer.id;
+
+          await membershipRef.set({
+            stripeCustomerId: stripeCustomerId,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, {merge: true});
+        }
+
+        // Build line items
+        const lineItems = [
+          {
+            price: packData.stripePriceId,
+            quantity: 1,
+          },
+        ];
+
+        // Create Checkout Session
+        const session = await stripeClient.checkout.sessions.create(
+            {
+              customer: stripeCustomerId,
+              mode: "payment",
+              line_items: lineItems,
+              success_url: `${origin}/members/store/pack-success?session_id={CHECKOUT_SESSION_ID}`,
+              cancel_url: `${origin}/members/store?category=packs`,
+              metadata: {
+                type: "class_pack",
+                gymId: gymId,
+                userId: userId,
+                packId: packId,
+                packName: packData.name,
+                credits: (packData.credits || 0).toString(),
+              },
+            },
+            {stripeAccount: stripeAccountId},
+        );
+
+        console.log(`Created class pack checkout session ${session.id} for user ${userId} at gym ${gymId}`);
+
+        return {url: session.url};
+      } catch (error) {
+        console.error("Error creating class pack checkout:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to create checkout: " + error.message);
       }
     },
 );

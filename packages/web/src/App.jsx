@@ -53,6 +53,8 @@ import AdminGroupChatScreen from './screens/admin/GroupChatScreen';
 import MemberCommunityFeedScreen from './screens/members/community/CommunityFeedScreen';
 import MemberGroupChatScreen from './screens/members/chat/GroupChatScreen';
 import SubscriptionSuccessScreen from './screens/members/membership/SubscriptionSuccessScreen';
+import OrderSuccessScreen from './screens/members/store/OrderSuccessScreen';
+import PackSuccessScreen from './screens/members/store/PackSuccessScreen';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -177,6 +179,10 @@ function App() {
 
               {/* Membership checkout routes */}
               <Route path="membership/success" element={<SubscriptionSuccessScreen />} />
+
+              {/* Store checkout success routes */}
+              <Route path="store/order-success" element={<OrderSuccessScreen />} />
+              <Route path="store/pack-success" element={<PackSuccessScreen />} />
 
               <Route index element={<Navigate to="home" replace />} />
             </Route>

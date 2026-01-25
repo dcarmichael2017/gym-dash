@@ -3,13 +3,14 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ShoppingBag, ChevronLeft, ChevronRight, Loader2, AlertCircle } from 'lucide-react';
 import { useGym } from '../../../context/GymContext';
 import { useStore } from './StoreContext';
+import { CartDrawer } from './CartDrawer';
 import { getProductById } from '../../../../../../packages/shared/api/firestore';
 
 export const ProductDetailScreen = () => {
     const { productId } = useParams();
     const navigate = useNavigate();
     const { currentGym } = useGym();
-    const { addToCart } = useStore();
+    const { addToCart, cartCount, setIsCartOpen } = useStore();
     const theme = currentGym?.theme || { primaryColor: '#2563eb' };
 
     const [product, setProduct] = useState(null);
@@ -119,6 +120,21 @@ export const ProductDetailScreen = () => {
                     <ArrowLeft size={20} className="text-gray-700" />
                 </button>
                 <h1 className="text-lg font-bold text-gray-900 truncate flex-1">{product.name}</h1>
+                {/* Cart Button */}
+                <button
+                    onClick={() => setIsCartOpen(true)}
+                    className="relative p-2 -mr-2 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                    <ShoppingBag size={20} className="text-gray-700" />
+                    {cartCount > 0 && (
+                        <div
+                            className="absolute -top-1 -right-1 w-5 h-5 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white"
+                            style={{ backgroundColor: theme.primaryColor }}
+                        >
+                            {cartCount}
+                        </div>
+                    )}
+                </button>
             </div>
 
             {/* Image Gallery */}
@@ -291,8 +307,8 @@ export const ProductDetailScreen = () => {
                 )}
             </div>
 
-            {/* Fixed Bottom Action Bar */}
-            <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 pb-safe z-20">
+            {/* Fixed Bottom Action Bar - z-[60] to be above mobile bottom nav (z-50) */}
+            <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 pb-safe z-[60]">
                 <div className="max-w-lg mx-auto flex items-center gap-4">
                     <div className="flex flex-col">
                         <span className="text-xs text-gray-500 font-medium">Total</span>
@@ -317,6 +333,9 @@ export const ProductDetailScreen = () => {
                     </button>
                 </div>
             </div>
+
+            {/* Cart Drawer */}
+            <CartDrawer />
         </div>
     );
 };

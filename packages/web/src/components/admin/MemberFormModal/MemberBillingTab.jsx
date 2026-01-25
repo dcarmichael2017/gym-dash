@@ -261,7 +261,9 @@ export const MemberBillingTab = ({
         setPaymentLinkUrl(null);
 
         try {
-            const result = await createAdminCheckoutLink(gymId, formData.membershipId, memberData.id);
+            // Pass custom price if it differs from the tier default
+            const priceToUse = customPrice !== '' ? parseFloat(customPrice) : null;
+            const result = await createAdminCheckoutLink(gymId, formData.membershipId, memberData.id, priceToUse);
 
             if (result.success && result.url) {
                 setPaymentLinkUrl(result.url);

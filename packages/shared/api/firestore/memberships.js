@@ -230,9 +230,10 @@ export const createSubscriptionCheckout = async (gymId, tierId) => {
  * @param {string} gymId - Gym ID
  * @param {string} tierId - Membership tier ID
  * @param {string} memberId - Target member's user ID
+ * @param {number|string|null} customPrice - Optional custom price (overrides tier default)
  * @returns {Promise<{success: boolean, url?: string, error?: string}>}
  */
-export const createAdminCheckoutLink = async (gymId, tierId, memberId) => {
+export const createAdminCheckoutLink = async (gymId, tierId, memberId, customPrice = null) => {
   try {
     const functions = getFunctions();
     const createCheckout = httpsCallable(functions, 'createAdminCheckoutLink');
@@ -241,6 +242,7 @@ export const createAdminCheckoutLink = async (gymId, tierId, memberId) => {
       gymId,
       tierId,
       memberId,
+      customPrice,
       origin: window.location.origin
     });
 
@@ -278,6 +280,62 @@ export const createCustomerPortalSession = async (gymId) => {
     return { success: false, error: "No portal URL returned" };
   } catch (error) {
     const errorMessage = error.message || "Failed to open billing portal";
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Create a Stripe Checkout session for shop product purchases (cart checkout)
+ * @param {string} gymId - Gym ID
+ * @param {Array} cartItems - Array of {productId, variantId, quantity}
+ * @returns {Promise<{success: boolean, url?: string, error?: string}>}
+ */
+export const createShopCheckout = async (gymId, cartItems) => {
+  try {
+    const functions = getFunctions();
+    const createCheckout = httpsCallable(functions, 'createShopCheckout');
+
+    const result = await createCheckout({
+      gymId,
+      cartItems,
+      origin: window.location.origin
+    });
+
+    if (result.data.url) {
+      return { success: true, url: result.data.url };
+    }
+
+    return { success: false, error: "No checkout URL returned" };
+  } catch (error) {
+    const errorMessage = error.message || "Failed to create checkout session";
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Create a Stripe Checkout session for one-time class pack purchase
+ * @param {string} gymId - Gym ID
+ * @param {string} packId - Class pack (membership tier) ID
+ * @returns {Promise<{success: boolean, url?: string, error?: string}>}
+ */
+export const createClassPackCheckout = async (gymId, packId) => {
+  try {
+    const functions = getFunctions();
+    const createCheckout = httpsCallable(functions, 'createClassPackCheckout');
+
+    const result = await createCheckout({
+      gymId,
+      packId,
+      origin: window.location.origin
+    });
+
+    if (result.data.url) {
+      return { success: true, url: result.data.url };
+    }
+
+    return { success: false, error: "No checkout URL returned" };
+  } catch (error) {
+    const errorMessage = error.message || "Failed to create checkout session";
     return { success: false, error: errorMessage };
   }
 };

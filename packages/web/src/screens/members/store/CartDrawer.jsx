@@ -1,9 +1,46 @@
-import React from 'react';
-import { X, Trash2, CreditCard } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Trash2, CreditCard, Loader2, AlertCircle } from 'lucide-react';
 import { useStore } from './StoreContext';
+import { useGym } from '../../../context/GymContext';
+import { createShopCheckout } from '../../../../../../packages/shared/api/firestore';
 
 export const CartDrawer = () => {
-    const { cart, isCartOpen, setIsCartOpen, removeFromCart, updateQuantity, cartTotal } = useStore();
+    const { cart, isCartOpen, setIsCartOpen, removeFromCart, updateQuantity, cartTotal, clearCart } = useStore();
+    const { currentGym } = useGym();
+    const theme = currentGym?.theme || { primaryColor: '#2563eb' };
+
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    const handleCheckout = async () => {
+        if (!currentGym?.id || cart.length === 0) return;
+
+        setLoading(true);
+        setError(null);
+
+        // Transform cart items for the API
+        const cartItems = cart.map(item => ({
+            productId: item.productId,
+            variantId: item.variantName ? item.cartItemId.split('-')[1] : null, // Extract variantId from cartItemId
+            quantity: item.quantity
+        }));
+
+        try {
+            const result = await createShopCheckout(currentGym.id, cartItems);
+
+            if (result.success && result.url) {
+                // Redirect to Stripe Checkout
+                window.location.href = result.url;
+            } else {
+                setError(result.error || 'Failed to start checkout. Please try again.');
+            }
+        } catch (err) {
+            console.error('Checkout error:', err);
+            setError('An unexpected error occurred. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     if (!isCartOpen) return null;
 
@@ -31,14 +68,14 @@ export const CartDrawer = () => {
                         cart.map(item => (
                             <div key={item.cartItemId} className="flex gap-4">
                                 <div className="w-16 h-16 bg-gray-50 rounded-lg overflow-hidden shrink-0">
-                                    {item.image && <img src={item.image} className="w-full h-full object-cover" />}
+                                    {item.image && <img src={item.image} alt={item.name} className="w-full h-full object-cover" />}
                                 </div>
                                 <div className="flex-1">
                                     <h4 className="font-bold text-sm text-gray-900">{item.name}</h4>
                                     {item.variantName && (
                                         <p className="text-xs text-gray-500">Size: {item.variantName}</p>
                                     )}
-                                    <p className="text-sm font-bold text-blue-600 mt-1">${item.price}</p>
+                                    <p className="text-sm font-bold mt-1" style={{ color: theme.primaryColor }}>${item.price?.toFixed(2)}</p>
                                 </div>
                                 <div className="flex flex-col items-end gap-2">
                                     <button onClick={() => removeFromCart(item.cartItemId)} className="text-gray-400 hover:text-red-500">
@@ -57,15 +94,33 @@ export const CartDrawer = () => {
 
                 {cart.length > 0 && (
                     <div className="p-6 border-t border-gray-100 bg-gray-50">
+                        {error && (
+                            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+                                <AlertCircle size={16} className="text-red-500 mt-0.5 shrink-0" />
+                                <p className="text-xs text-red-700">{error}</p>
+                            </div>
+                        )}
                         <div className="flex justify-between items-center mb-4">
                             <span className="text-gray-500 font-medium">Subtotal</span>
                             <span className="text-xl font-bold">${cartTotal.toFixed(2)}</span>
                         </div>
-                        <button 
-                            onClick={() => alert("Proceed to Stripe Checkout")} 
-                            className="w-full py-4 bg-gray-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-black transition-colors"
+                        <button
+                            onClick={handleCheckout}
+                            disabled={loading}
+                            className="w-full py-4 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-60"
+                            style={{ backgroundColor: theme.primaryColor }}
                         >
-                            <CreditCard size={18} /> Checkout
+                            {loading ? (
+                                <>
+                                    <Loader2 size={18} className="animate-spin" />
+                                    Processing...
+                                </>
+                            ) : (
+                                <>
+                                    <CreditCard size={18} />
+                                    Checkout
+                                </>
+                            )}
                         </button>
                     </div>
                 )}
