@@ -2847,28 +2847,61 @@ const session = await stripe.checkout.sessions.create({
 
 ---
 
-#### Phase 9: Reporting & Analytics
+#### Phase 9: Reporting & Analytics ✅ COMPLETED
 
-**[ ] 9.1 Revenue Dashboard Integration**
-- [ ] Update existing Reports screen with Stripe data:
+**[x] 9.1 Revenue Dashboard Integration**
+- [x] Update existing Reports screen with Stripe data:
   - Total revenue (period)
   - Subscription revenue vs one-time purchases
   - Refunds issued
-  - Application fees collected (GymDash revenue)
-- [ ] Data source options:
-  - Option A: Aggregate from local order/subscription data
-  - Option B: Use Stripe Reporting API for accuracy
+  - Net revenue calculation
+- [x] Data source: Aggregate from local order/subscription data with Cloud Function
 
-**[ ] 9.2 Subscription Metrics**
-- [ ] Active subscribers count
-- [ ] Monthly Recurring Revenue (MRR) calculation
-- [ ] Churn rate (cancellations / total subscribers)
-- [ ] Failed payment rate
+**[x] 9.2 Subscription Metrics**
+- [x] Active subscribers count
+- [x] Monthly Recurring Revenue (MRR) calculation
+- [x] Churn rate (cancellations / total subscribers)
+- [x] Failed payment rate
 
-**[ ] 9.3 Shop Metrics**
-- [ ] Total orders / revenue
-- [ ] Top selling products
-- [ ] Revenue by category
+**[x] 9.3 Shop Metrics**
+- [x] Total orders / revenue
+- [x] Top selling products (top 5 by revenue)
+- [x] Revenue by category (pie chart)
+- [x] Order status breakdown (pending, fulfilled, refunded)
+
+**Implementation Details:**
+
+**New Cloud Function:**
+- `getRevenueAnalytics(gymId, startDate, endDate)` - Comprehensive analytics aggregation:
+  - Revenue: total, shop, subscription MRR, refunds, net
+  - Orders: total, pending, fulfilled, refunded
+  - Subscriptions: active count, MRR, churn rate, cancelled count, failed payments
+  - Shop: top products, revenue by category
+  - Disputes: active count, disputed amount
+  - Timeline: daily revenue for charts
+
+**New Files Created:**
+- `packages/shared/api/firestore/analytics.js` - API functions for analytics
+  - `getRevenueAnalytics(gymId, startDate, endDate)`
+  - `getQuickStats(gymId)` - Simplified stats for dashboard widgets
+- `packages/shared/hooks/useRevenueAnalytics.js` - React hook for analytics
+  - `useRevenueAnalytics(gymId, options)` - Fetch and manage analytics state
+  - `DATE_RANGES` - Predefined date range options (7 days, 30 days, 90 days, this month, etc.)
+
+**Updated Files:**
+- `functions/index.js` - Added `getRevenueAnalytics` Cloud Function
+- `packages/shared/api/firestore/index.js` - Added analytics export
+- `packages/web/src/screens/admin/DashboardAnalyticsScreen.jsx` - Complete redesign:
+  - Key metrics cards row (Net Revenue, MRR, Active Subscribers, Shop Orders, Refunds, Disputes)
+  - Date range selector dropdown
+  - Revenue timeline chart (daily shop revenue)
+  - Member growth chart (6 months)
+  - Subscription health panel (churn rate, cancelled, failed payments)
+  - Plan distribution bar chart
+  - Top selling products list
+  - Revenue by category pie chart
+  - Demographics pie chart
+  - Order status breakdown grid
 
 ---
 

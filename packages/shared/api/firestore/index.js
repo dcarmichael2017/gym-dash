@@ -11,3 +11,4 @@ export * from './chat';
 export * from './community';
 export * from './products';
 export * from './orders';
+export * from './analytics';

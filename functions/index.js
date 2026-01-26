@@ -4881,3 +4881,256 @@ async function processClassPackRefund(
     },
   };
 }
+
+// ============================================================================
+// PHASE 9: REPORTING & ANALYTICS
+// ============================================================================
+
+/**
+ * Get comprehensive revenue analytics for a gym
+ * Aggregates data from orders, subscriptions, and refunds
+ */
+exports.getRevenueAnalytics = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, startDate, endDate} = request.data;
+
+      if (!gymId) {
+        throw new HttpsError("invalid-argument", "gymId is required.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Verify user is admin/owner of the gym
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const isOwner = gymData.ownerId === userId;
+
+        if (!isOwner) {
+          const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+          const membershipDoc = await membershipRef.get();
+          const role = membershipDoc.exists ? membershipDoc.data().role : null;
+          if (role !== "admin" && role !== "staff") {
+            throw new HttpsError("permission-denied", "Only admins can view analytics.");
+          }
+        }
+
+        // Parse date filters
+        const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Default: 30 days ago
+        const end = endDate ? new Date(endDate) : new Date();
+
+        // ---- FETCH ALL DATA IN PARALLEL ----
+        const [ordersSnap, membersSnap, productsSnap, eventsSnap] = await Promise.all([
+          gymRef.collection("orders").get(),
+          db.collectionGroup("memberships").where("gymId", "==", gymId).get(),
+          gymRef.collection("products").get(),
+          gymRef.collection("stripeEvents").get(),
+        ]);
+
+        // ---- ORDERS ANALYTICS ----
+        const orders = ordersSnap.docs.map((doc) => ({id: doc.id, ...doc.data()}));
+
+        // Filter orders by date
+        const filteredOrders = orders.filter((o) => {
+          const orderDate = o.createdAt?.toDate?.() || new Date(o.createdAt);
+          return orderDate >= start && orderDate <= end;
+        });
+
+        // Calculate order stats
+        const shopRevenue = filteredOrders
+            .filter((o) => o.status !== "refunded")
+            .reduce((sum, o) => sum + (o.total || 0), 0);
+
+        const refundedOrders = filteredOrders.filter((o) =>
+          o.status === "refunded" || o.status === "partially_refunded",
+        );
+        const totalRefunds = filteredOrders.reduce((sum, o) => sum + (o.refundedAmount || 0), 0);
+
+        // Top selling products
+        const productSales = {};
+        filteredOrders.forEach((order) => {
+          (order.items || []).forEach((item) => {
+            const key = item.productId || item.name;
+            if (!productSales[key]) {
+              productSales[key] = {
+                name: item.name,
+                quantity: 0,
+                revenue: 0,
+                productId: item.productId,
+              };
+            }
+            productSales[key].quantity += item.quantity || 1;
+            productSales[key].revenue += (item.price || 0) * (item.quantity || 1);
+          });
+        });
+
+        const topProducts = Object.values(productSales)
+            .sort((a, b) => b.revenue - a.revenue)
+            .slice(0, 5);
+
+        // Revenue by category
+        const products = productsSnap.docs.map((doc) => ({id: doc.id, ...doc.data()}));
+        const productCategoryMap = {};
+        products.forEach((p) => {
+          productCategoryMap[p.id] = p.category || "uncategorized";
+        });
+
+        const revenueByCategory = {};
+        filteredOrders.forEach((order) => {
+          (order.items || []).forEach((item) => {
+            const category = productCategoryMap[item.productId] || "uncategorized";
+            revenueByCategory[category] = (revenueByCategory[category] || 0) +
+              ((item.price || 0) * (item.quantity || 1));
+          });
+        });
+
+        // ---- SUBSCRIPTION ANALYTICS ----
+        const memberships = membersSnap.docs.map((doc) => ({id: doc.id, ...doc.data()}));
+
+        // Active subscribers
+        const activeSubscribers = memberships.filter((m) =>
+          m.subscriptionStatus === "active" && m.stripeSubscriptionId,
+        ).length;
+
+        // Calculate MRR from active subscriptions
+        let subscriptionMRR = 0;
+        memberships.forEach((m) => {
+          if (m.subscriptionStatus === "active") {
+            const price = m.assignedPrice || m.tierPrice || 0;
+            const interval = m.interval || "month";
+
+            if (interval === "year" || interval === "yearly") {
+              subscriptionMRR += price / 12;
+            } else if (interval === "week" || interval === "weekly") {
+              subscriptionMRR += price * 4.33;
+            } else {
+              subscriptionMRR += price;
+            }
+          }
+        });
+
+        // Churn calculation (cancelled in period)
+        const cancelledInPeriod = memberships.filter((m) => {
+          if (m.subscriptionStatus !== "canceled" && m.subscriptionStatus !== "cancelled") return false;
+          const cancelDate = m.cancelledAt?.toDate?.() || m.canceledAt?.toDate?.() ||
+            (m.cancelledAt ? new Date(m.cancelledAt) : null);
+          if (!cancelDate) return false;
+          return cancelDate >= start && cancelDate <= end;
+        }).length;
+
+        // Total subscribers at start of period (approximation)
+        const totalAtStart = activeSubscribers + cancelledInPeriod;
+        const churnRate = totalAtStart > 0 ? ((cancelledInPeriod / totalAtStart) * 100).toFixed(1) : 0;
+
+        // Failed payments (from stripeEvents)
+        const events = eventsSnap.docs.map((doc) => ({id: doc.id, ...doc.data()}));
+        const failedPayments = events.filter((e) => {
+          const eventDate = e.createdAt?.toDate?.() || new Date(e.createdAt);
+          return e.eventType === "invoice.payment_failed" &&
+            eventDate >= start && eventDate <= end;
+        }).length;
+
+        // ---- REVENUE BY DAY (for chart) ----
+        const revenueByDay = {};
+        filteredOrders.forEach((order) => {
+          if (order.status === "refunded") return;
+          const orderDate = order.createdAt?.toDate?.() || new Date(order.createdAt);
+          const dayKey = orderDate.toISOString().split("T")[0];
+          revenueByDay[dayKey] = (revenueByDay[dayKey] || 0) + (order.total || 0);
+        });
+
+        // Fill in missing days with 0
+        const revenueTimeline = [];
+        const currentDate = new Date(start);
+        while (currentDate <= end) {
+          const dayKey = currentDate.toISOString().split("T")[0];
+          revenueTimeline.push({
+            date: dayKey,
+            label: currentDate.toLocaleDateString("en-US", {month: "short", day: "numeric"}),
+            revenue: revenueByDay[dayKey] || 0,
+          });
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+        // ---- DISPUTES ----
+        const disputesSnap = await gymRef.collection("disputes").get();
+        const activeDisputes = disputesSnap.docs.filter((doc) => {
+          const d = doc.data();
+          return d.status !== "won" && d.status !== "lost" && d.status !== "warning_closed";
+        }).length;
+
+        const disputeAmount = disputesSnap.docs
+            .filter((doc) => {
+              const d = doc.data();
+              return d.status !== "won" && d.status !== "lost" && d.status !== "warning_closed";
+            })
+            .reduce((sum, doc) => sum + (doc.data().amount || 0), 0);
+
+        return {
+          success: true,
+          analytics: {
+            period: {
+              start: start.toISOString(),
+              end: end.toISOString(),
+            },
+            revenue: {
+              total: shopRevenue + subscriptionMRR,
+              shop: shopRevenue,
+              subscriptionMRR: Math.round(subscriptionMRR * 100) / 100,
+              refunds: totalRefunds,
+              net: shopRevenue + subscriptionMRR - totalRefunds,
+            },
+            orders: {
+              total: filteredOrders.length,
+              fulfilled: filteredOrders.filter((o) => o.status === "fulfilled").length,
+              pending: filteredOrders.filter((o) => o.status === "paid").length,
+              refunded: refundedOrders.length,
+            },
+            subscriptions: {
+              active: activeSubscribers,
+              mrr: Math.round(subscriptionMRR * 100) / 100,
+              churnRate: parseFloat(churnRate),
+              cancelledInPeriod: cancelledInPeriod,
+              failedPayments: failedPayments,
+            },
+            shop: {
+              topProducts: topProducts,
+              revenueByCategory: Object.entries(revenueByCategory).map(([name, value]) => ({
+                name: name.charAt(0).toUpperCase() + name.slice(1),
+                value: Math.round(value * 100) / 100,
+              })),
+            },
+            disputes: {
+              active: activeDisputes,
+              amount: disputeAmount,
+            },
+            timeline: revenueTimeline.slice(-30), // Last 30 days max
+          },
+        };
+      } catch (error) {
+        console.error("Error fetching revenue analytics:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to fetch analytics: " + error.message);
+      }
+    },
+);
