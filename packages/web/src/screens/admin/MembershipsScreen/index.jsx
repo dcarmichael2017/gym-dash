@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
-import { Plus, Repeat, Ticket } from 'lucide-react';
+import { Plus, Repeat, Ticket, Tag } from 'lucide-react';
 
 import { auth, db } from '../../../../../../packages/shared/api/firebaseConfig';
 import { getMembershipTiers, deleteMembershipTier, getGymMembers } from '../../../../../../packages/shared/api/firestore';
@@ -18,6 +18,7 @@ import RecurringForm from '../../../components/admin/memberships/RecurringForm';
 import ClassPackForm from '../../../components/admin/memberships/ClassPackForm';
 import RecurringPlansTab from './RecurringPlansTab';
 import ClassPacksTab from './ClassPacksTab';
+import CouponsTab from './CouponsTab';
 
 const MembershipsScreen = () => {
   const { theme } = useOutletContext() || {};
@@ -29,7 +30,7 @@ const MembershipsScreen = () => {
   const [stripeEnabled, setStripeEnabled] = useState(false);
 
   // UI State
-  const [activeTab, setActiveTab] = useState('recurring'); // 'recurring' | 'pack'
+  const [activeTab, setActiveTab] = useState('recurring'); // 'recurring' | 'pack' | 'coupons'
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTier, setSelectedTier] = useState(null);
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, tierId: null });
@@ -134,14 +135,16 @@ const MembershipsScreen = () => {
           <p className="text-gray-500">Manage recurring plans and class packs.</p>
         </div>
         
-        <button 
+        {activeTab !== 'coupons' && (
+          <button
             onClick={handleOpenAdd}
             className="text-white px-4 py-2 rounded-lg flex items-center hover:opacity-90 transition-colors shadow-sm font-bold text-sm"
             style={{ backgroundColor: primaryColor }}
-        >
-          <Plus className="h-5 w-5 mr-2" /> 
-          {activeTab === 'recurring' ? 'Create Plan' : 'Create Pack'}
-        </button>
+          >
+            <Plus className="h-5 w-5 mr-2" />
+            {activeTab === 'recurring' ? 'Create Plan' : 'Create Pack'}
+          </button>
+        )}
       </div>
 
       {/* Tabs */}
@@ -160,24 +163,39 @@ const MembershipsScreen = () => {
           >
              <Ticket size={16} /> Class Packs
           </button>
+          <button
+            onClick={() => setActiveTab('coupons')}
+            className={`pb-3 text-sm font-bold flex items-center gap-2 transition-all border-b-2 ${activeTab === 'coupons' ? '' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            style={activeTab === 'coupons' ? { borderColor: primaryColor, color: primaryColor } : {}}
+          >
+             <Tag size={16} /> Coupons
+          </button>
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'recurring' ? (
-          <RecurringPlansTab 
-            tiers={recurringTiers} 
-            memberStats={memberStats} 
-            onEdit={handleOpenEdit} 
-            onViewMembers={(tier) => setViewMembersModal({ isOpen: true, tierName: tier.name, members: allMembers.filter(m => m.currentMembership?.membershipId === tier.id) })} 
+      {activeTab === 'recurring' && (
+          <RecurringPlansTab
+            tiers={recurringTiers}
+            memberStats={memberStats}
+            onEdit={handleOpenEdit}
+            onViewMembers={(tier) => setViewMembersModal({ isOpen: true, tierName: tier.name, members: allMembers.filter(m => m.currentMembership?.membershipId === tier.id) })}
             onDelete={(id) => setDeleteModal({ isOpen: true, tierId: id })}
             onAdd={handleOpenAdd}
           />
-      ) : (
-          <ClassPacksTab 
-            tiers={packTiers} 
-            onEdit={handleOpenEdit} 
+      )}
+      {activeTab === 'pack' && (
+          <ClassPacksTab
+            tiers={packTiers}
+            onEdit={handleOpenEdit}
             onDelete={(id) => setDeleteModal({ isOpen: true, tierId: id })}
             onAdd={handleOpenAdd}
+          />
+      )}
+      {activeTab === 'coupons' && (
+          <CouponsTab
+            gymId={gymId}
+            theme={theme}
+            stripeEnabled={stripeEnabled}
           />
       )}
 

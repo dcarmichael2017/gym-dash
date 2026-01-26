@@ -201,7 +201,7 @@ export const syncMembershipTierToStripe = async (gymId, tierId) => {
  * @param {string} tierId - Membership tier ID
  * @returns {Promise<{success: boolean, url?: string, error?: string}>}
  */
-export const createSubscriptionCheckout = async (gymId, tierId) => {
+export const createSubscriptionCheckout = async (gymId, tierId, promoCode = null) => {
   try {
     const functions = getFunctions();
     const createCheckout = httpsCallable(functions, 'createSubscriptionCheckout');
@@ -209,7 +209,8 @@ export const createSubscriptionCheckout = async (gymId, tierId) => {
     const result = await createCheckout({
       gymId,
       tierId,
-      origin: window.location.origin
+      origin: window.location.origin,
+      promoCode
     });
 
     if (result.data.url) {
@@ -290,7 +291,7 @@ export const createCustomerPortalSession = async (gymId) => {
  * @param {Array} cartItems - Array of {productId, variantId, quantity}
  * @returns {Promise<{success: boolean, url?: string, error?: string}>}
  */
-export const createShopCheckout = async (gymId, cartItems) => {
+export const createShopCheckout = async (gymId, cartItems, promoCode = null) => {
   try {
     const functions = getFunctions();
     const createCheckout = httpsCallable(functions, 'createShopCheckout');
@@ -298,7 +299,8 @@ export const createShopCheckout = async (gymId, cartItems) => {
     const result = await createCheckout({
       gymId,
       cartItems,
-      origin: window.location.origin
+      origin: window.location.origin,
+      promoCode
     });
 
     if (result.data.url) {
@@ -318,7 +320,7 @@ export const createShopCheckout = async (gymId, cartItems) => {
  * @param {string} packId - Class pack (membership tier) ID
  * @returns {Promise<{success: boolean, url?: string, error?: string}>}
  */
-export const createClassPackCheckout = async (gymId, packId) => {
+export const createClassPackCheckout = async (gymId, packId, promoCode = null) => {
   try {
     const functions = getFunctions();
     const createCheckout = httpsCallable(functions, 'createClassPackCheckout');
@@ -326,7 +328,8 @@ export const createClassPackCheckout = async (gymId, packId) => {
     const result = await createCheckout({
       gymId,
       packId,
-      origin: window.location.origin
+      origin: window.location.origin,
+      promoCode
     });
 
     if (result.data.url) {
@@ -427,5 +430,95 @@ export const getPaymentMethods = async (gymId) => {
   } catch (error) {
     const errorMessage = error.message || "Failed to get payment methods";
     return { success: false, error: errorMessage, paymentMethods: [] };
+  }
+};
+
+// ============================================================================
+// COUPON & PROMO CODE FUNCTIONS
+// ============================================================================
+
+/**
+ * Create a new coupon
+ * @param {string} gymId - Gym ID
+ * @param {object} couponData - Coupon data
+ * @returns {Promise<{success: boolean, coupon?: object, error?: string}>}
+ */
+export const createCoupon = async (gymId, couponData) => {
+  try {
+    const functions = getFunctions();
+    const createCouponFn = httpsCallable(functions, 'createCoupon');
+
+    const result = await createCouponFn({ gymId, couponData });
+
+    return {
+      success: true,
+      coupon: result.data.coupon
+    };
+  } catch (error) {
+    const errorMessage = error.message || "Failed to create coupon";
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Validate a coupon code
+ * @param {string} gymId - Gym ID
+ * @param {string} code - Coupon code
+ * @param {string} cartType - Type of cart ('memberships', 'shop', 'class_packs', 'all')
+ * @returns {Promise<{valid: boolean, coupon?: object, error?: string}>}
+ */
+export const validateCoupon = async (gymId, code, cartType = 'all') => {
+  try {
+    const functions = getFunctions();
+    const validateCouponFn = httpsCallable(functions, 'validateCoupon');
+
+    const result = await validateCouponFn({ gymId, code, cartType });
+
+    return result.data;
+  } catch (error) {
+    return { valid: false, error: error.message || "Failed to validate coupon" };
+  }
+};
+
+/**
+ * List all coupons for a gym (admin only)
+ * @param {string} gymId - Gym ID
+ * @param {boolean} includeInactive - Whether to include inactive coupons
+ * @returns {Promise<{success: boolean, coupons?: array, error?: string}>}
+ */
+export const listCoupons = async (gymId, includeInactive = false) => {
+  try {
+    const functions = getFunctions();
+    const listCouponsFn = httpsCallable(functions, 'listCoupons');
+
+    const result = await listCouponsFn({ gymId, includeInactive });
+
+    return {
+      success: true,
+      coupons: result.data.coupons || []
+    };
+  } catch (error) {
+    const errorMessage = error.message || "Failed to list coupons";
+    return { success: false, error: errorMessage, coupons: [] };
+  }
+};
+
+/**
+ * Deactivate a coupon (admin only)
+ * @param {string} gymId - Gym ID
+ * @param {string} couponId - Coupon ID
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+export const deactivateCoupon = async (gymId, couponId) => {
+  try {
+    const functions = getFunctions();
+    const deactivateCouponFn = httpsCallable(functions, 'deactivateCoupon');
+
+    await deactivateCouponFn({ gymId, couponId });
+
+    return { success: true };
+  } catch (error) {
+    const errorMessage = error.message || "Failed to deactivate coupon";
+    return { success: false, error: errorMessage };
   }
 };

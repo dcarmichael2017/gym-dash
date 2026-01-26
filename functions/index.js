@@ -2354,7 +2354,7 @@ exports.createSubscriptionCheckout = onCall(
         throw new HttpsError("unauthenticated", "You must be logged in.");
       }
 
-      const {gymId, tierId, origin} = request.data;
+      const {gymId, tierId, origin, promoCode} = request.data;
 
       if (!gymId || !tierId || !origin) {
         throw new HttpsError(
@@ -2542,6 +2542,35 @@ exports.createSubscriptionCheckout = onCall(
         // Add trial period if applicable
         if (tierData.hasTrial && tierData.trialDays > 0) {
           sessionConfig.subscription_data.trial_period_days = tierData.trialDays;
+        }
+
+        // Apply promo code if provided
+        if (promoCode) {
+          // Validate and get the promo code ID
+          const couponsQuery = await db.collection("gyms").doc(gymId)
+              .collection("coupons")
+              .where("code", "==", promoCode.toUpperCase())
+              .where("active", "==", true)
+              .limit(1)
+              .get();
+
+          if (!couponsQuery.empty) {
+            const couponDoc = couponsQuery.docs[0];
+            const couponData = couponDoc.data();
+
+            // Check if coupon applies to memberships
+            if (couponData.appliesToProducts === "all" || couponData.appliesToProducts === "memberships") {
+              // Check expiration
+              if (!couponData.expiresAt || new Date(couponData.expiresAt.toDate()) > new Date()) {
+                // Check max redemptions
+                if (!couponData.maxRedemptions || couponData.currentRedemptions < couponData.maxRedemptions) {
+                  sessionConfig.discounts = [{
+                    promotion_code: couponData.stripePromotionCodeId,
+                  }];
+                }
+              }
+            }
+          }
         }
 
         // Create the Checkout Session on the connected account
@@ -2844,7 +2873,7 @@ exports.createShopCheckout = onCall(
         throw new HttpsError("unauthenticated", "You must be logged in.");
       }
 
-      const {gymId, cartItems, origin} = request.data;
+      const {gymId, cartItems, origin, promoCode} = request.data;
 
       if (!gymId || !cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
         throw new HttpsError(
@@ -3012,22 +3041,50 @@ exports.createShopCheckout = onCall(
         // Calculate totals
         const subtotal = orderItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
+        // Build session config
+        const sessionConfig = {
+          customer: stripeCustomerId,
+          mode: "payment",
+          line_items: lineItems,
+          success_url: `${origin}/members/store/order-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${origin}/members/store`,
+          metadata: {
+            type: "shop_order",
+            gymId: gymId,
+            userId: userId,
+            orderItems: JSON.stringify(orderItems),
+            subtotal: subtotal.toString(),
+          },
+        };
+
+        // Apply promo code if provided
+        if (promoCode) {
+          const couponsQuery = await db.collection("gyms").doc(gymId)
+              .collection("coupons")
+              .where("code", "==", promoCode.toUpperCase())
+              .where("active", "==", true)
+              .limit(1)
+              .get();
+
+          if (!couponsQuery.empty) {
+            const couponDoc = couponsQuery.docs[0];
+            const couponData = couponDoc.data();
+
+            if (couponData.appliesToProducts === "all" || couponData.appliesToProducts === "shop") {
+              if (!couponData.expiresAt || new Date(couponData.expiresAt.toDate()) > new Date()) {
+                if (!couponData.maxRedemptions || couponData.currentRedemptions < couponData.maxRedemptions) {
+                  sessionConfig.discounts = [{
+                    promotion_code: couponData.stripePromotionCodeId,
+                  }];
+                }
+              }
+            }
+          }
+        }
+
         // Create Checkout Session
         const session = await stripeClient.checkout.sessions.create(
-            {
-              customer: stripeCustomerId,
-              mode: "payment",
-              line_items: lineItems,
-              success_url: `${origin}/members/store/order-success?session_id={CHECKOUT_SESSION_ID}`,
-              cancel_url: `${origin}/members/store`,
-              metadata: {
-                type: "shop_order",
-                gymId: gymId,
-                userId: userId,
-                orderItems: JSON.stringify(orderItems),
-                subtotal: subtotal.toString(),
-              },
-            },
+            sessionConfig,
             {stripeAccount: stripeAccountId},
         );
 
@@ -3063,7 +3120,7 @@ exports.createClassPackCheckout = onCall(
         throw new HttpsError("unauthenticated", "You must be logged in.");
       }
 
-      const {gymId, packId, origin} = request.data;
+      const {gymId, packId, origin, promoCode} = request.data;
 
       if (!gymId || !packId || !origin) {
         throw new HttpsError(
@@ -3173,23 +3230,51 @@ exports.createClassPackCheckout = onCall(
           },
         ];
 
+        // Build session config
+        const sessionConfig = {
+          customer: stripeCustomerId,
+          mode: "payment",
+          line_items: lineItems,
+          success_url: `${origin}/members/store/pack-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${origin}/members/store?category=packs`,
+          metadata: {
+            type: "class_pack",
+            gymId: gymId,
+            userId: userId,
+            packId: packId,
+            packName: packData.name,
+            credits: (packData.credits || 0).toString(),
+          },
+        };
+
+        // Apply promo code if provided
+        if (promoCode) {
+          const couponsQuery = await db.collection("gyms").doc(gymId)
+              .collection("coupons")
+              .where("code", "==", promoCode.toUpperCase())
+              .where("active", "==", true)
+              .limit(1)
+              .get();
+
+          if (!couponsQuery.empty) {
+            const couponDoc = couponsQuery.docs[0];
+            const couponData = couponDoc.data();
+
+            if (couponData.appliesToProducts === "all" || couponData.appliesToProducts === "class_packs") {
+              if (!couponData.expiresAt || new Date(couponData.expiresAt.toDate()) > new Date()) {
+                if (!couponData.maxRedemptions || couponData.currentRedemptions < couponData.maxRedemptions) {
+                  sessionConfig.discounts = [{
+                    promotion_code: couponData.stripePromotionCodeId,
+                  }];
+                }
+              }
+            }
+          }
+        }
+
         // Create Checkout Session
         const session = await stripeClient.checkout.sessions.create(
-            {
-              customer: stripeCustomerId,
-              mode: "payment",
-              line_items: lineItems,
-              success_url: `${origin}/members/store/pack-success?session_id={CHECKOUT_SESSION_ID}`,
-              cancel_url: `${origin}/members/store?category=packs`,
-              metadata: {
-                type: "class_pack",
-                gymId: gymId,
-                userId: userId,
-                packId: packId,
-                packName: packData.name,
-                credits: (packData.credits || 0).toString(),
-              },
-            },
+            sessionConfig,
             {stripeAccount: stripeAccountId},
         );
 
@@ -3621,6 +3706,420 @@ exports.changeSubscriptionPlan = onCall(
         }
 
         throw new HttpsError("internal", "Failed to change plan: " + error.message);
+      }
+    },
+);
+
+// ============================================================================
+// COUPON & PROMO CODE FUNCTIONS
+// ============================================================================
+
+/**
+ * Create a coupon with Stripe Promotion Code
+ * Admin only - creates coupon in Stripe and stores locally
+ */
+exports.createCoupon = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, couponData} = request.data;
+
+      if (!gymId || !couponData) {
+        throw new HttpsError("invalid-argument", "gymId and couponData are required.");
+      }
+
+      const {
+        code,
+        type, // 'percent' or 'fixed'
+        value, // percentage (20 for 20%) or cents (1000 for $10)
+        duration = "once", // 'once', 'repeating', 'forever'
+        durationInMonths = null, // only for 'repeating'
+        appliesToProducts = "all", // 'memberships', 'shop', 'class_packs', 'all'
+        maxRedemptions = null,
+        expiresAt = null,
+        firstTimeOnly = false,
+      } = couponData;
+
+      if (!code || !type || value === undefined) {
+        throw new HttpsError("invalid-argument", "code, type, and value are required.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Verify user is admin/owner of the gym
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId) {
+          throw new HttpsError("failed-precondition", "Gym has no connected Stripe account.");
+        }
+
+        // Check if user is owner or admin
+        const isOwner = gymData.ownerId === userId;
+        if (!isOwner) {
+          const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+          const membershipDoc = await membershipRef.get();
+          const role = membershipDoc.exists ? membershipDoc.data().role : null;
+          if (role !== "admin" && role !== "staff") {
+            throw new HttpsError("permission-denied", "Only admins can create coupons.");
+          }
+        }
+
+        // Check if code already exists
+        const existingCoupon = await db.collection("gyms").doc(gymId)
+            .collection("coupons")
+            .where("code", "==", code.toUpperCase())
+            .where("active", "==", true)
+            .get();
+
+        if (!existingCoupon.empty) {
+          throw new HttpsError("already-exists", "A coupon with this code already exists.");
+        }
+
+        // Create Stripe Coupon
+        const stripeCouponData = {
+          name: code.toUpperCase(),
+          duration: duration,
+        };
+
+        if (type === "percent") {
+          stripeCouponData.percent_off = value;
+        } else {
+          stripeCouponData.amount_off = value;
+          stripeCouponData.currency = "usd";
+        }
+
+        if (duration === "repeating" && durationInMonths) {
+          stripeCouponData.duration_in_months = durationInMonths;
+        }
+
+        if (maxRedemptions) {
+          stripeCouponData.max_redemptions = maxRedemptions;
+        }
+
+        if (expiresAt) {
+          stripeCouponData.redeem_by = Math.floor(new Date(expiresAt).getTime() / 1000);
+        }
+
+        const stripeCoupon = await stripeClient.coupons.create(
+            stripeCouponData,
+            {stripeAccount: stripeAccountId},
+        );
+
+        // Create Stripe Promotion Code
+        const promoCodeData = {
+          coupon: stripeCoupon.id,
+          code: code.toUpperCase(),
+        };
+
+        if (firstTimeOnly) {
+          promoCodeData.restrictions = {first_time_transaction: true};
+        }
+
+        const stripePromoCode = await stripeClient.promotionCodes.create(
+            promoCodeData,
+            {stripeAccount: stripeAccountId},
+        );
+
+        // Store coupon locally
+        const couponRef = db.collection("gyms").doc(gymId).collection("coupons").doc();
+        const couponDoc = {
+          code: code.toUpperCase(),
+          stripeCouponId: stripeCoupon.id,
+          stripePromotionCodeId: stripePromoCode.id,
+          type: type,
+          value: value,
+          duration: duration,
+          durationInMonths: durationInMonths,
+          appliesToProducts: appliesToProducts,
+          firstTimeOnly: firstTimeOnly,
+          maxRedemptions: maxRedemptions,
+          currentRedemptions: 0,
+          expiresAt: expiresAt ? new Date(expiresAt) : null,
+          active: true,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdBy: userId,
+        };
+
+        await couponRef.set(couponDoc);
+
+        console.log(`Created coupon ${code} for gym ${gymId}`);
+
+        return {
+          success: true,
+          coupon: {
+            id: couponRef.id,
+            ...couponDoc,
+          },
+        };
+      } catch (error) {
+        console.error("Error creating coupon:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to create coupon: " + error.message);
+      }
+    },
+);
+
+/**
+ * Validate a coupon code
+ * Returns discount info if valid
+ */
+exports.validateCoupon = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, code, cartType = "all"} = request.data;
+
+      if (!gymId || !code) {
+        throw new HttpsError("invalid-argument", "gymId and code are required.");
+      }
+
+      try {
+        // Find the coupon
+        const couponsQuery = await db.collection("gyms").doc(gymId)
+            .collection("coupons")
+            .where("code", "==", code.toUpperCase())
+            .where("active", "==", true)
+            .limit(1)
+            .get();
+
+        if (couponsQuery.empty) {
+          return {valid: false, error: "Invalid coupon code."};
+        }
+
+        const couponDoc = couponsQuery.docs[0];
+        const coupon = couponDoc.data();
+
+        // Check expiration
+        if (coupon.expiresAt && new Date(coupon.expiresAt.toDate()) < new Date()) {
+          return {valid: false, error: "This coupon has expired."};
+        }
+
+        // Check max redemptions
+        if (coupon.maxRedemptions && coupon.currentRedemptions >= coupon.maxRedemptions) {
+          return {valid: false, error: "This coupon has reached its usage limit."};
+        }
+
+        // Check if coupon applies to this cart type
+        if (coupon.appliesToProducts !== "all" && coupon.appliesToProducts !== cartType) {
+          return {valid: false, error: `This coupon is only valid for ${coupon.appliesToProducts}.`};
+        }
+
+        // Return coupon details
+        return {
+          valid: true,
+          coupon: {
+            id: couponDoc.id,
+            code: coupon.code,
+            type: coupon.type,
+            value: coupon.value,
+            duration: coupon.duration,
+            stripePromotionCodeId: coupon.stripePromotionCodeId,
+            description: coupon.type === "percent" ?
+              `${coupon.value}% off` :
+              `$${(coupon.value / 100).toFixed(2)} off`,
+          },
+        };
+      } catch (error) {
+        console.error("Error validating coupon:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to validate coupon: " + error.message);
+      }
+    },
+);
+
+/**
+ * List all coupons for a gym (admin only)
+ */
+exports.listCoupons = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, includeInactive = false} = request.data;
+
+      if (!gymId) {
+        throw new HttpsError("invalid-argument", "gymId is required.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Verify user is admin/owner of the gym
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const isOwner = gymData.ownerId === userId;
+
+        if (!isOwner) {
+          const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+          const membershipDoc = await membershipRef.get();
+          const role = membershipDoc.exists ? membershipDoc.data().role : null;
+          if (role !== "admin" && role !== "staff") {
+            throw new HttpsError("permission-denied", "Only admins can list coupons.");
+          }
+        }
+
+        // Get coupons
+        let query = db.collection("gyms").doc(gymId).collection("coupons");
+        if (!includeInactive) {
+          query = query.where("active", "==", true);
+        }
+
+        const couponsSnapshot = await query.orderBy("createdAt", "desc").get();
+
+        const coupons = couponsSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+          createdAt: doc.data().createdAt?.toDate?.() || null,
+          expiresAt: doc.data().expiresAt?.toDate?.() || null,
+        }));
+
+        return {success: true, coupons};
+      } catch (error) {
+        console.error("Error listing coupons:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to list coupons: " + error.message);
+      }
+    },
+);
+
+/**
+ * Deactivate a coupon (admin only)
+ */
+exports.deactivateCoupon = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, couponId} = request.data;
+
+      if (!gymId || !couponId) {
+        throw new HttpsError("invalid-argument", "gymId and couponId are required.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Verify user is admin/owner of the gym
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+        const isOwner = gymData.ownerId === userId;
+
+        if (!isOwner) {
+          const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+          const membershipDoc = await membershipRef.get();
+          const role = membershipDoc.exists ? membershipDoc.data().role : null;
+          if (role !== "admin" && role !== "staff") {
+            throw new HttpsError("permission-denied", "Only admins can deactivate coupons.");
+          }
+        }
+
+        // Get the coupon
+        const couponRef = db.collection("gyms").doc(gymId).collection("coupons").doc(couponId);
+        const couponDoc = await couponRef.get();
+
+        if (!couponDoc.exists) {
+          throw new HttpsError("not-found", "Coupon not found.");
+        }
+
+        const couponData = couponDoc.data();
+
+        // Deactivate in Stripe (delete the promo code, not the coupon)
+        if (stripeAccountId && couponData.stripePromotionCodeId) {
+          try {
+            await stripeClient.promotionCodes.update(
+                couponData.stripePromotionCodeId,
+                {active: false},
+                {stripeAccount: stripeAccountId},
+            );
+          } catch (stripeErr) {
+            console.warn("Failed to deactivate Stripe promo code:", stripeErr.message);
+          }
+        }
+
+        // Deactivate locally
+        await couponRef.update({
+          active: false,
+          deactivatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          deactivatedBy: userId,
+        });
+
+        console.log(`Deactivated coupon ${couponId} for gym ${gymId}`);
+
+        return {success: true};
+      } catch (error) {
+        console.error("Error deactivating coupon:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to deactivate coupon: " + error.message);
       }
     },
 );

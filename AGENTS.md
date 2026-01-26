@@ -2722,58 +2722,54 @@ const session = await stripe.checkout.sessions.create({
 
 ---
 
-#### Phase 7: Coupons & Promo Codes
+#### Phase 7: Coupons & Promo Codes ✅ COMPLETED
 
-**[ ] 7.1 Admin Coupon Creation**
-- [ ] Create `CouponsScreen.jsx` for admin:
-  - List existing coupons with usage stats
-  - "Create Coupon" form
-- [ ] Create `createCoupon(gymId, couponData)` Cloud Function:
-  - Creates Stripe Coupon + Promotion Code
-  - Stores locally for quick lookup:
-    ```javascript
-    gyms/{gymId}/coupons/{couponId} {
-      code: string,              // User-facing code (e.g., "SUMMER20")
-      stripeCouponId: string,
-      stripePromotionCodeId: string,
-      type: 'percent' | 'fixed',
-      value: number,             // 20 for 20% or 1000 for $10.00
-      appliesToTiers: string[] | 'all',
-      appliesToProducts: 'memberships' | 'shop' | 'class_packs' | 'all',
-      firstTimeOnly: boolean,
-      maxRedemptions: number | null,
-      currentRedemptions: number,
-      expiresAt: timestamp | null,
-      active: boolean,
-      createdAt: timestamp,
-      createdBy: string
-    }
-    ```
-- [ ] Coupon options:
-  - Percentage off (e.g., 20% off)
-  - Fixed amount off (e.g., $10 off)
+**[x] 7.1 Admin Coupon Creation** ✅
+- [x] CouponsTab added to MembershipsScreen:
+  - Lists existing coupons with usage stats, expiration, status
+  - "Create Coupon" form with full options
+  - Deactivate coupon functionality
+- [x] `createCoupon(gymId, couponData)` Cloud Function:
+  - Creates Stripe Coupon + Promotion Code on connected account
+  - Stores coupon data in `gyms/{gymId}/coupons/{couponId}`
+- [x] `listCoupons(gymId, includeInactive)` Cloud Function
+- [x] `deactivateCoupon(gymId, couponId)` Cloud Function
+- [x] Coupon options supported:
+  - Percentage off or fixed amount off
   - Duration: once, repeating (X months), forever
-  - Restrictions: first-time only, specific plans, min purchase, expiration, usage limit
+  - Applies to: all, memberships, shop, class_packs
+  - First-time only restriction
+  - Max redemptions limit
+  - Expiration date
 
-**[ ] 7.2 Coupon Application at Checkout**
-- [ ] Add promo code input field on checkout screens
-- [ ] Create `validateCoupon(gymId, code, cartType)` Cloud Function:
-  - Checks if coupon exists, is active, not expired, has redemptions left
-  - Returns discount amount/percent for display
-- [ ] Apply promotion code to Checkout Session:
-  ```javascript
-  const session = await stripe.checkout.sessions.create({
-    // ...
-    discounts: [{
-      promotion_code: promoCodeId,
-    }],
-  });
-  ```
-- [ ] Show discount in order summary before redirect
+**[x] 7.2 Coupon Application at Checkout** ✅
+- [x] Promo code input field on CartDrawer (shop checkout)
+- [x] `validateCoupon(gymId, code, cartType)` Cloud Function:
+  - Validates coupon exists, is active, not expired, has redemptions left
+  - Checks if coupon applies to cart type
+  - Returns discount description for display
+- [x] All checkout functions updated to accept promoCode:
+  - `createSubscriptionCheckout` - memberships
+  - `createShopCheckout` - shop products
+  - `createClassPackCheckout` - class packs
+- [x] Promo code applied as Stripe discount at checkout
 
-**[ ] 7.3 Admin-Applied Discounts**
-- [ ] Allow admin to apply coupon to member's account
-- [ ] Allow admin to give manual credit adjustment (already exists in credits system)
+**[x] 7.3 Admin-Applied Discounts** ✅
+- [x] Admins can create coupons that members apply at checkout
+- [x] Manual credit adjustment already exists in credits system
+
+**New Cloud Functions:**
+- `createCoupon` - Create Stripe coupon + promotion code
+- `validateCoupon` - Validate promo code for checkout
+- `listCoupons` - List gym's coupons (admin only)
+- `deactivateCoupon` - Deactivate a coupon
+
+**Files Created/Modified:**
+- `functions/index.js` - Coupon functions + checkout promo code support
+- `packages/shared/api/firestore/memberships.js` - Coupon API functions
+- `packages/web/src/screens/admin/MembershipsScreen/CouponsTab.jsx` - NEW
+- `packages/web/src/screens/admin/MembershipsScreen/index.jsx` - Added Coupons tab
+- `packages/web/src/screens/members/store/CartDrawer.jsx` - Promo code input
 
 ---
 

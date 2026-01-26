@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { X, Trash2, CreditCard, Loader2, AlertCircle } from 'lucide-react';
+import { X, Trash2, CreditCard, Loader2, AlertCircle, Tag, Check } from 'lucide-react';
 import { useStore } from './StoreContext';
 import { useGym } from '../../../context/GymContext';
-import { createShopCheckout } from '../../../../../../packages/shared/api/firestore';
+import { createShopCheckout, validateCoupon } from '../../../../../../packages/shared/api/firestore';
 
 export const CartDrawer = () => {
     const { cart, isCartOpen, setIsCartOpen, removeFromCart, updateQuantity, cartTotal, clearCart } = useStore();
@@ -11,6 +11,40 @@ export const CartDrawer = () => {
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [promoCode, setPromoCode] = useState('');
+    const [promoCodeInput, setPromoCodeInput] = useState('');
+    const [validatingPromo, setValidatingPromo] = useState(false);
+    const [appliedCoupon, setAppliedCoupon] = useState(null);
+    const [promoError, setPromoError] = useState(null);
+
+    const handleApplyPromo = async () => {
+        if (!promoCodeInput.trim() || !currentGym?.id) return;
+
+        setValidatingPromo(true);
+        setPromoError(null);
+
+        try {
+            const result = await validateCoupon(currentGym.id, promoCodeInput.trim(), 'shop');
+
+            if (result.valid) {
+                setAppliedCoupon(result.coupon);
+                setPromoCode(result.coupon.code);
+                setPromoCodeInput('');
+            } else {
+                setPromoError(result.error || 'Invalid coupon code');
+            }
+        } catch (err) {
+            setPromoError('Failed to validate coupon');
+        } finally {
+            setValidatingPromo(false);
+        }
+    };
+
+    const handleRemovePromo = () => {
+        setAppliedCoupon(null);
+        setPromoCode('');
+        setPromoError(null);
+    };
 
     const handleCheckout = async () => {
         if (!currentGym?.id || cart.length === 0) return;
@@ -26,7 +60,7 @@ export const CartDrawer = () => {
         }));
 
         try {
-            const result = await createShopCheckout(currentGym.id, cartItems);
+            const result = await createShopCheckout(currentGym.id, cartItems, promoCode || null);
 
             if (result.success && result.url) {
                 // Redirect to Stripe Checkout
@@ -100,10 +134,63 @@ export const CartDrawer = () => {
                                 <p className="text-xs text-red-700">{error}</p>
                             </div>
                         )}
+
+                        {/* Promo Code Section */}
+                        <div className="mb-4">
+                            {appliedCoupon ? (
+                                <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                                    <div className="flex items-center gap-2">
+                                        <Check size={16} className="text-green-600" />
+                                        <div>
+                                            <span className="font-mono font-bold text-green-700">{appliedCoupon.code}</span>
+                                            <span className="text-xs text-green-600 ml-2">{appliedCoupon.description}</span>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={handleRemovePromo}
+                                        className="text-green-600 hover:text-green-800 text-xs font-semibold"
+                                    >
+                                        Remove
+                                    </button>
+                                </div>
+                            ) : (
+                                <div>
+                                    <div className="flex gap-2">
+                                        <div className="flex-1 relative">
+                                            <Tag size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                            <input
+                                                type="text"
+                                                value={promoCodeInput}
+                                                onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                                                placeholder="Promo code"
+                                                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                onKeyDown={(e) => e.key === 'Enter' && handleApplyPromo()}
+                                            />
+                                        </div>
+                                        <button
+                                            onClick={handleApplyPromo}
+                                            disabled={validatingPromo || !promoCodeInput.trim()}
+                                            className="px-4 py-2 bg-gray-200 text-gray-700 font-semibold rounded-lg text-sm hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {validatingPromo ? <Loader2 size={16} className="animate-spin" /> : 'Apply'}
+                                        </button>
+                                    </div>
+                                    {promoError && (
+                                        <p className="text-xs text-red-600 mt-1">{promoError}</p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
                         <div className="flex justify-between items-center mb-4">
                             <span className="text-gray-500 font-medium">Subtotal</span>
                             <span className="text-xl font-bold">${cartTotal.toFixed(2)}</span>
                         </div>
+                        {appliedCoupon && (
+                            <p className="text-xs text-gray-500 mb-2 text-right">
+                                Discount will be applied at checkout
+                            </p>
+                        )}
                         <button
                             onClick={handleCheckout}
                             disabled={loading}
