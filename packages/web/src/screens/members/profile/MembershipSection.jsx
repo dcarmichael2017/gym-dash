@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CreditCard, ChevronRight, Calendar, DollarSign, RefreshCw, Clock, XCircle, Bug, AlertCircle, Loader2, ExternalLink } from 'lucide-react';
 import { useConfirm } from '../../../context/ConfirmationContext';
 import { doc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
-import { getMembershipTiers, cancelUserMembership, logMembershipHistory, runPermissionDiagnostics, createCustomerPortalSession, cancelMemberSubscription, reactivateSubscription } from '../../../../../shared/api/firestore';
+import { getMembershipTiers, cancelUserMembership, logMembershipHistory, runPermissionDiagnostics, createCustomerPortalSession, cancelMemberSubscription, reactivateSubscription, getPaymentMethods } from '../../../../../shared/api/firestore';
 import { auth, db } from '../../../../../shared/api/firebaseConfig';
 import { useGym } from '../../../context/GymContext';
 
@@ -18,6 +18,8 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
   const { currentGym } = useGym();
   const [membershipHistory, setMembershipHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [loadingPaymentMethods, setLoadingPaymentMethods] = useState(false);
 
   // ✅ NEW: Add diagnostic handler
   const handleRunDiagnostic = async () => {
@@ -121,6 +123,30 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
 
     return () => unsub();
   }, [currentGym?.id]);
+
+  // Fetch payment methods when membership has a Stripe customer
+  useEffect(() => {
+    const fetchPaymentMethods = async () => {
+      if (!currentGym?.id || !liveMembership?.stripeCustomerId) {
+        setPaymentMethods([]);
+        return;
+      }
+
+      setLoadingPaymentMethods(true);
+      try {
+        const result = await getPaymentMethods(currentGym.id);
+        if (result.success) {
+          setPaymentMethods(result.paymentMethods || []);
+        }
+      } catch (error) {
+        console.error("Error fetching payment methods:", error);
+      } finally {
+        setLoadingPaymentMethods(false);
+      }
+    };
+
+    fetchPaymentMethods();
+  }, [currentGym?.id, liveMembership?.stripeCustomerId]);
 
   const {
     planName,
@@ -375,7 +401,53 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
           </div>
         )}
 
-        {/* Billing Action */}
+        {/* Payment Methods Display */}
+        {liveMembership?.stripeCustomerId && (
+          <div className="p-4 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Payment Methods</h4>
+              {loadingPaymentMethods && <Loader2 size={12} className="animate-spin text-gray-400" />}
+            </div>
+
+            {paymentMethods.length > 0 ? (
+              <div className="space-y-2">
+                {paymentMethods.map((method) => (
+                  <div
+                    key={method.id}
+                    className={`flex items-center gap-3 p-2.5 rounded-lg ${method.isDefault ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50'}`}
+                  >
+                    <div className="w-8 h-5 bg-white rounded border border-gray-200 flex items-center justify-center">
+                      <span className="text-[8px] font-bold text-gray-600 uppercase">
+                        {method.brand === 'visa' ? 'VISA' :
+                         method.brand === 'mastercard' ? 'MC' :
+                         method.brand === 'amex' ? 'AMEX' :
+                         method.brand === 'discover' ? 'DISC' :
+                         method.brand?.slice(0, 4).toUpperCase() || 'CARD'}
+                      </span>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-xs font-semibold text-gray-800">
+                        •••• {method.last4}
+                      </p>
+                      <p className="text-[10px] text-gray-500">
+                        Expires {method.expMonth}/{method.expYear}
+                      </p>
+                    </div>
+                    {method.isDefault && (
+                      <span className="text-[9px] font-bold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded">
+                        DEFAULT
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : !loadingPaymentMethods && (
+              <p className="text-xs text-gray-500">No payment methods on file</p>
+            )}
+          </div>
+        )}
+
+        {/* Manage Billing Button */}
         <button
           onClick={handleManageBilling}
           disabled={isOpeningPortal}
@@ -388,7 +460,7 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
             </div>
             <div className="text-left">
               <p className="text-sm font-bold text-gray-900">
-                {isOpeningPortal ? 'Opening Billing Portal...' : 'Payment Method'}
+                {isOpeningPortal ? 'Opening Billing Portal...' : 'Manage Billing'}
               </p>
               <p className="text-xs text-gray-500">
                 {isTrialing

@@ -406,3 +406,26 @@ export const changeSubscriptionPlan = async (gymId, newTierId, previewOnly = fal
     return { success: false, error: errorMessage };
   }
 };
+
+/**
+ * Get payment methods for a member (read-only display)
+ * @param {string} gymId - Gym ID
+ * @returns {Promise<{success: boolean, paymentMethods?: array, defaultPaymentMethodId?: string, error?: string}>}
+ */
+export const getPaymentMethods = async (gymId) => {
+  try {
+    const functions = getFunctions();
+    const getMethods = httpsCallable(functions, 'getPaymentMethods');
+
+    const result = await getMethods({ gymId });
+
+    return {
+      success: true,
+      paymentMethods: result.data.paymentMethods || [],
+      defaultPaymentMethodId: result.data.defaultPaymentMethodId
+    };
+  } catch (error) {
+    const errorMessage = error.message || "Failed to get payment methods";
+    return { success: false, error: errorMessage, paymentMethods: [] };
+  }
+};

@@ -2245,6 +2245,102 @@ exports.createCustomerPortalSession = onCall(
     },
 );
 
+/**
+ * Get payment methods for a member (read-only display)
+ * Returns sanitized card data - never returns full card numbers
+ */
+exports.getPaymentMethods = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId} = request.data;
+
+      if (!gymId) {
+        throw new HttpsError("invalid-argument", "gymId is required.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Get gym data
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId) {
+          throw new HttpsError("failed-precondition", "Gym has no connected Stripe account.");
+        }
+
+        // Get user's membership to find the Stripe Customer ID
+        const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+        const membershipDoc = await membershipRef.get();
+
+        if (!membershipDoc.exists || !membershipDoc.data().stripeCustomerId) {
+          return {paymentMethods: [], defaultPaymentMethodId: null};
+        }
+
+        const stripeCustomerId = membershipDoc.data().stripeCustomerId;
+
+        // Get payment methods from Stripe
+        const paymentMethods = await stripeClient.paymentMethods.list(
+            {
+              customer: stripeCustomerId,
+              type: "card",
+            },
+            {stripeAccount: stripeAccountId},
+        );
+
+        // Get customer to find default payment method
+        const customer = await stripeClient.customers.retrieve(
+            stripeCustomerId,
+            {stripeAccount: stripeAccountId},
+        );
+
+        const defaultPaymentMethodId = customer.invoice_settings?.default_payment_method || null;
+
+        // Sanitize payment method data - NEVER return full card numbers
+        const sanitizedMethods = paymentMethods.data.map((pm) => ({
+          id: pm.id,
+          brand: pm.card.brand,
+          last4: pm.card.last4,
+          expMonth: pm.card.exp_month,
+          expYear: pm.card.exp_year,
+          isDefault: pm.id === defaultPaymentMethodId,
+        }));
+
+        console.log(`Retrieved ${sanitizedMethods.length} payment methods for user ${userId} at gym ${gymId}`);
+
+        return {
+          paymentMethods: sanitizedMethods,
+          defaultPaymentMethodId: defaultPaymentMethodId,
+        };
+      } catch (error) {
+        console.error("Error getting payment methods:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to get payment methods: " + error.message);
+      }
+    },
+);
+
 exports.createSubscriptionCheckout = onCall(
     {
       region: "us-central1",

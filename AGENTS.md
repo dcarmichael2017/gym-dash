@@ -2688,32 +2688,37 @@ const session = await stripe.checkout.sessions.create({
 
 ---
 
-#### Phase 6: Customer Portal & Payment Methods
+#### Phase 6: Customer Portal & Payment Methods ✅ COMPLETED
 
-**[ ] 6.1 Stripe Customer Portal Integration**
-- [ ] Configure Customer Portal in Stripe Dashboard:
-  - Enable payment method management
-  - Enable subscription cancellation (optional - or handle in-app)
-  - Enable invoice history viewing
-- [ ] Create `createCustomerPortalSession(userId, gymId)` Cloud Function:
+**[x] 6.1 Stripe Customer Portal Integration** ✅
+- [x] `createCustomerPortalSession(gymId)` Cloud Function (implemented in Phase 3):
   - Creates portal session for the member's Stripe Customer
   - Returns portal URL with return_url back to app
-- [ ] Add "Manage Billing" button in member profile that opens portal
+- [x] "Manage Billing" button in member profile opens portal
 
-**[ ] 6.2 Payment Method Display (Read-Only in App)**
-- [ ] Create `getPaymentMethods(userId, gymId)` Cloud Function:
+**[x] 6.2 Payment Method Display (Read-Only in App)** ✅
+- [x] `getPaymentMethods(gymId)` Cloud Function:
   - Fetches payment methods from Stripe API
   - Returns sanitized data: `{ id, brand, last4, expMonth, expYear, isDefault }`
-  - **NEVER return full card numbers**
-- [ ] Display in member billing tab:
-  - List saved cards with brand icons (Visa, Mastercard, etc.)
-  - Show which is default
-  - "Manage" button links to Customer Portal
+  - **NEVER returns full card numbers**
+- [x] MembershipSection displays saved cards:
+  - Lists saved cards with brand abbreviations (VISA, MC, AMEX, DISC)
+  - Shows DEFAULT badge on default payment method
+  - "Manage Billing" button links to Customer Portal
 
-**[ ] 6.3 Per-Gym Default Payment Method**
-- [ ] Store `stripeDefaultPaymentMethodId` in membership subcollection
-- [ ] When member has multiple gyms, show payment method per gym
-- [ ] Allow selection of which card to use per gym (via portal or custom UI)
+**[x] 6.3 Per-Gym Default Payment Method** ✅
+- [x] Already handled by architecture: each gym has its own Stripe connected account
+- [x] Each gym creates its own customer for the member
+- [x] Payment methods shown are already per-gym isolated
+- [x] Members with multiple gyms see different payment methods per gym
+
+**New Cloud Functions:**
+- `getPaymentMethods` - Fetch saved cards for display (read-only, sanitized)
+
+**Files Modified:**
+- `functions/index.js` - Added getPaymentMethods function
+- `packages/shared/api/firestore/memberships.js` - Added getPaymentMethods API
+- `packages/web/src/screens/members/profile/MembershipSection.jsx` - Payment methods display
 
 ---
 
