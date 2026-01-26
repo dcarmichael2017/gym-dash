@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar
@@ -11,6 +11,13 @@ import {
 import { useGymStats } from '../../../../shared/hooks/useGymStats';
 import { useRevenueAnalytics, DATE_RANGES } from '../../../../shared/hooks/useRevenueAnalytics';
 import { FullScreenLoader } from '../../components/common/FullScreenLoader';
+
+// Safe wrapper for ResponsiveContainer to prevent rendering with invalid dimensions
+const SafeResponsiveContainer = ({ children, ...props }) => (
+  <ResponsiveContainer {...props} minWidth={0} minHeight={0}>
+    {children}
+  </ResponsiveContainer>
+);
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
 
@@ -30,8 +37,10 @@ const DashboardAnalyticsScreen = () => {
   const [dateRange, setDateRange] = useState('LAST_30_DAYS');
   const [showDateDropdown, setShowDateDropdown] = useState(false);
 
-  // Get date range
-  const { startDate, endDate } = DATE_RANGES[dateRange].getRange();
+  // Memoize date range to prevent infinite re-renders
+  const { startDate, endDate } = useMemo(() => {
+    return DATE_RANGES[dateRange].getRange();
+  }, [dateRange]);
 
   // Fetch member stats (existing)
   const {
@@ -44,12 +53,24 @@ const DashboardAnalyticsScreen = () => {
   } = useGymStats(gymId);
 
   // Fetch revenue analytics (new Stripe data)
+  // Use autoFetch: false initially to prevent race conditions
   const {
     analytics,
     loading: analyticsLoading,
     error: analyticsError,
     refetch,
-  } = useRevenueAnalytics(gymId, { startDate, endDate });
+  } = useRevenueAnalytics(gymId, {
+    startDate,
+    endDate,
+    autoFetch: !!gymId, // Only auto-fetch when gymId is available
+  });
+
+  // Stable refetch handler
+  const handleRefetch = useCallback(() => {
+    if (gymId) {
+      refetch(startDate, endDate);
+    }
+  }, [gymId, startDate, endDate, refetch]);
 
   // --- CHART DATA ---
   const historyData = useMemo(() => {
@@ -101,7 +122,7 @@ const DashboardAnalyticsScreen = () => {
         <div className="flex items-center gap-3">
           {/* Refresh Button */}
           <button
-            onClick={() => refetch(startDate, endDate)}
+            onClick={handleRefetch}
             disabled={analyticsLoading}
             className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
             title="Refresh data"
@@ -220,7 +241,7 @@ const DashboardAnalyticsScreen = () => {
                 <Loader2 className="animate-spin text-gray-400" size={32} />
               </div>
             ) : revenueTimeline.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <SafeResponsiveContainer width="100%" height="100%">
                 <AreaChart data={revenueTimeline}>
                   <defs>
                     <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
@@ -256,7 +277,7 @@ const DashboardAnalyticsScreen = () => {
                     fill="url(#colorRevenue)"
                   />
                 </AreaChart>
-              </ResponsiveContainer>
+              </SafeResponsiveContainer>
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-gray-400">
                 <ShoppingBag size={32} className="mb-2 opacity-50" />
@@ -278,7 +299,7 @@ const DashboardAnalyticsScreen = () => {
             </div>
           </div>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
+            <SafeResponsiveContainer width="100%" height="100%">
               <AreaChart data={historyData}>
                 <defs>
                   <linearGradient id="colorMembers" x1="0" y1="0" x2="0" y2="1">
@@ -292,7 +313,7 @@ const DashboardAnalyticsScreen = () => {
                 <Tooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
                 <Area type="monotone" dataKey="Members" stroke="#3B82F6" strokeWidth={3} fillOpacity={1} fill="url(#colorMembers)" />
               </AreaChart>
-            </ResponsiveContainer>
+            </SafeResponsiveContainer>
           </div>
         </div>
       </div>
@@ -338,7 +359,7 @@ const DashboardAnalyticsScreen = () => {
 
           <div className="h-48">
             {tierDistribution.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <SafeResponsiveContainer width="100%" height="100%">
                 <BarChart data={tierDistribution} layout="vertical" margin={{top: 5, right: 30, left: 40, bottom: 5}}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E5E7EB" />
                   <XAxis type="number" hide />
@@ -346,7 +367,7 @@ const DashboardAnalyticsScreen = () => {
                   <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '8px'}} />
                   <Bar dataKey="value" fill={primaryColor} radius={[0, 4, 4, 0]} barSize={20} />
                 </BarChart>
-              </ResponsiveContainer>
+              </SafeResponsiveContainer>
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-gray-400">
                 <p>No active plans yet.</p>
@@ -407,7 +428,7 @@ const DashboardAnalyticsScreen = () => {
             </div>
           ) : (analytics?.shop?.revenueByCategory?.length || 0) > 0 ? (
             <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
+              <SafeResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={analytics.shop.revenueByCategory}
@@ -429,7 +450,7 @@ const DashboardAnalyticsScreen = () => {
                   </Pie>
                   <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
                 </PieChart>
-              </ResponsiveContainer>
+              </SafeResponsiveContainer>
             </div>
           ) : (
             <div className="h-48 flex flex-col items-center justify-center text-gray-400">
@@ -449,7 +470,7 @@ const DashboardAnalyticsScreen = () => {
           <p className="text-xs text-gray-400 mb-6">Member Age Breakdown</p>
 
           <div className="h-48 relative">
-            <ResponsiveContainer width="100%" height="100%">
+            <SafeResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={demographicData}
@@ -466,7 +487,7 @@ const DashboardAnalyticsScreen = () => {
                 </Pie>
                 <Tooltip />
               </PieChart>
-            </ResponsiveContainer>
+            </SafeResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
               <span className="text-3xl font-bold text-gray-800">{demographics.avgAge || 0}</span>
               <span className="text-xs text-gray-400 uppercase font-bold">Avg Age</span>

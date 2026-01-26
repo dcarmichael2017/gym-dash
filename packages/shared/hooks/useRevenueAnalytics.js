@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getRevenueAnalytics } from '../api/firestore';
 
 /**
@@ -17,10 +17,19 @@ export const useRevenueAnalytics = (gymId, options = {}) => {
   } = options;
 
   const [analytics, setAnalytics] = useState(null);
-  const [loading, setLoading] = useState(autoFetch);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchAnalytics = useCallback(async (start = startDate, end = endDate) => {
+  // Track if we've already fetched to prevent duplicate calls
+  const hasFetchedRef = useRef(false);
+  const lastFetchKeyRef = useRef('');
+
+  // Convert dates to stable string keys for dependency comparison
+  const startKey = startDate ? new Date(startDate).toISOString().split('T')[0] : '';
+  const endKey = endDate ? new Date(endDate).toISOString().split('T')[0] : '';
+  const fetchKey = `${gymId}-${startKey}-${endKey}`;
+
+  const fetchAnalytics = useCallback(async (start, end) => {
     if (!gymId) return;
 
     setLoading(true);
@@ -39,19 +48,30 @@ export const useRevenueAnalytics = (gymId, options = {}) => {
     } finally {
       setLoading(false);
     }
-  }, [gymId, startDate, endDate]);
+  }, [gymId]);
 
+  // Auto-fetch when params change (using stable string comparison)
   useEffect(() => {
-    if (autoFetch && gymId) {
-      fetchAnalytics();
-    }
-  }, [autoFetch, gymId, fetchAnalytics]);
+    if (!autoFetch || !gymId) return;
+
+    // Skip if we've already fetched with the same parameters
+    if (lastFetchKeyRef.current === fetchKey) return;
+
+    lastFetchKeyRef.current = fetchKey;
+    fetchAnalytics(startDate, endDate);
+  }, [autoFetch, gymId, fetchKey, startDate, endDate, fetchAnalytics]);
+
+  // Manual refetch function
+  const refetch = useCallback((start = startDate, end = endDate) => {
+    lastFetchKeyRef.current = ''; // Clear to allow refetch
+    fetchAnalytics(start, end);
+  }, [startDate, endDate, fetchAnalytics]);
 
   return {
     analytics,
     loading,
     error,
-    refetch: fetchAnalytics,
+    refetch,
   };
 };
 
