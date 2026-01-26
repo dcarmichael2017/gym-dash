@@ -37,6 +37,7 @@ import DashboardAnalyticsScreen from './screens/admin/DashboardAnalyticsScreen';
 import DashboardCalendarScreen from './screens/admin/DashboardCalendarScreen';
 import DashboardClassesScreen from './screens/admin/DashboardClassesScreen';
 import ShopScreen from './screens/admin/ShopScreen';
+import OrdersScreen from './screens/admin/OrdersScreen';
 
 // --- MEMBER SCREENS ---
 import MemberHomeScreen from './screens/members/dashboard/MemberHomeScreen';
@@ -154,6 +155,7 @@ function App() {
               <Route path="chat" element={<AdminGroupChatScreen />} />
               <Route path="memberships" element={<DashboardMembershipsScreen />} />
               <Route path="shop" element={<ShopScreen />} />
+              <Route path="orders" element={<OrdersScreen />} />
               <Route path="members" element={<DashboardMembersScreen />} />
               <Route path="staff" element={<DashboardStaffScreen />} />
               <Route path="settings" element={<DashboardSettingsScreen />} />

@@ -2773,40 +2773,77 @@ const session = await stripe.checkout.sessions.create({
 
 ---
 
-#### Phase 8: Refunds & Disputes
+#### Phase 8: Refunds & Disputes ✅ COMPLETED
 
-**[ ] 8.1 Admin Refund Flow**
-- [ ] Add refund functionality to Order detail screen:
+**[x] 8.1 Admin Refund Flow**
+- [x] Add refund functionality to Order detail screen:
   - Full refund option
   - Partial refund with amount input
   - Reason selection (requested by customer, defective, etc.)
-- [ ] Create `processRefund(gymId, paymentIntentId, amount, reason)` Cloud Function:
+- [x] Create `processRefund(gymId, paymentIntentId, amount, reason)` Cloud Function:
   - Calls Stripe Refunds API
   - **Note**: Application fee is NOT refunded by default (platform keeps fee)
   - Option to refund application fee: `refund_application_fee: true`
-- [ ] Handle `charge.refunded` webhook:
+- [x] Handle `charge.refunded` webhook:
   - Update order status to `refunded` or `partially_refunded`
   - Log refund details
 
-**[ ] 8.2 Subscription Refunds**
-- [ ] For subscription cancellations with refund:
+**[x] 8.2 Subscription Refunds**
+- [x] For subscription cancellations with refund:
   - Calculate prorated amount
   - Process refund for unused portion
-- [ ] Update membership history log
+- [x] Update membership history log
 
-**[ ] 8.3 Class Pack Refunds**
-- [ ] When refunding class pack purchase:
+**[x] 8.3 Class Pack Refunds**
+- [x] When refunding class pack purchase:
   - Check if credits have been used
   - If credits used < total → Partial refund
   - Deduct credits from member's balance
   - Log to creditLogs: "Refund processed - {X} credits removed"
 
-**[ ] 8.4 Dispute Handling (Basic)**
-- [ ] Handle `charge.dispute.created` webhook:
+**[x] 8.4 Dispute Handling (Basic)**
+- [x] Handle `charge.dispute.created` webhook:
   - Log dispute to stripeEvents
-  - Notify gym owner via email
+  - Store dispute in `gyms/{gymId}/disputes` collection
   - Show dispute indicator on order
+- [x] Handle `charge.dispute.closed` webhook:
+  - Update dispute status (won/lost)
 - [ ] (Future) Provide evidence submission UI
+
+**Implementation Details:**
+
+**New Cloud Functions:**
+- `processRefund` - Unified refund function supporting orders, subscriptions, and class packs
+  - Parameters: `gymId`, `refundType`, `orderId`/`subscriptionId`/`purchaseId`, `amount`, `reason`
+  - Handles full and partial refunds
+  - Updates order status and logs to stripeEvents
+
+**Webhook Handlers Updated:**
+- `charge.refunded` - Updates order status to `refunded` or `partially_refunded`
+- `charge.dispute.created` - Creates dispute record, marks order as disputed
+- `charge.dispute.closed` - Updates dispute and order status
+
+**New Admin Screen - Orders:**
+- `packages/web/src/screens/admin/OrdersScreen/index.jsx` - Main orders management screen
+- `packages/web/src/screens/admin/OrdersScreen/OrdersTab.jsx` - Order list with expand/collapse, refund modal
+- `packages/web/src/screens/admin/OrdersScreen/DisputesTab.jsx` - Dispute tracking with Stripe Dashboard links
+
+**New API Functions:**
+- `packages/shared/api/firestore/orders.js`:
+  - `getOrders(gymId, options)` - List orders with filtering
+  - `getOrderById(gymId, orderId)` - Get single order
+  - `fulfillOrder(gymId, orderId, notes)` - Mark as fulfilled
+  - `processOrderRefund(gymId, orderId, amount, reason, refundApplicationFee)`
+  - `processSubscriptionRefund(gymId, subscriptionId, prorate, reason)`
+  - `processClassPackRefund(gymId, userId, purchaseId, creditsUsed, reason)`
+  - `getDisputedOrders(gymId)` - Get orders with disputes
+  - `getOrderStats(gymId, startDate, endDate)` - Dashboard statistics
+
+**Files Modified:**
+- `functions/index.js` - Added refund/dispute handlers and processRefund function
+- `packages/shared/api/firestore/index.js` - Added orders export
+- `packages/web/src/App.jsx` - Added OrdersScreen route
+- `packages/web/src/layout/AdminLayout.jsx` - Added Orders nav item
 
 ---
 

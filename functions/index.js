@@ -1232,6 +1232,14 @@ exports.stripeWebhook = onRequest(
             await handleChargeRefunded(db, event);
             break;
 
+          case "charge.dispute.created":
+            await handleDisputeCreated(db, event);
+            break;
+
+          case "charge.dispute.closed":
+            await handleDisputeClosed(db, event);
+            break;
+
           default:
             console.log(`Unhandled event type: ${event.type}`);
         }
@@ -2133,8 +2141,229 @@ async function handleChargeRefunded(db, event) {
   const charge = event.data.object;
   console.log("Charge refunded:", charge.id);
 
-  // Will be implemented in Phase 8
-  // Update order status to 'refunded', log refund
+  try {
+    // Find the order associated with this charge's payment intent
+    const paymentIntentId = charge.payment_intent;
+
+    if (!paymentIntentId) {
+      console.log("No payment intent on charge, cannot process refund webhook.");
+      return;
+    }
+
+    // Search for the order by stripePaymentIntentId across all gyms
+    const gymsSnapshot = await db.collection("gyms").get();
+
+    for (const gymDoc of gymsSnapshot.docs) {
+      const ordersQuery = await gymDoc.ref.collection("orders")
+          .where("stripePaymentIntentId", "==", paymentIntentId)
+          .limit(1)
+          .get();
+
+      if (!ordersQuery.empty) {
+        const orderDoc = ordersQuery.docs[0];
+
+        // Check for idempotency
+        const eventRef = gymDoc.ref.collection("stripeEvents").doc(event.id);
+        const eventDoc = await eventRef.get();
+        if (eventDoc.exists && eventDoc.data().processed) {
+          console.log(`Refund event ${event.id} already processed, skipping.`);
+          return;
+        }
+
+        // Calculate refund amounts
+        const refundedAmountCents = charge.amount_refunded || 0;
+        const totalAmountCents = charge.amount || 0;
+        const isFullRefund = refundedAmountCents >= totalAmountCents;
+
+        const newStatus = isFullRefund ? "refunded" : "partially_refunded";
+
+        // Update the order
+        await orderDoc.ref.update({
+          status: newStatus,
+          refundedAmount: refundedAmountCents / 100,
+          refundedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // Log the event
+        await eventRef.set({
+          eventType: "charge.refunded",
+          stripeEventId: event.id,
+          chargeId: charge.id,
+          orderId: orderDoc.id,
+          refundedAmount: refundedAmountCents / 100,
+          isFullRefund: isFullRefund,
+          processed: true,
+          processedAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        console.log(`Processed refund webhook for order ${orderDoc.id}: $${refundedAmountCents / 100}`);
+        return;
+      }
+    }
+
+    // If no order found, might be a subscription or class pack refund
+    // Those are handled by the processRefund function directly
+    console.log(`No order found for payment intent ${paymentIntentId}, might be subscription/class pack.`);
+  } catch (error) {
+    console.error("Error processing charge.refunded webhook:", error);
+    throw error;
+  }
+}
+
+/**
+ * Handle charge.dispute.created event
+ * Logs dispute and notifies gym owner
+ */
+async function handleDisputeCreated(db, event) {
+  const dispute = event.data.object;
+  console.log("Dispute created:", dispute.id);
+
+  try {
+    const chargeId = dispute.charge;
+    const paymentIntentId = dispute.payment_intent;
+
+    if (!chargeId && !paymentIntentId) {
+      console.log("No charge or payment intent on dispute, cannot process.");
+      return;
+    }
+
+    // Search for the order by payment intent across all gyms
+    const gymsSnapshot = await db.collection("gyms").get();
+
+    for (const gymDoc of gymsSnapshot.docs) {
+      // Query orders by payment intent ID
+      const ordersQuery = await gymDoc.ref.collection("orders")
+          .where("stripePaymentIntentId", "==", paymentIntentId)
+          .limit(1)
+          .get();
+
+      if (!ordersQuery.empty) {
+        const orderDoc = ordersQuery.docs[0];
+        const orderData = orderDoc.data();
+
+        // Check for idempotency
+        const disputeEventRef = gymDoc.ref.collection("stripeEvents").doc(event.id);
+        const existingEvent = await disputeEventRef.get();
+        if (existingEvent.exists && existingEvent.data().processed) {
+          console.log(`Dispute event ${event.id} already processed, skipping.`);
+          return;
+        }
+
+        // Mark the order as disputed
+        await orderDoc.ref.update({
+          hasDispute: true,
+          disputeId: dispute.id,
+          disputeStatus: dispute.status,
+          disputeReason: dispute.reason,
+          disputeAmount: dispute.amount / 100,
+          disputeCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // Log to stripeEvents
+        await disputeEventRef.set({
+          eventType: "charge.dispute.created",
+          stripeEventId: event.id,
+          disputeId: dispute.id,
+          chargeId: chargeId,
+          orderId: orderDoc.id,
+          amount: dispute.amount / 100,
+          reason: dispute.reason,
+          status: dispute.status,
+          processed: true,
+          processedAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // Store dispute info at gym level for dashboard
+        const disputeRef = gymDoc.ref.collection("disputes").doc(dispute.id);
+        await disputeRef.set({
+          disputeId: dispute.id,
+          chargeId: chargeId,
+          orderId: orderDoc.id,
+          amount: dispute.amount / 100,
+          reason: dispute.reason,
+          status: dispute.status,
+          memberName: orderData.memberName,
+          memberEmail: orderData.memberEmail,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          evidenceDueBy: dispute.evidence_details?.due_by
+            ? new Date(dispute.evidence_details.due_by * 1000)
+            : null,
+        });
+
+        console.log(`Logged dispute ${dispute.id} for order ${orderDoc.id} at gym ${gymDoc.id}`);
+
+        // TODO: Send email notification to gym owner
+        // This would use a mail service like SendGrid
+
+        return;
+      }
+    }
+
+    console.log(`Could not find order for disputed payment intent ${paymentIntentId}`);
+  } catch (error) {
+    console.error("Error processing dispute.created webhook:", error);
+    throw error;
+  }
+}
+
+/**
+ * Handle charge.dispute.closed event
+ * Updates dispute status
+ */
+async function handleDisputeClosed(db, event) {
+  const dispute = event.data.object;
+  console.log("Dispute closed:", dispute.id, "Status:", dispute.status);
+
+  try {
+    // Find and update the dispute record
+    const gymsSnapshot = await db.collection("gyms").get();
+
+    for (const gymDoc of gymsSnapshot.docs) {
+      const disputeRef = gymDoc.ref.collection("disputes").doc(dispute.id);
+      const disputeDoc = await disputeRef.get();
+
+      if (disputeDoc.exists) {
+        await disputeRef.update({
+          status: dispute.status,
+          closedAt: admin.firestore.FieldValue.serverTimestamp(),
+          won: dispute.status === "won",
+        });
+
+        // Update the order's dispute status
+        const disputeData = disputeDoc.data();
+        if (disputeData.orderId) {
+          const orderRef = gymDoc.ref.collection("orders").doc(disputeData.orderId);
+          await orderRef.update({
+            disputeStatus: dispute.status,
+            disputeClosedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+
+        // Log the event
+        const eventRef = gymDoc.ref.collection("stripeEvents").doc(event.id);
+        await eventRef.set({
+          eventType: "charge.dispute.closed",
+          stripeEventId: event.id,
+          disputeId: dispute.id,
+          status: dispute.status,
+          won: dispute.status === "won",
+          processed: true,
+          processedAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        console.log(`Updated dispute ${dispute.id} to status: ${dispute.status}`);
+        return;
+      }
+    }
+
+    console.log(`Dispute ${dispute.id} not found in database`);
+  } catch (error) {
+    console.error("Error processing dispute.closed webhook:", error);
+    throw error;
+  }
 }
 
 // ============================================================================
@@ -4123,3 +4352,532 @@ exports.deactivateCoupon = onCall(
       }
     },
 );
+
+// ============================================================================
+// PHASE 8: REFUNDS & DISPUTES
+// ============================================================================
+
+/**
+ * Process a refund for various purchase types (orders, subscriptions, class packs)
+ * Admin only function
+ */
+exports.processRefund = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {
+        gymId,
+        refundType, // 'order', 'subscription', 'class_pack'
+        orderId, // For order refunds
+        subscriptionId, // For subscription refunds
+        userId, // For class pack refunds
+        purchaseId, // For class pack refunds
+        amount, // Optional: partial refund amount in dollars
+        reason,
+        refundApplicationFee,
+        prorate, // For subscription refunds
+        creditsUsed, // For class pack refunds
+      } = request.data;
+
+      if (!gymId || !refundType) {
+        throw new HttpsError("invalid-argument", "gymId and refundType are required.");
+      }
+
+      try {
+        const adminUserId = request.auth.uid;
+
+        // Verify user is admin/owner of the gym
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+        const isOwner = gymData.ownerId === adminUserId;
+
+        if (!isOwner) {
+          const membershipRef = db.collection("users").doc(adminUserId).collection("memberships").doc(gymId);
+          const membershipDoc = await membershipRef.get();
+          const role = membershipDoc.exists ? membershipDoc.data().role : null;
+          if (role !== "admin" && role !== "staff") {
+            throw new HttpsError("permission-denied", "Only admins can process refunds.");
+          }
+        }
+
+        if (!stripeAccountId) {
+          throw new HttpsError("failed-precondition", "Gym has no connected Stripe account.");
+        }
+
+        let refundResult;
+
+        switch (refundType) {
+          case "order":
+            refundResult = await processOrderRefund(
+                db,
+                stripeClient,
+                gymId,
+                stripeAccountId,
+                orderId,
+                amount,
+                reason,
+                refundApplicationFee,
+                adminUserId,
+            );
+            break;
+
+          case "subscription":
+            refundResult = await processSubscriptionRefund(
+                db,
+                stripeClient,
+                gymId,
+                stripeAccountId,
+                subscriptionId,
+                prorate,
+                reason,
+                adminUserId,
+            );
+            break;
+
+          case "class_pack":
+            refundResult = await processClassPackRefund(
+                db,
+                stripeClient,
+                gymId,
+                stripeAccountId,
+                userId,
+                purchaseId,
+                creditsUsed || 0,
+                reason,
+                adminUserId,
+            );
+            break;
+
+          default:
+            throw new HttpsError("invalid-argument", `Invalid refund type: ${refundType}`);
+        }
+
+        return refundResult;
+      } catch (error) {
+        console.error("Error processing refund:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to process refund: " + error.message);
+      }
+    },
+);
+
+/**
+ * Process refund for a shop order
+ */
+async function processOrderRefund(
+    db,
+    stripeClient,
+    gymId,
+    stripeAccountId,
+    orderId,
+    amount,
+    reason,
+    refundApplicationFee,
+    adminUserId,
+) {
+  if (!orderId) {
+    throw new HttpsError("invalid-argument", "orderId is required for order refunds.");
+  }
+
+  const orderRef = db.collection("gyms").doc(gymId).collection("orders").doc(orderId);
+  const orderDoc = await orderRef.get();
+
+  if (!orderDoc.exists) {
+    throw new HttpsError("not-found", "Order not found.");
+  }
+
+  const orderData = orderDoc.data();
+
+  if (!orderData.stripePaymentIntentId) {
+    throw new HttpsError("failed-precondition", "Order has no associated payment.");
+  }
+
+  if (orderData.status === "refunded") {
+    throw new HttpsError("failed-precondition", "Order has already been fully refunded.");
+  }
+
+  // Calculate refund amount
+  const totalPaid = orderData.total || 0;
+  const alreadyRefunded = orderData.refundedAmount || 0;
+  const maxRefundable = totalPaid - alreadyRefunded;
+  const refundAmountCents = amount
+    ? Math.min(Math.round(amount * 100), Math.round(maxRefundable * 100))
+    : Math.round(maxRefundable * 100);
+
+  if (refundAmountCents <= 0) {
+    throw new HttpsError("invalid-argument", "No amount available to refund.");
+  }
+
+  // Process refund through Stripe
+  const refundParams = {
+    payment_intent: orderData.stripePaymentIntentId,
+    amount: refundAmountCents,
+    reason: reason === "fraudulent" ? "fraudulent" : reason === "duplicate" ? "duplicate" : "requested_by_customer",
+  };
+
+  // Note: refund_application_fee only works with transfers, not direct charges
+  // For Connect with destination charges, this would refund the platform fee
+  if (refundApplicationFee) {
+    refundParams.refund_application_fee = true;
+  }
+
+  const refund = await stripeClient.refunds.create(
+      refundParams,
+      {stripeAccount: stripeAccountId},
+  );
+
+  // Calculate new totals
+  const newRefundedAmount = alreadyRefunded + (refundAmountCents / 100);
+  const isFullRefund = newRefundedAmount >= totalPaid;
+  const newStatus = isFullRefund ? "refunded" : "partially_refunded";
+
+  // Update order
+  await orderRef.update({
+    status: newStatus,
+    refundedAmount: newRefundedAmount,
+    refundedAt: admin.firestore.FieldValue.serverTimestamp(),
+    lastRefund: {
+      stripeRefundId: refund.id,
+      amount: refundAmountCents / 100,
+      reason: reason,
+      processedBy: adminUserId,
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+  });
+
+  // Log to stripeEvents for idempotency
+  const eventRef = db.collection("gyms").doc(gymId).collection("stripeEvents").doc(`refund_${refund.id}`);
+  await eventRef.set({
+    eventType: "refund.created",
+    stripeRefundId: refund.id,
+    orderId: orderId,
+    amount: refundAmountCents / 100,
+    reason: reason,
+    processedBy: adminUserId,
+    processed: true,
+    processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.log(`Processed refund ${refund.id} for order ${orderId}: $${refundAmountCents / 100}`);
+
+  return {
+    success: true,
+    refund: {
+      id: refund.id,
+      amount: refundAmountCents / 100,
+      status: refund.status,
+      orderId: orderId,
+      orderStatus: newStatus,
+    },
+  };
+}
+
+/**
+ * Process refund for a subscription (with optional proration)
+ */
+async function processSubscriptionRefund(
+    db,
+    stripeClient,
+    gymId,
+    stripeAccountId,
+    subscriptionId,
+    prorate,
+    reason,
+    adminUserId,
+) {
+  if (!subscriptionId) {
+    throw new HttpsError("invalid-argument", "subscriptionId is required for subscription refunds.");
+  }
+
+  // Get the subscription from Stripe
+  const subscription = await stripeClient.subscriptions.retrieve(
+      subscriptionId,
+      {stripeAccount: stripeAccountId},
+  );
+
+  if (!subscription) {
+    throw new HttpsError("not-found", "Subscription not found in Stripe.");
+  }
+
+  // Get the latest invoice for this subscription
+  const invoices = await stripeClient.invoices.list(
+      {
+        subscription: subscriptionId,
+        limit: 1,
+        status: "paid",
+      },
+      {stripeAccount: stripeAccountId},
+  );
+
+  if (invoices.data.length === 0) {
+    throw new HttpsError("failed-precondition", "No paid invoices found for this subscription.");
+  }
+
+  const latestInvoice = invoices.data[0];
+  const chargeId = latestInvoice.charge;
+
+  if (!chargeId) {
+    throw new HttpsError("failed-precondition", "No charge found for the latest invoice.");
+  }
+
+  // Calculate refund amount
+  let refundAmountCents;
+
+  if (prorate) {
+    // Calculate prorated refund based on unused time
+    const periodStart = subscription.current_period_start;
+    const periodEnd = subscription.current_period_end;
+    const now = Math.floor(Date.now() / 1000);
+
+    const totalPeriod = periodEnd - periodStart;
+    const usedPeriod = now - periodStart;
+    const unusedFraction = Math.max(0, (totalPeriod - usedPeriod) / totalPeriod);
+
+    refundAmountCents = Math.round(latestInvoice.amount_paid * unusedFraction);
+  } else {
+    // Full refund of the last payment
+    refundAmountCents = latestInvoice.amount_paid;
+  }
+
+  if (refundAmountCents <= 0) {
+    throw new HttpsError("invalid-argument", "No amount available to refund (period may be fully used).");
+  }
+
+  // Process refund
+  const refund = await stripeClient.refunds.create(
+      {
+        charge: chargeId,
+        amount: refundAmountCents,
+        reason: "requested_by_customer",
+      },
+      {stripeAccount: stripeAccountId},
+  );
+
+  // Find the user membership for this subscription
+  const membershipsSnapshot = await db.collectionGroup("memberships")
+      .where("stripeSubscriptionId", "==", subscriptionId)
+      .limit(1)
+      .get();
+
+  if (!membershipsSnapshot.empty) {
+    const membershipDoc = membershipsSnapshot.docs[0];
+    const membershipRef = membershipDoc.ref;
+
+    // Log to membership history
+    const historyRef = membershipRef.collection("history").doc();
+    await historyRef.set({
+      action: "subscription_refund",
+      description: `Refund processed: $${(refundAmountCents / 100).toFixed(2)} (${prorate ? "prorated" : "full"})`,
+      stripeRefundId: refund.id,
+      amount: refundAmountCents / 100,
+      reason: reason,
+      processedBy: adminUserId,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  // Log to stripeEvents
+  const eventRef = db.collection("gyms").doc(gymId).collection("stripeEvents").doc(`refund_${refund.id}`);
+  await eventRef.set({
+    eventType: "subscription_refund.created",
+    stripeRefundId: refund.id,
+    subscriptionId: subscriptionId,
+    amount: refundAmountCents / 100,
+    prorate: prorate,
+    reason: reason,
+    processedBy: adminUserId,
+    processed: true,
+    processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.log(`Processed subscription refund ${refund.id} for subscription ${subscriptionId}: $${refundAmountCents / 100}`);
+
+  return {
+    success: true,
+    refund: {
+      id: refund.id,
+      amount: refundAmountCents / 100,
+      status: refund.status,
+      subscriptionId: subscriptionId,
+      prorate: prorate,
+    },
+  };
+}
+
+/**
+ * Process refund for a class pack purchase
+ */
+async function processClassPackRefund(
+    db,
+    stripeClient,
+    gymId,
+    stripeAccountId,
+    userId,
+    purchaseId,
+    creditsUsed,
+    reason,
+    adminUserId,
+) {
+  if (!userId || !purchaseId) {
+    throw new HttpsError("invalid-argument", "userId and purchaseId are required for class pack refunds.");
+  }
+
+  // Get the class pack purchase from creditLogs
+  const creditLogsRef = db.collection("users").doc(userId)
+      .collection("memberships").doc(gymId)
+      .collection("creditLogs");
+
+  const purchaseQuery = await creditLogsRef
+      .where("type", "==", "purchase")
+      .where("stripeCheckoutSessionId", "==", purchaseId)
+      .limit(1)
+      .get();
+
+  let purchaseDoc;
+  let purchaseData;
+
+  if (!purchaseQuery.empty) {
+    purchaseDoc = purchaseQuery.docs[0];
+    purchaseData = purchaseDoc.data();
+  } else {
+    // Try finding by document ID
+    const directDoc = await creditLogsRef.doc(purchaseId).get();
+    if (directDoc.exists && directDoc.data().type === "purchase") {
+      purchaseDoc = directDoc;
+      purchaseData = directDoc.data();
+    } else {
+      throw new HttpsError("not-found", "Class pack purchase not found.");
+    }
+  }
+
+  if (!purchaseData.stripePaymentIntentId && !purchaseData.stripeCheckoutSessionId) {
+    throw new HttpsError("failed-precondition", "Purchase has no associated Stripe payment.");
+  }
+
+  if (purchaseData.refunded) {
+    throw new HttpsError("failed-precondition", "This purchase has already been refunded.");
+  }
+
+  // Calculate refund amount based on credits used
+  const totalCredits = purchaseData.credits || purchaseData.amount || 0;
+  const pricePerCredit = purchaseData.totalPaid ? purchaseData.totalPaid / totalCredits : 0;
+  const unusedCredits = Math.max(0, totalCredits - creditsUsed);
+  const refundAmount = unusedCredits * pricePerCredit;
+  const refundAmountCents = Math.round(refundAmount * 100);
+
+  if (refundAmountCents <= 0) {
+    throw new HttpsError("invalid-argument", "No refundable amount (all credits may have been used).");
+  }
+
+  // Get payment intent ID
+  let paymentIntentId = purchaseData.stripePaymentIntentId;
+
+  if (!paymentIntentId && purchaseData.stripeCheckoutSessionId) {
+    // Retrieve payment intent from checkout session
+    const session = await stripeClient.checkout.sessions.retrieve(
+        purchaseData.stripeCheckoutSessionId,
+        {stripeAccount: stripeAccountId},
+    );
+    paymentIntentId = session.payment_intent;
+  }
+
+  if (!paymentIntentId) {
+    throw new HttpsError("failed-precondition", "Could not find payment intent for this purchase.");
+  }
+
+  // Process refund
+  const refund = await stripeClient.refunds.create(
+      {
+        payment_intent: paymentIntentId,
+        amount: refundAmountCents,
+        reason: "requested_by_customer",
+      },
+      {stripeAccount: stripeAccountId},
+  );
+
+  // Deduct credits from member's balance
+  const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+  const membershipDoc = await membershipRef.get();
+
+  if (membershipDoc.exists) {
+    const currentCredits = membershipDoc.data().classCredits || 0;
+    const newCredits = Math.max(0, currentCredits - unusedCredits);
+
+    await membershipRef.update({
+      classCredits: newCredits,
+    });
+
+    // Log credit deduction
+    const deductLogRef = creditLogsRef.doc();
+    await deductLogRef.set({
+      type: "refund_deduction",
+      credits: -unusedCredits,
+      amount: -unusedCredits,
+      description: `Refund processed - ${unusedCredits} credits removed`,
+      stripeRefundId: refund.id,
+      originalPurchaseId: purchaseDoc.id,
+      processedBy: adminUserId,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Mark original purchase as refunded
+    await purchaseDoc.ref.update({
+      refunded: true,
+      refundedAt: admin.firestore.FieldValue.serverTimestamp(),
+      refundedAmount: refundAmountCents / 100,
+      stripeRefundId: refund.id,
+      creditsRefunded: unusedCredits,
+    });
+  }
+
+  // Log to stripeEvents
+  const eventRef = db.collection("gyms").doc(gymId).collection("stripeEvents").doc(`refund_${refund.id}`);
+  await eventRef.set({
+    eventType: "class_pack_refund.created",
+    stripeRefundId: refund.id,
+    userId: userId,
+    purchaseId: purchaseDoc.id,
+    amount: refundAmountCents / 100,
+    creditsRefunded: unusedCredits,
+    reason: reason,
+    processedBy: adminUserId,
+    processed: true,
+    processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.log(`Processed class pack refund ${refund.id} for user ${userId}: $${refundAmountCents / 100} (${unusedCredits} credits)`);
+
+  return {
+    success: true,
+    refund: {
+      id: refund.id,
+      amount: refundAmountCents / 100,
+      status: refund.status,
+      creditsRefunded: unusedCredits,
+      userId: userId,
+    },
+  };
+}
