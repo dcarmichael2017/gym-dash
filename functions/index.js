@@ -5134,3 +5134,200 @@ exports.getRevenueAnalytics = onCall(
       }
     },
 );
+
+// ============================================================================
+// PHASE 10: UI POLISH & QUALITY OF LIFE
+// ============================================================================
+
+/**
+ * Sync gym branding (colors) to their Stripe Connect account
+ * This makes Checkout pages and Customer Portal match the gym's theme
+ */
+exports.syncGymBrandingToStripe = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId} = request.data;
+
+      if (!gymId) {
+        throw new HttpsError("invalid-argument", "gymId is required.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Get gym data
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        // Verify user is owner/admin
+        const isOwner = gymData.ownerId === userId;
+        if (!isOwner) {
+          const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+          const membershipDoc = await membershipRef.get();
+          const role = membershipDoc.exists ? membershipDoc.data().role : null;
+          if (role !== "admin") {
+            throw new HttpsError("permission-denied", "Only admins can sync branding.");
+          }
+        }
+
+        if (!stripeAccountId) {
+          throw new HttpsError("failed-precondition", "Gym has no connected Stripe account.");
+        }
+
+        // Extract branding info
+        const theme = gymData.theme || {};
+        const primaryColor = theme.primaryColor || "#2563eb";
+        const secondaryColor = theme.secondaryColor || "#4f46e5";
+
+        // Update Stripe account branding
+        await stripeClient.accounts.update(stripeAccountId, {
+          settings: {
+            branding: {
+              primary_color: primaryColor,
+              secondary_color: secondaryColor,
+            },
+          },
+          business_profile: {
+            name: gymData.name || undefined,
+          },
+        });
+
+        // Update gym doc to track last sync
+        await gymRef.update({
+          stripeBrandingSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          stripeBrandingColors: {
+            primary: primaryColor,
+            secondary: secondaryColor,
+          },
+        });
+
+        console.log(`Synced branding for gym ${gymId} to Stripe account ${stripeAccountId}`);
+
+        return {
+          success: true,
+          synced: {
+            primaryColor,
+            secondaryColor,
+            stripeAccountId,
+          },
+        };
+      } catch (error) {
+        console.error("Error syncing branding to Stripe:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to sync branding: " + error.message);
+      }
+    },
+);
+
+/**
+ * Firestore trigger: Auto-clear payment links when membership tier details change
+ * This prevents stale links from being used after price/interval changes
+ */
+exports.onMembershipTierUpdated = onDocumentUpdated(
+    {
+      document: "gyms/{gymId}/membershipTiers/{tierId}",
+      region: "us-central1",
+    },
+    async (event) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      const beforeData = event.data.before.data();
+      const afterData = event.data.after.data();
+
+      if (!beforeData || !afterData) {
+        console.log("Missing before/after data, skipping.");
+        return;
+      }
+
+      // Check if price-affecting fields changed
+      const priceChanged = beforeData.price !== afterData.price;
+      const intervalChanged = beforeData.interval !== afterData.interval;
+      const nameChanged = beforeData.name !== afterData.name;
+
+      if (!priceChanged && !intervalChanged && !nameChanged) {
+        // No significant changes, nothing to do
+        return;
+      }
+
+      const changes = [];
+      if (priceChanged) changes.push(`price: ${beforeData.price} → ${afterData.price}`);
+      if (intervalChanged) changes.push(`interval: ${beforeData.interval} → ${afterData.interval}`);
+      if (nameChanged) changes.push(`name: ${beforeData.name} → ${afterData.name}`);
+
+      console.log(`Tier ${event.params.tierId} changed: ${changes.join(", ")}`);
+
+      // Clear payment link if it exists
+      if (afterData.stripePaymentLink) {
+        await event.data.after.ref.update({
+          stripePaymentLink: null,
+          stripePaymentLinkClearedAt: admin.firestore.FieldValue.serverTimestamp(),
+          stripePaymentLinkClearedReason: `Tier details changed: ${changes.join(", ")}`,
+        });
+
+        console.log(`Cleared payment link for tier ${event.params.tierId}`);
+      }
+
+      // If the price changed and there's an existing Stripe Price, we should create a new one
+      // But we don't deactivate the old one as existing subscriptions may still use it
+      if (priceChanged && afterData.stripeProductId) {
+        try {
+          // Get the gym's Stripe account
+          const gymDoc = await db.collection("gyms").doc(event.params.gymId).get();
+          if (!gymDoc.exists) return;
+
+          const stripeAccountId = gymDoc.data().stripeAccountId;
+          if (!stripeAccountId) return;
+
+          // Create a new price for the updated amount
+          const newPrice = await stripeClient.prices.create(
+              {
+                product: afterData.stripeProductId,
+                unit_amount: Math.round(afterData.price * 100),
+                currency: "usd",
+                recurring: {
+                  interval: afterData.interval === "yearly" || afterData.interval === "year"
+                    ? "year"
+                    : afterData.interval === "weekly" || afterData.interval === "week"
+                      ? "week"
+                      : "month",
+                },
+              },
+              {stripeAccount: stripeAccountId},
+          );
+
+          // Update the tier with the new price ID
+          await event.data.after.ref.update({
+            stripePriceId: newPrice.id,
+            stripePriceUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          console.log(`Created new Stripe price ${newPrice.id} for tier ${event.params.tierId}`);
+        } catch (stripeErr) {
+          console.error("Failed to create new Stripe price:", stripeErr.message);
+          // Don't throw - the tier update should still succeed
+        }
+      }
+    },
+);

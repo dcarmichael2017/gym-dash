@@ -1,4 +1,5 @@
-import { doc, setDoc, addDoc, collection, updateDoc, getDocs, getDoc, query, where, limit, arrayUnion } from "firebase/firestore";
+import { doc, setDoc, addDoc, collection, updateDoc, getDocs, getDoc, query, where, limit, arrayUnion, orderBy } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../firebaseConfig";
 
 // --- GYM MANAGEMENT ---
@@ -187,7 +188,7 @@ export const getLegalSettings = async (gymId) => {
 export const getLegalHistory = async (gymId) => {
   try {
     const historyRef = collection(db, "gyms", gymId, "settings", "legal", "history");
-    const q = query(historyRef, orderBy("version", "desc")); 
+    const q = query(historyRef, orderBy("version", "desc"));
     const querySnapshot = await getDocs(q);
 
     const history = querySnapshot.docs.map(doc => ({
@@ -198,6 +199,26 @@ export const getLegalHistory = async (gymId) => {
     return { success: true, history };
   } catch (error) {
     console.error("Error fetching legal history:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// --- STRIPE BRANDING SYNC ---
+
+/**
+ * Sync gym branding colors to Stripe Connect account
+ * Updates the Stripe checkout/customer portal theme to match gym colors
+ * @param {string} gymId - Gym ID
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+export const syncGymBrandingToStripe = async (gymId) => {
+  try {
+    const functions = getFunctions();
+    const syncBranding = httpsCallable(functions, 'syncGymBrandingToStripe');
+    const result = await syncBranding({ gymId });
+    return result.data;
+  } catch (error) {
+    console.error("Error syncing branding to Stripe:", error);
     return { success: false, error: error.message };
   }
 };

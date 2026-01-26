@@ -1,5 +1,5 @@
 import React from 'react';
-import { CreditCard, Edit2, Users, Trash2, Coins, Clock, UserCheck, Hourglass, CalendarRange } from 'lucide-react';
+import { CreditCard, Edit2, Users, Trash2, Coins, Clock, UserCheck, Hourglass, CalendarRange, Link, AlertTriangle } from 'lucide-react';
 
 const RecurringPlansTab = ({ tiers, memberStats, onEdit, onViewMembers, onDelete, onAdd }) => {
 
@@ -47,6 +47,20 @@ const RecurringPlansTab = ({ tiers, memberStats, onEdit, onViewMembers, onDelete
               {tier.hasTrial && (
                 <div className="absolute top-4 right-4 bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded-full flex items-center uppercase tracking-wide">
                   <Clock className="h-3 w-3 mr-1" /> {tier.trialDays} Day Trial
+                </div>
+              )}
+
+              {/* Payment Link Status */}
+              {tier.stripeProductId && !tier.stripePaymentLink && (
+                <div className="mt-3 flex items-center text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded-md">
+                  <AlertTriangle className="h-3 w-3 mr-1.5" />
+                  Payment link needs regeneration
+                </div>
+              )}
+              {tier.stripePaymentLink && (
+                <div className="mt-3 flex items-center text-xs text-green-600 bg-green-50 px-2 py-1 rounded-md">
+                  <Link className="h-3 w-3 mr-1.5" />
+                  Payment link active
                 </div>
               )}
             </div>

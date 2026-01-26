@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Save, Upload, Check } from 'lucide-react';
-import { updateGymBranding } from '../../../../../shared/api/firestore';
+import { Save, Upload, Check, RefreshCw } from 'lucide-react';
+import { updateGymBranding, syncGymBrandingToStripe } from '../../../../../shared/api/firestore';
 import { uploadLogo } from '../../../../../shared/api/storage';
 
 const THEME_PRESETS = [
@@ -44,8 +44,17 @@ export const BrandingSettingsTab = ({ gymId, initialData, showMessage, theme }) 
     };
 
     const result = await updateGymBranding(gymId, payload);
-    if (result.success) showMessage('success', 'Branding updated! Refresh page to see changes.');
-    else showMessage('error', 'Failed to update branding.');
+    if (result.success) {
+      // Sync branding colors to Stripe checkout/portal
+      const stripeSync = await syncGymBrandingToStripe(gymId);
+      if (stripeSync.success) {
+        showMessage('success', 'Branding updated & synced to Stripe!');
+      } else {
+        showMessage('success', 'Branding updated! (Stripe sync pending - connect Stripe to theme checkout pages)');
+      }
+    } else {
+      showMessage('error', 'Failed to update branding.');
+    }
     setSaving(false);
   };
 

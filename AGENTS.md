@@ -2905,9 +2905,9 @@ const session = await stripe.checkout.sessions.create({
 
 ---
 
-#### Phase 10: UI Polish & Quality of Life
+#### Phase 10: UI Polish & Quality of Life (COMPLETE)
 
-**[ ] 10.1 Stripe Branding Sync (Gym-Themed Checkout)**
+**[x] 10.1 Stripe Branding Sync (Gym-Themed Checkout)**
 
 Stripe Connect accounts support custom branding that applies to Checkout pages and Customer Portal. When a gym updates their theme colors, we should sync these to their Stripe account.
 
@@ -2973,9 +2973,9 @@ stripe.accounts.update(accountId, {
 
 ---
 
-**[ ] 10.2 Auto-Clear Payment Links on Tier Changes**
+**[x] 10.2 Auto-Clear Payment Links on Tier Changes**
 
-When an admin generates a payment link for a membership tier and later changes the tier's price or details, the existing link becomes stale. We should automatically invalidate it.
+When an admin generates a payment link for a membership tier and later changes the tier's price or details, the existing link becomes stale. We now automatically invalidate it.
 
 **Implementation Plan:**
 
@@ -3034,6 +3034,25 @@ When an admin generates a payment link for a membership tier and later changes t
 4. **Files to Modify:**
    - `functions/index.js` - Add `onMembershipTierUpdated` trigger
    - `packages/web/src/screens/admin/MembershipsScreen/RecurringPlansTab.jsx` - Show cleared state
+
+**Implementation Notes (Completed):**
+
+1. **Phase 10.1 - Branding Sync:**
+   - Created `syncGymBrandingToStripe` Cloud Function in `functions/index.js`
+   - Uses Stripe Account API to update `settings.branding.primary_color` and `secondary_color`
+   - Also updates `business_profile.name` with gym name
+   - Added `syncGymBrandingToStripe` API function to `packages/shared/api/firestore/gym.js`
+   - Updated `BrandingSettingsTab.jsx` to call sync after theme save
+   - Shows success message indicating Stripe sync status
+
+2. **Phase 10.2 - Auto-Clear Payment Links:**
+   - Created `onMembershipTierUpdated` Firestore trigger in `functions/index.js`
+   - Monitors `gyms/{gymId}/membershipTiers/{tierId}` for changes
+   - Detects price, interval, or name changes
+   - Clears `stripePaymentLink` and creates new Stripe Price for price changes
+   - Updated `RecurringPlansTab.jsx` with visual indicators:
+     - Amber warning when payment link needs regeneration
+     - Green indicator when payment link is active
 
 ---
 
