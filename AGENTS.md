@@ -2872,6 +2872,138 @@ const session = await stripe.checkout.sessions.create({
 
 ---
 
+#### Phase 10: UI Polish & Quality of Life
+
+**[ ] 10.1 Stripe Branding Sync (Gym-Themed Checkout)**
+
+Stripe Connect accounts support custom branding that applies to Checkout pages and Customer Portal. When a gym updates their theme colors, we should sync these to their Stripe account.
+
+**Implementation Plan:**
+
+1. **Create `syncGymBrandingToStripe` Cloud Function:**
+   ```javascript
+   // Called when gym theme is updated
+   exports.syncGymBrandingToStripe = onCall(async (request) => {
+     const { gymId } = request.data;
+
+     // Get gym data
+     const gymDoc = await db.collection("gyms").doc(gymId).get();
+     const { stripeAccountId, theme, logoUrl, name } = gymDoc.data();
+
+     if (!stripeAccountId) return { success: false, error: "No Stripe account" };
+
+     // Update Stripe account branding
+     await stripeClient.accounts.update(stripeAccountId, {
+       settings: {
+         branding: {
+           primary_color: theme?.primaryColor || '#2563eb',
+           secondary_color: theme?.secondaryColor || '#4f46e5',
+           // logo and icon require file uploads to Stripe
+         }
+       },
+       business_profile: {
+         name: name
+       }
+     });
+
+     return { success: true };
+   });
+   ```
+
+2. **Trigger on Theme Update:**
+   - Option A: Add Firestore trigger `onDocumentUpdated("gyms/{gymId}")` that detects theme changes
+   - Option B: Call `syncGymBrandingToStripe` from the Settings screen after theme save
+
+3. **Logo Upload (Optional Enhancement):**
+   - Stripe requires logos to be uploaded via `stripe.files.create()`
+   - Would need to download gym's logo from Firebase Storage, upload to Stripe, then reference in branding
+   - Consider: Only sync colors initially, logo sync as future enhancement
+
+4. **Files to Modify:**
+   - `functions/index.js` - Add `syncGymBrandingToStripe` function
+   - `packages/web/src/screens/admin/settings/BrandingSettingsTab.jsx` - Call sync after save
+   - OR add Firestore trigger for automatic sync
+
+**Stripe Branding API Reference:**
+```javascript
+stripe.accounts.update(accountId, {
+  settings: {
+    branding: {
+      icon: 'file_xxx',           // Square icon (min 128x128px)
+      logo: 'file_xxx',           // Full logo
+      primary_color: '#2563eb',   // Hex color for buttons, links
+      secondary_color: '#4f46e5'  // Hex color for accents
+    }
+  }
+});
+```
+
+---
+
+**[ ] 10.2 Auto-Clear Payment Links on Tier Changes**
+
+When an admin generates a payment link for a membership tier and later changes the tier's price or details, the existing link becomes stale. We should automatically invalidate it.
+
+**Implementation Plan:**
+
+1. **Add Firestore Trigger for Tier Updates:**
+   ```javascript
+   exports.onMembershipTierUpdated = onDocumentUpdated(
+     "gyms/{gymId}/membershipTiers/{tierId}",
+     async (event) => {
+       const before = event.data.before.data();
+       const after = event.data.after.data();
+
+       // Check if price-affecting fields changed
+       const priceChanged = before.price !== after.price;
+       const intervalChanged = before.interval !== after.interval;
+       const nameChanged = before.name !== after.name;
+
+       if (priceChanged || intervalChanged || nameChanged) {
+         // Clear the payment link
+         if (after.stripePaymentLink) {
+           await event.data.after.ref.update({
+             stripePaymentLink: null,
+             stripePaymentLinkClearedAt: admin.firestore.FieldValue.serverTimestamp(),
+             stripePaymentLinkClearedReason: 'Tier details changed'
+           });
+
+           console.log(`Cleared payment link for tier ${event.params.tierId} due to changes`);
+         }
+
+         // Optionally: Deactivate the Stripe Price if it exists
+         // This prevents the old price from being used
+         if (priceChanged && before.stripePriceId) {
+           try {
+             await stripeClient.prices.update(
+               before.stripePriceId,
+               { active: false },
+               { stripeAccount: gymData.stripeAccountId }
+             );
+           } catch (e) {
+             console.warn("Could not deactivate old price:", e.message);
+           }
+         }
+       }
+     }
+   );
+   ```
+
+2. **UI Indication:**
+   - In `RecurringPlansTab.jsx`, show visual indicator when payment link is cleared
+   - Add tooltip: "Payment link was cleared because tier details changed. Generate a new one."
+
+3. **Fields to Track:**
+   - `stripePaymentLink` - The generated link (existing)
+   - `stripePaymentLinkClearedAt` - When it was auto-cleared
+   - `stripePaymentLinkClearedReason` - Why it was cleared
+
+4. **Files to Modify:**
+   - `functions/index.js` - Add `onMembershipTierUpdated` trigger
+   - `packages/web/src/screens/admin/MembershipsScreen/RecurringPlansTab.jsx` - Show cleared state
+
+---
+
 ### Environment Variables Setup
 
 **Create `.env.example`:**
