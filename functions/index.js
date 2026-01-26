@@ -1692,8 +1692,109 @@ async function handleInvoicePaid(db, event) {
   const invoice = event.data.object;
   console.log("Invoice paid:", invoice.id);
 
-  // Will be implemented in Phase 5
-  // Update membership currentPeriodEnd, log to history
+  // Skip invoices that aren't for subscriptions
+  if (!invoice.subscription) {
+    console.log("Invoice is not for a subscription, skipping.");
+    return;
+  }
+
+  // Get subscription metadata to find user/gym
+  const subscriptionId = invoice.subscription;
+  const metadata = invoice.subscription_details?.metadata || {};
+  const gymId = metadata.gymId;
+  const userId = metadata.userId;
+
+  if (!gymId || !userId) {
+    console.log("Missing gymId or userId in invoice metadata, skipping.");
+    return;
+  }
+
+  // Check for idempotency
+  const gymRef = db.collection("gyms").doc(gymId);
+  const eventRef = gymRef.collection("stripeEvents").doc(event.id);
+  const eventDoc = await eventRef.get();
+
+  if (eventDoc.exists && eventDoc.data().processed) {
+    console.log(`Event ${event.id} already processed, skipping.`);
+    return;
+  }
+
+  try {
+    // Get membership document
+    const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+    const membershipDoc = await membershipRef.get();
+
+    if (!membershipDoc.exists) {
+      console.log(`Membership not found for user ${userId} at gym ${gymId}`);
+      return;
+    }
+
+    const membershipData = membershipDoc.data();
+
+    // Only process if this matches our subscription
+    if (membershipData.stripeSubscriptionId !== subscriptionId) {
+      console.log("Invoice subscription doesn't match membership subscription, skipping.");
+      return;
+    }
+
+    // Calculate period dates from invoice
+    const periodStart = invoice.period_start ?
+        admin.firestore.Timestamp.fromMillis(invoice.period_start * 1000) : null;
+    const periodEnd = invoice.period_end ?
+        admin.firestore.Timestamp.fromMillis(invoice.period_end * 1000) : null;
+
+    // Update membership with new period dates
+    const updateData = {
+      lastPaymentAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (periodStart) updateData.currentPeriodStart = periodStart;
+    if (periodEnd) updateData.currentPeriodEnd = periodEnd;
+
+    // If member was in past_due or trialing, they're now active
+    if (membershipData.status === "past_due" || membershipData.status === "trialing") {
+      updateData.status = "active";
+    }
+
+    await membershipRef.update(updateData);
+
+    // Log to membership history
+    const historyRef = membershipRef.collection("history").doc();
+    const formattedDate = periodEnd ?
+        new Date(periodEnd.toMillis()).toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        }) : "N/A";
+
+    await historyRef.set({
+      action: "payment_succeeded",
+      description: `Payment successful - next billing: ${formattedDate}`,
+      amount: invoice.amount_paid / 100,
+      invoiceId: invoice.id,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Log event as processed
+    await eventRef.set({
+      eventType: "invoice.paid",
+      stripeEventId: event.id,
+      processed: true,
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+      data: {
+        invoiceId: invoice.id,
+        userId: userId,
+        amount: invoice.amount_paid,
+      },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    console.log(`Successfully processed invoice.paid for user ${userId} at gym ${gymId}`);
+  } catch (error) {
+    console.error("Error processing invoice.paid:", error);
+    throw error;
+  }
 }
 
 /**
@@ -1704,8 +1805,90 @@ async function handleInvoicePaymentFailed(db, event) {
   const invoice = event.data.object;
   console.log("Invoice payment failed:", invoice.id);
 
-  // Will be implemented in Phase 5
-  // Update membership status to 'past_due', start grace period
+  // Skip invoices that aren't for subscriptions
+  if (!invoice.subscription) {
+    console.log("Invoice is not for a subscription, skipping.");
+    return;
+  }
+
+  // Get subscription metadata to find user/gym
+  const subscriptionId = invoice.subscription;
+  const metadata = invoice.subscription_details?.metadata || {};
+  const gymId = metadata.gymId;
+  const userId = metadata.userId;
+
+  if (!gymId || !userId) {
+    console.log("Missing gymId or userId in invoice metadata, skipping.");
+    return;
+  }
+
+  // Check for idempotency
+  const gymRef = db.collection("gyms").doc(gymId);
+  const eventRef = gymRef.collection("stripeEvents").doc(event.id);
+  const eventDoc = await eventRef.get();
+
+  if (eventDoc.exists && eventDoc.data().processed) {
+    console.log(`Event ${event.id} already processed, skipping.`);
+    return;
+  }
+
+  try {
+    // Get membership document
+    const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+    const membershipDoc = await membershipRef.get();
+
+    if (!membershipDoc.exists) {
+      console.log(`Membership not found for user ${userId} at gym ${gymId}`);
+      return;
+    }
+
+    const membershipData = membershipDoc.data();
+
+    // Only process if this matches our subscription
+    if (membershipData.stripeSubscriptionId !== subscriptionId) {
+      console.log("Invoice subscription doesn't match membership subscription, skipping.");
+      return;
+    }
+
+    // Update membership to past_due status
+    await membershipRef.update({
+      status: "past_due",
+      lastPaymentFailedAt: admin.firestore.FieldValue.serverTimestamp(),
+      paymentFailureReason: invoice.last_finalization_error?.message || "Payment failed",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Log to membership history
+    const historyRef = membershipRef.collection("history").doc();
+    await historyRef.set({
+      action: "payment_failed",
+      description: "Payment failed - please update your payment method",
+      invoiceId: invoice.id,
+      failureReason: invoice.last_finalization_error?.message || "Payment failed",
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Log event as processed
+    await eventRef.set({
+      eventType: "invoice.payment_failed",
+      stripeEventId: event.id,
+      processed: true,
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+      data: {
+        invoiceId: invoice.id,
+        userId: userId,
+        failureReason: invoice.last_finalization_error?.message,
+      },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    console.log(`Successfully processed invoice.payment_failed for user ${userId} at gym ${gymId}`);
+
+    // TODO: Send notification to member (email/push) about failed payment
+  } catch (error) {
+    console.error("Error processing invoice.payment_failed:", error);
+    throw error;
+  }
 }
 
 /**
@@ -1716,8 +1899,139 @@ async function handleSubscriptionUpdated(db, event) {
   const subscription = event.data.object;
   console.log("Subscription updated:", subscription.id);
 
-  // Will be implemented in Phase 5
-  // Update membership document with new plan details, cancelAtPeriodEnd, etc.
+  // Get metadata to find user/gym
+  const metadata = subscription.metadata || {};
+  const gymId = metadata.gymId;
+  const userId = metadata.userId;
+
+  if (!gymId || !userId) {
+    console.log("Missing gymId or userId in subscription metadata, skipping.");
+    return;
+  }
+
+  // Check for idempotency
+  const gymRef = db.collection("gyms").doc(gymId);
+  const eventRef = gymRef.collection("stripeEvents").doc(event.id);
+  const eventDoc = await eventRef.get();
+
+  if (eventDoc.exists && eventDoc.data().processed) {
+    console.log(`Event ${event.id} already processed, skipping.`);
+    return;
+  }
+
+  try {
+    // Get membership document
+    const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+    const membershipDoc = await membershipRef.get();
+
+    if (!membershipDoc.exists) {
+      console.log(`Membership not found for user ${userId} at gym ${gymId}`);
+      return;
+    }
+
+    const membershipData = membershipDoc.data();
+
+    // Only process if this matches our subscription
+    if (membershipData.stripeSubscriptionId !== subscription.id) {
+      console.log("Subscription doesn't match membership subscription, skipping.");
+      return;
+    }
+
+    // Build update data
+    const updateData = {
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    // Map Stripe status to our status
+    const statusMap = {
+      active: "active",
+      past_due: "past_due",
+      unpaid: "past_due",
+      canceled: "cancelled",
+      incomplete: "pending",
+      incomplete_expired: "cancelled",
+      trialing: "trialing",
+      paused: "paused",
+    };
+
+    if (statusMap[subscription.status]) {
+      updateData.status = statusMap[subscription.status];
+    }
+
+    // Update cancel_at_period_end flag
+    updateData.cancelAtPeriodEnd = subscription.cancel_at_period_end || false;
+
+    // Update period dates
+    if (subscription.current_period_start) {
+      updateData.currentPeriodStart = admin.firestore.Timestamp.fromMillis(
+          subscription.current_period_start * 1000,
+      );
+    }
+    if (subscription.current_period_end) {
+      updateData.currentPeriodEnd = admin.firestore.Timestamp.fromMillis(
+          subscription.current_period_end * 1000,
+      );
+    }
+
+    // Update trial end if applicable
+    if (subscription.trial_end) {
+      updateData.trialEndDate = admin.firestore.Timestamp.fromMillis(subscription.trial_end * 1000);
+    }
+
+    // If subscription has cancel_at set, store when it will cancel
+    if (subscription.cancel_at) {
+      updateData.cancelAt = admin.firestore.Timestamp.fromMillis(subscription.cancel_at * 1000);
+    }
+
+    await membershipRef.update(updateData);
+
+    // Log to history if cancellation was scheduled
+    if (subscription.cancel_at_period_end && !membershipData.cancelAtPeriodEnd) {
+      const historyRef = membershipRef.collection("history").doc();
+      const cancelDate = subscription.current_period_end ?
+          new Date(subscription.current_period_end * 1000).toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+          }) : "end of period";
+
+      await historyRef.set({
+        action: "cancellation_scheduled",
+        description: `Subscription set to cancel on ${cancelDate}`,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    // Log to history if cancellation was reversed
+    if (!subscription.cancel_at_period_end && membershipData.cancelAtPeriodEnd) {
+      const historyRef = membershipRef.collection("history").doc();
+      await historyRef.set({
+        action: "cancellation_reversed",
+        description: "Subscription cancellation was reversed",
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    // Log event as processed
+    await eventRef.set({
+      eventType: "customer.subscription.updated",
+      stripeEventId: event.id,
+      processed: true,
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+      data: {
+        subscriptionId: subscription.id,
+        userId: userId,
+        status: subscription.status,
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    console.log(`Successfully processed subscription.updated for user ${userId} at gym ${gymId}`);
+  } catch (error) {
+    console.error("Error processing subscription.updated:", error);
+    throw error;
+  }
 }
 
 /**
@@ -1728,8 +2042,87 @@ async function handleSubscriptionDeleted(db, event) {
   const subscription = event.data.object;
   console.log("Subscription deleted:", subscription.id);
 
-  // Will be implemented in Phase 5
-  // Update membership status to 'cancelled'
+  // Get metadata to find user/gym
+  const metadata = subscription.metadata || {};
+  const gymId = metadata.gymId;
+  const userId = metadata.userId;
+
+  if (!gymId || !userId) {
+    console.log("Missing gymId or userId in subscription metadata, skipping.");
+    return;
+  }
+
+  // Check for idempotency
+  const gymRef = db.collection("gyms").doc(gymId);
+  const eventRef = gymRef.collection("stripeEvents").doc(event.id);
+  const eventDoc = await eventRef.get();
+
+  if (eventDoc.exists && eventDoc.data().processed) {
+    console.log(`Event ${event.id} already processed, skipping.`);
+    return;
+  }
+
+  try {
+    // Get membership document
+    const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+    const membershipDoc = await membershipRef.get();
+
+    if (!membershipDoc.exists) {
+      console.log(`Membership not found for user ${userId} at gym ${gymId}`);
+      return;
+    }
+
+    const membershipData = membershipDoc.data();
+
+    // Only process if this matches our subscription
+    if (membershipData.stripeSubscriptionId !== subscription.id) {
+      console.log("Subscription doesn't match membership subscription, skipping.");
+      return;
+    }
+
+    // Update membership to cancelled status
+    await membershipRef.update({
+      status: "inactive",
+      cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+      cancellationReason: subscription.cancellation_details?.reason || "Subscription ended",
+      stripeSubscriptionId: null, // Clear the subscription ID
+      cancelAtPeriodEnd: false,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Log to membership history
+    const historyRef = membershipRef.collection("history").doc();
+    await historyRef.set({
+      action: "subscription_ended",
+      description: "Subscription has ended",
+      reason: subscription.cancellation_details?.reason || "Period ended",
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Log event as processed
+    await eventRef.set({
+      eventType: "customer.subscription.deleted",
+      stripeEventId: event.id,
+      processed: true,
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+      data: {
+        subscriptionId: subscription.id,
+        userId: userId,
+        reason: subscription.cancellation_details?.reason,
+      },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Decrement gym member count
+    await gymRef.update({
+      memberCount: admin.firestore.FieldValue.increment(-1),
+    });
+
+    console.log(`Successfully processed subscription.deleted for user ${userId} at gym ${gymId}`);
+  } catch (error) {
+    console.error("Error processing subscription.deleted:", error);
+    throw error;
+  }
 }
 
 /**
@@ -2715,6 +3108,423 @@ exports.createClassPackCheckout = onCall(
         }
 
         throw new HttpsError("internal", "Failed to create checkout: " + error.message);
+      }
+    },
+);
+
+// ============================================================================
+// PHASE 5: SUBSCRIPTION LIFECYCLE MANAGEMENT
+// ============================================================================
+
+/**
+ * Cancel a member's subscription
+ * Can cancel immediately or at end of billing period
+ */
+exports.cancelMemberSubscription = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, cancelImmediately = false} = request.data;
+
+      if (!gymId) {
+        throw new HttpsError("invalid-argument", "gymId is required.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Get membership document
+        const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+        const membershipDoc = await membershipRef.get();
+
+        if (!membershipDoc.exists) {
+          throw new HttpsError("not-found", "Membership not found.");
+        }
+
+        const membershipData = membershipDoc.data();
+
+        if (!membershipData.stripeSubscriptionId) {
+          throw new HttpsError("failed-precondition", "No active subscription found.");
+        }
+
+        // Get gym data for Stripe account
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId) {
+          throw new HttpsError("failed-precondition", "Gym has no connected Stripe account.");
+        }
+
+        if (cancelImmediately) {
+          // Cancel immediately - subscription ends now
+          await stripeClient.subscriptions.cancel(
+              membershipData.stripeSubscriptionId,
+              {stripeAccount: stripeAccountId},
+          );
+
+          // Update membership in Firestore
+          await membershipRef.update({
+            status: "inactive",
+            cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+            cancellationReason: "Member cancelled",
+            stripeSubscriptionId: null,
+            cancelAtPeriodEnd: false,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          // Log to history
+          const historyRef = membershipRef.collection("history").doc();
+          await historyRef.set({
+            action: "subscription_cancelled",
+            description: "Subscription cancelled immediately by member",
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          console.log(`Member ${userId} cancelled subscription immediately at gym ${gymId}`);
+
+          return {success: true, cancelledImmediately: true};
+        } else {
+          // Cancel at end of period
+          await stripeClient.subscriptions.update(
+              membershipData.stripeSubscriptionId,
+              {cancel_at_period_end: true},
+              {stripeAccount: stripeAccountId},
+          );
+
+          // Get the updated subscription to know when it will end
+          const subscription = await stripeClient.subscriptions.retrieve(
+              membershipData.stripeSubscriptionId,
+              {stripeAccount: stripeAccountId},
+          );
+
+          const cancelAt = subscription.current_period_end ?
+              admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000) : null;
+
+          // Update membership in Firestore
+          await membershipRef.update({
+            cancelAtPeriodEnd: true,
+            cancelAt: cancelAt,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          // Log to history
+          const historyRef = membershipRef.collection("history").doc();
+          const cancelDate = cancelAt ?
+              new Date(cancelAt.toMillis()).toLocaleDateString("en-US", {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+              }) : "end of period";
+
+          await historyRef.set({
+            action: "cancellation_scheduled",
+            description: `Subscription set to cancel on ${cancelDate}`,
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          console.log(`Member ${userId} scheduled cancellation at gym ${gymId} for ${cancelDate}`);
+
+          return {
+            success: true,
+            cancelledImmediately: false,
+            cancelAt: cancelAt ? cancelAt.toDate().toISOString() : null,
+          };
+        }
+      } catch (error) {
+        console.error("Error cancelling subscription:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to cancel subscription: " + error.message);
+      }
+    },
+);
+
+/**
+ * Reactivate a subscription that was scheduled to cancel
+ * Reverses the cancel_at_period_end flag
+ */
+exports.reactivateSubscription = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId} = request.data;
+
+      if (!gymId) {
+        throw new HttpsError("invalid-argument", "gymId is required.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Get membership document
+        const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+        const membershipDoc = await membershipRef.get();
+
+        if (!membershipDoc.exists) {
+          throw new HttpsError("not-found", "Membership not found.");
+        }
+
+        const membershipData = membershipDoc.data();
+
+        if (!membershipData.stripeSubscriptionId) {
+          throw new HttpsError("failed-precondition", "No subscription found.");
+        }
+
+        if (!membershipData.cancelAtPeriodEnd) {
+          throw new HttpsError("failed-precondition", "Subscription is not scheduled for cancellation.");
+        }
+
+        // Get gym data for Stripe account
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId) {
+          throw new HttpsError("failed-precondition", "Gym has no connected Stripe account.");
+        }
+
+        // Reactivate in Stripe
+        await stripeClient.subscriptions.update(
+            membershipData.stripeSubscriptionId,
+            {cancel_at_period_end: false},
+            {stripeAccount: stripeAccountId},
+        );
+
+        // Update membership in Firestore
+        await membershipRef.update({
+          cancelAtPeriodEnd: false,
+          cancelAt: null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // Log to history
+        const historyRef = membershipRef.collection("history").doc();
+        await historyRef.set({
+          action: "cancellation_reversed",
+          description: "Subscription cancellation was reversed by member",
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        console.log(`Member ${userId} reactivated subscription at gym ${gymId}`);
+
+        return {success: true};
+      } catch (error) {
+        console.error("Error reactivating subscription:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to reactivate subscription: " + error.message);
+      }
+    },
+);
+
+/**
+ * Change subscription plan (upgrade/downgrade)
+ * Allows members to switch to a different membership tier
+ */
+exports.changeSubscriptionPlan = onCall(
+    {
+      region: "us-central1",
+      cors: ALLOWED_ORIGINS,
+    },
+    async (request) => {
+      const db = admin.firestore();
+      const stripeClient = stripe(stripeSecret.value());
+
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "You must be logged in.");
+      }
+
+      const {gymId, newTierId, previewOnly = false} = request.data;
+
+      if (!gymId || !newTierId) {
+        throw new HttpsError("invalid-argument", "gymId and newTierId are required.");
+      }
+
+      try {
+        const userId = request.auth.uid;
+
+        // Get current membership
+        const membershipRef = db.collection("users").doc(userId).collection("memberships").doc(gymId);
+        const membershipDoc = await membershipRef.get();
+
+        if (!membershipDoc.exists) {
+          throw new HttpsError("not-found", "Membership not found.");
+        }
+
+        const membershipData = membershipDoc.data();
+
+        if (!membershipData.stripeSubscriptionId) {
+          throw new HttpsError("failed-precondition", "No active subscription found.");
+        }
+
+        if (membershipData.status !== "active" && membershipData.status !== "trialing") {
+          throw new HttpsError("failed-precondition", "Subscription must be active to change plans.");
+        }
+
+        // Get gym data
+        const gymRef = db.collection("gyms").doc(gymId);
+        const gymDoc = await gymRef.get();
+
+        if (!gymDoc.exists) {
+          throw new HttpsError("not-found", "Gym not found.");
+        }
+
+        const gymData = gymDoc.data();
+        const stripeAccountId = gymData.stripeAccountId;
+
+        if (!stripeAccountId) {
+          throw new HttpsError("failed-precondition", "Gym has no connected Stripe account.");
+        }
+
+        // Get new tier
+        const newTierRef = db.collection("gyms").doc(gymId).collection("membershipTiers").doc(newTierId);
+        const newTierDoc = await newTierRef.get();
+
+        if (!newTierDoc.exists) {
+          throw new HttpsError("not-found", "Membership tier not found.");
+        }
+
+        const newTierData = newTierDoc.data();
+
+        if (!newTierData.stripePriceId) {
+          throw new HttpsError("failed-precondition", "This plan is not available for online subscription.");
+        }
+
+        // Check if changing to the same plan
+        if (membershipData.membershipId === newTierId) {
+          throw new HttpsError("invalid-argument", "You are already subscribed to this plan.");
+        }
+
+        // Get current subscription from Stripe
+        const subscription = await stripeClient.subscriptions.retrieve(
+            membershipData.stripeSubscriptionId,
+            {stripeAccount: stripeAccountId},
+        );
+
+        const currentItemId = subscription.items.data[0].id;
+
+        // Preview the proration
+        if (previewOnly) {
+          const prorationDate = Math.floor(Date.now() / 1000);
+
+          const invoice = await stripeClient.invoices.retrieveUpcoming({
+            customer: membershipData.stripeCustomerId,
+            subscription: membershipData.stripeSubscriptionId,
+            subscription_items: [{
+              id: currentItemId,
+              price: newTierData.stripePriceId,
+            }],
+            subscription_proration_date: prorationDate,
+          }, {stripeAccount: stripeAccountId});
+
+          // Calculate the proration amount
+          const prorationAmount = invoice.lines.data
+              .filter((line) => line.proration)
+              .reduce((sum, line) => sum + line.amount, 0);
+
+          return {
+            success: true,
+            preview: {
+              newPlanName: newTierData.name,
+              newPlanPrice: newTierData.price,
+              newPlanInterval: newTierData.interval || "month",
+              proratedAmount: prorationAmount / 100, // Convert from cents
+              immediateCharge: prorationAmount > 0 ? prorationAmount / 100 : 0,
+              credit: prorationAmount < 0 ? Math.abs(prorationAmount / 100) : 0,
+              nextBillingDate: new Date(subscription.current_period_end * 1000).toISOString(),
+            },
+          };
+        }
+
+        // Perform the actual plan change
+        await stripeClient.subscriptions.update(
+            membershipData.stripeSubscriptionId,
+            {
+              items: [{
+                id: currentItemId,
+                price: newTierData.stripePriceId,
+              }],
+              proration_behavior: "create_prorations",
+            },
+            {stripeAccount: stripeAccountId},
+        );
+
+        // Update membership in Firestore
+        const oldPlanName = membershipData.planName;
+        await membershipRef.update({
+          membershipId: newTierId,
+          planName: newTierData.name,
+          price: newTierData.price,
+          interval: newTierData.interval || "month",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // Log to history
+        const historyRef = membershipRef.collection("history").doc();
+        await historyRef.set({
+          action: "plan_changed",
+          description: `Changed from ${oldPlanName || "previous plan"} to ${newTierData.name}`,
+          oldPlan: oldPlanName,
+          newPlan: newTierData.name,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        console.log(`Member ${userId} changed plan from ${oldPlanName} to ${newTierData.name} at gym ${gymId}`);
+
+        return {
+          success: true,
+          newPlan: {
+            id: newTierId,
+            name: newTierData.name,
+            price: newTierData.price,
+            interval: newTierData.interval || "month",
+          },
+        };
+      } catch (error) {
+        console.error("Error changing subscription plan:", error);
+
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+
+        throw new HttpsError("internal", "Failed to change plan: " + error.message);
       }
     },
 );

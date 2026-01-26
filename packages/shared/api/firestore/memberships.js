@@ -339,3 +339,70 @@ export const createClassPackCheckout = async (gymId, packId) => {
     return { success: false, error: errorMessage };
   }
 };
+
+/**
+ * Cancel a member's subscription
+ * @param {string} gymId - Gym ID
+ * @param {boolean} cancelImmediately - If true, cancel now; if false, cancel at end of period
+ * @returns {Promise<{success: boolean, cancelledImmediately?: boolean, cancelAt?: string, error?: string}>}
+ */
+export const cancelMemberSubscription = async (gymId, cancelImmediately = false) => {
+  try {
+    const functions = getFunctions();
+    const cancelSub = httpsCallable(functions, 'cancelMemberSubscription');
+
+    const result = await cancelSub({ gymId, cancelImmediately });
+
+    return {
+      success: true,
+      cancelledImmediately: result.data.cancelledImmediately,
+      cancelAt: result.data.cancelAt
+    };
+  } catch (error) {
+    const errorMessage = error.message || "Failed to cancel subscription";
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Reactivate a subscription that was scheduled to cancel
+ * @param {string} gymId - Gym ID
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+export const reactivateSubscription = async (gymId) => {
+  try {
+    const functions = getFunctions();
+    const reactivate = httpsCallable(functions, 'reactivateSubscription');
+
+    await reactivate({ gymId });
+
+    return { success: true };
+  } catch (error) {
+    const errorMessage = error.message || "Failed to reactivate subscription";
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Preview or execute a subscription plan change
+ * @param {string} gymId - Gym ID
+ * @param {string} newTierId - New tier ID to switch to
+ * @param {boolean} previewOnly - If true, only preview the change without executing
+ * @returns {Promise<{success: boolean, preview?: object, newPlan?: object, error?: string}>}
+ */
+export const changeSubscriptionPlan = async (gymId, newTierId, previewOnly = false) => {
+  try {
+    const functions = getFunctions();
+    const changePlan = httpsCallable(functions, 'changeSubscriptionPlan');
+
+    const result = await changePlan({ gymId, newTierId, previewOnly });
+
+    return {
+      success: true,
+      ...(previewOnly ? { preview: result.data.preview } : { newPlan: result.data.newPlan })
+    };
+  } catch (error) {
+    const errorMessage = error.message || "Failed to change subscription plan";
+    return { success: false, error: errorMessage };
+  }
+};

@@ -106,7 +106,7 @@ export const StoreScreen = () => {
     const renderContent = () => {
         if (activeCategory === 'memberships') {
             if (loadingTiers) return <Loader2 className="animate-spin mx-auto text-gray-400 mt-10" />;
-            return <MembershipListTab tiers={recurringPlans} theme={theme} />;
+            return <MembershipListTab tiers={recurringPlans} theme={theme} currentMembership={currentMembership} />;
         }
 
         if (activeCategory === 'packs') {

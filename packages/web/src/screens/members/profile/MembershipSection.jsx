@@ -2,15 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { CreditCard, ChevronRight, Calendar, DollarSign, RefreshCw, Clock, XCircle, Bug, AlertCircle, Loader2, ExternalLink } from 'lucide-react';
 import { useConfirm } from '../../../context/ConfirmationContext';
 import { doc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
-import { getMembershipTiers, cancelUserMembership, logMembershipHistory, runPermissionDiagnostics, createCustomerPortalSession } from '../../../../../shared/api/firestore';
+import { getMembershipTiers, cancelUserMembership, logMembershipHistory, runPermissionDiagnostics, createCustomerPortalSession, cancelMemberSubscription, reactivateSubscription } from '../../../../../shared/api/firestore';
 import { auth, db } from '../../../../../shared/api/firebaseConfig';
 import { useGym } from '../../../context/GymContext';
 
 export const MembershipSection = ({ membership, onManageBilling }) => {
   const { confirm } = useConfirm();
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isReactivating, setIsReactivating] = useState(false);
   const [isOpeningPortal, setIsOpeningPortal] = useState(false);
   const [portalError, setPortalError] = useState(null);
+  const [actionError, setActionError] = useState(null);
   const [liveMembership, setLiveMembership] = useState(membership);
   const [tiers, setTiers] = useState([]);
   const { currentGym } = useGym();
@@ -137,6 +139,7 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
   const displayPrice = assignedPrice ?? price;
   const isTrialing = status?.toLowerCase() === 'trialing';
   const isActive = status?.toLowerCase() === 'active';
+  const isPastDue = status?.toLowerCase() === 'past_due';
 
   const getStatusDisplay = (status) => {
     switch (status?.toLowerCase()) {
@@ -177,20 +180,59 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
 
     if (isConfirmed) {
       setIsCancelling(true);
+      setActionError(null);
       try {
         const user = auth.currentUser;
         if (!user || !currentGym?.id) throw new Error("User or gym not found.");
 
-        const result = await cancelUserMembership(user.uid, currentGym.id);
-        if (result.success) {
-          await logMembershipHistory(user.uid, currentGym.id, 'Member scheduled cancellation.', user.uid);
+        // Use Stripe-based cancellation if there's a subscription
+        if (liveMembership?.stripeSubscriptionId) {
+          const result = await cancelMemberSubscription(currentGym.id, false); // false = cancel at period end
+          if (!result.success) {
+            throw new Error(result.error || "Failed to schedule cancellation.");
+          }
         } else {
-          throw new Error(result.error || "Failed to schedule cancellation.");
+          // Fallback to local cancellation for non-Stripe memberships
+          const result = await cancelUserMembership(user.uid, currentGym.id);
+          if (result.success) {
+            await logMembershipHistory(user.uid, currentGym.id, 'Member scheduled cancellation.', user.uid);
+          } else {
+            throw new Error(result.error || "Failed to schedule cancellation.");
+          }
         }
       } catch (error) {
         console.error("Failed to cancel membership:", error);
+        setActionError(error.message || "Failed to cancel membership.");
       } finally {
         setIsCancelling(false);
+      }
+    }
+  };
+
+  const handleReactivate = async () => {
+    const isConfirmed = await confirm({
+      title: 'Reactivate Membership?',
+      message: 'This will restore your membership and it will continue to renew automatically. Would you like to reactivate?',
+      confirmText: "Yes, Reactivate",
+      cancelText: "Keep Cancelled",
+      type: 'info'
+    });
+
+    if (isConfirmed) {
+      setIsReactivating(true);
+      setActionError(null);
+      try {
+        if (!currentGym?.id) throw new Error("Gym not found.");
+
+        const result = await reactivateSubscription(currentGym.id);
+        if (!result.success) {
+          throw new Error(result.error || "Failed to reactivate subscription.");
+        }
+      } catch (error) {
+        console.error("Failed to reactivate membership:", error);
+        setActionError(error.message || "Failed to reactivate membership.");
+      } finally {
+        setIsReactivating(false);
       }
     }
   };
@@ -267,6 +309,42 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
           </div>
         )}
 
+        {/* Past Due Payment Warning */}
+        {isPastDue && (
+          <div className="p-4 bg-red-50 border-b border-red-100">
+            <div className="flex items-start gap-2">
+              <AlertCircle size={16} className="text-red-500 mt-0.5 shrink-0" />
+              <div className="flex-1">
+                <p className="text-xs text-red-900 font-bold mb-1">Payment Failed</p>
+                <p className="text-xs text-red-700 mb-2">
+                  Your last payment didn't go through. Please update your payment method to keep your membership active.
+                </p>
+                <button
+                  onClick={handleManageBilling}
+                  disabled={isOpeningPortal}
+                  className="text-xs font-bold text-red-700 hover:text-red-900 underline flex items-center gap-1"
+                >
+                  {isOpeningPortal ? (
+                    <>
+                      <Loader2 size={12} className="animate-spin" />
+                      Opening...
+                    </>
+                  ) : (
+                    'Update Payment Method →'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Action Error Message */}
+        {actionError && (
+          <div className="p-3 bg-red-50 border-b border-red-100">
+            <p className="text-xs text-red-600">{actionError}</p>
+          </div>
+        )}
+
         {/* Dates Grid */}
         {liveMembership && (
           <div className="grid grid-cols-2 divide-x divide-gray-50 bg-gray-50/50">
@@ -340,10 +418,29 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
 
         {/* Cancellation Section */}
         {cancelAtPeriodEnd ? (
-          <div className="p-4 bg-yellow-50 border-t border-yellow-100 text-center">
-            <p className="text-xs text-yellow-800 font-semibold">
+          <div className="p-4 bg-yellow-50 border-t border-yellow-100">
+            <p className="text-xs text-yellow-800 font-semibold text-center mb-3">
               Your membership is set to cancel and will not renew. Access ends after {nextBillingDate?.toLocaleDateString('en-US', dateOpts) || 'your billing cycle end date'}.
             </p>
+            {liveMembership?.stripeSubscriptionId && (
+              <button
+                onClick={handleReactivate}
+                disabled={isReactivating}
+                className="w-full py-2.5 bg-yellow-600 text-white text-xs font-bold rounded-lg hover:bg-yellow-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isReactivating ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Reactivating...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={14} />
+                    Reactivate Membership
+                  </>
+                )}
+              </button>
+            )}
           </div>
         ) : (isActive || isTrialing) && (
           <div className="p-3 bg-gray-50/50 border-t border-gray-100 text-center">
@@ -352,8 +449,17 @@ export const MembershipSection = ({ membership, onManageBilling }) => {
               disabled={isCancelling}
               className="text-xs font-semibold text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 mx-auto"
             >
-              <XCircle size={14} />
-              {isCancelling ? 'Cancelling...' : 'Cancel Membership'}
+              {isCancelling ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  Cancelling...
+                </>
+              ) : (
+                <>
+                  <XCircle size={14} />
+                  Cancel Membership
+                </>
+              )}
             </button>
           </div>
         )}

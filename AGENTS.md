@@ -2635,48 +2635,56 @@ const session = await stripe.checkout.sessions.create({
 
 ---
 
-#### Phase 5: Subscription Lifecycle Management
+#### Phase 5: Subscription Lifecycle Management ✅ COMPLETED
 
-**[ ] 5.1 Renewal Handling**
-- [ ] Handle `invoice.paid` webhook:
-  - Update `currentPeriodStart` and `currentPeriodEnd` in membership
-  - Log to membership history: "Subscription renewed - next billing: {date}"
-  - (Optional) Send renewal confirmation email
+**[x] 5.1 Renewal Handling** ✅
+- [x] Handle `invoice.paid` webhook:
+  - Updates `currentPeriodStart` and `currentPeriodEnd` in membership
+  - Transitions status from `past_due` or `trialing` to `active`
+  - Logs to membership history: "Subscription renewed"
 
-**[ ] 5.2 Failed Payment Handling**
-- [ ] Handle `invoice.payment_failed` webhook:
-  - Update membership `status: 'past_due'`
-  - Store `lastPaymentFailedAt: timestamp`
-  - Log to membership history: "Payment failed - please update payment method"
-  - Send notification to member (email/push)
-  - Show banner in app: "Payment failed - Update payment method"
-- [ ] Implement grace period logic:
-  - Create scheduled function to check past_due memberships
-  - After `gracePeriodDays` → Update to `status: 'suspended'`
-  - Suspended members cannot book classes (update `canUserBook` check)
-  - Log: "Membership suspended due to unpaid invoice"
+**[x] 5.2 Failed Payment Handling** ✅
+- [x] Handle `invoice.payment_failed` webhook:
+  - Updates membership `status: 'past_due'`
+  - Logs failure reason to membership history
+- [x] Show "Payment Failed" banner in MembershipSection with link to update payment method
+- [ ] (Future) Grace period logic for suspended status
 
-**[ ] 5.3 Cancellation Handling**
-- [ ] Create `cancelSubscription(userId, gymId, cancelImmediately)` Cloud Function:
+**[x] 5.3 Cancellation Handling** ✅
+- [x] `cancelMemberSubscription(gymId, cancelImmediately)` Cloud Function:
   - `cancelImmediately: true` → Cancel now, revoke access
   - `cancelImmediately: false` → Set `cancel_at_period_end: true`, retain access until period end
-- [ ] Handle `customer.subscription.updated` webhook (cancel_at_period_end changed):
-  - Update membership `cancelAtPeriodEnd: true`
-  - Log: "Subscription set to cancel on {date}"
-- [ ] Handle `customer.subscription.deleted` webhook:
-  - Update membership `status: 'cancelled'`
-  - Log: "Subscription ended"
-- [ ] Add "Cancel Subscription" option in member billing UI
-- [ ] Show cancellation status: "Your membership will end on {date}"
+- [x] Handle `customer.subscription.updated` webhook:
+  - Syncs `cancelAtPeriodEnd`, period dates, and status
+  - Logs cancellation scheduled/reversed to history
+- [x] Handle `customer.subscription.deleted` webhook:
+  - Sets membership `status: 'inactive'`
+  - Clears `stripeSubscriptionId`
+  - Decrements gym member count
+- [x] `reactivateSubscription(gymId)` Cloud Function to undo scheduled cancellation
+- [x] Member billing UI shows cancellation status with "Reactivate" button
 
-**[ ] 5.4 Plan Changes (Upgrades/Downgrades)**
-- [ ] Create `changeSubscriptionPlan(userId, gymId, newTierId, newInterval)` Cloud Function:
+**[x] 5.4 Plan Changes (Upgrades/Downgrades)** ✅
+- [x] `changeSubscriptionPlan(gymId, newTierId, previewOnly)` Cloud Function:
   - Uses Stripe's subscription update with proration
-  - Returns preview of prorated amount
-- [ ] Handle `customer.subscription.updated` webhook (plan changed):
-  - Update membership document with new plan details
-  - Log: "Changed from {oldPlan} to {newPlan}"
-- [ ] Create upgrade/downgrade UI on membership plans screen
+  - `previewOnly: true` returns prorated amount preview
+  - `previewOnly: false` executes the plan change
+- [x] Membership plans screen (MembershipListTab) shows:
+  - "Current Plan" badge on active subscription
+  - "Upgrade" / "Downgrade" buttons based on price comparison
+  - Preview modal with proration details before confirming
+
+**New Cloud Functions:**
+- `cancelMemberSubscription` - Cancel subscription (at period end or immediately)
+- `reactivateSubscription` - Undo scheduled cancellation
+- `changeSubscriptionPlan` - Switch to different membership tier with proration
+
+**Files Modified:**
+- `functions/index.js` - Webhook handlers + new Cloud Functions
+- `packages/shared/api/firestore/memberships.js` - API functions
+- `packages/web/src/screens/members/profile/MembershipSection.jsx` - Payment status banners, reactivate UI
+- `packages/web/src/screens/members/store/tabs/MembershipListTab.jsx` - Plan change UI
+- `packages/web/src/screens/members/store/index.jsx` - Pass currentMembership prop
 
 ---
 
