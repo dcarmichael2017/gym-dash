@@ -3056,241 +3056,70 @@ When an admin generates a payment link for a membership tier and later changes t
 
 ---
 
-PHASE 11
+PHASE 11: Bug Fixes & Webhook Improvements ✅ COMPLETED
 
-When user completes membership purchase via store, it opens the payment link, the user inputs card, stripe completes the purchase, redirects user back to the store, and shows the payment success page. All is good till here. If the user goes to their profile, they see the payment method on file (assuming stripe saved it to their profile, which it should have) then this is good.
+### Issues Addressed
 
-However, the user's plan is NOT updated, it still shows as no plan. This is the current state of the user's membership on both the admin and member side of things. When checking the admin's stripe dashboard, I can see the membership purchased twice (I tried twice so it makes sense)
+**11.1 Membership Not Syncing After Stripe Checkout** ✅
+- **Problem**: When users completed membership purchase via store payment link, the membership status wasn't updating in Firestore despite Stripe showing successful payments
+- **Root Cause**: Stripe Connect webhooks include connected account events with `event.account` property, but the webhook handler wasn't using this to look up the gym when `gymId` was missing from metadata
+- **Fix** (`functions/index.js`):
+  - Extract `connectedAccountId` from `event.account` in webhook handler
+  - Pass `connectedAccountId` to `handleCheckoutSessionCompleted()`
+  - If `gymId` is not in session metadata, look it up from Firestore using `stripeAccountId` field
+  - Added detailed logging for debugging webhook events
 
-It did not sync either of those times. Also, as a note, on the second purchase attempt it added /shows the same card twice on payment methoids for the user now. as I had to input the same card even though it should have been saved, and then it shows it twice on their payment methods under profile.
+**11.2 Duplicate Payment Methods Showing** ✅
+- **Problem**: Users saw the same card displayed multiple times in their payment methods
+- **Root Cause**: No deduplication when listing payment methods from Stripe
+- **Fix** (`functions/index.js` in `getPaymentMethods`):
+  - Added deduplication logic using card "fingerprint" (brand + last4 + exp_month + exp_year)
+  - Uses a Set to track seen cards and skip duplicates
+  - Logs when duplicate cards are filtered out
 
-When the user attempts to checkout with a product from the store, like a Gi, it gives this error due to image: POST https://firestore.googleapis.com/google.firestore.v1.Firestore/Write/channel?VER=8&database=projects%2Fgymdash-4e911%2Fdatabases%2F(default)&gsessionid=lYlMnEqfAvvUSvYW4XIY2p2mxJ8wviqkGmrwdQkdfKs&SID=VFynRqxOi_5Nn_-s3aOfPw&RID=19676&TYPE=terminate&zx=p3fz6vc9v1vg net::ERR_BLOCKED_BY_CLIENT
-cc @ firebase_firestore.js?v=9b8480a6:2073
-Y2.close @ firebase_firestore.js?v=9b8480a6:2428
-Zo @ firebase_firestore.js?v=9b8480a6:12584
-close @ firebase_firestore.js?v=9b8480a6:12470
-close @ firebase_firestore.js?v=9b8480a6:12836
-k_ @ firebase_firestore.js?v=9b8480a6:12794
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12785
-(anonymous) @ firebase_firestore.js?v=9b8480a6:13487
-(anonymous) @ firebase_firestore.js?v=9b8480a6:15977
-(anonymous) @ firebase_firestore.js?v=9b8480a6:16008
-Promise.then
-cc @ firebase_firestore.js?v=9b8480a6:16008
-enqueue @ firebase_firestore.js?v=9b8480a6:15977
-enqueueAndForget @ firebase_firestore.js?v=9b8480a6:15959
-handleDelayElapsed @ firebase_firestore.js?v=9b8480a6:13487
-(anonymous) @ firebase_firestore.js?v=9b8480a6:13467
-setTimeout
-start @ firebase_firestore.js?v=9b8480a6:13467
-createAndSchedule @ firebase_firestore.js?v=9b8480a6:13460
-enqueueAfterDelay @ firebase_firestore.js?v=9b8480a6:16017
-L_ @ firebase_firestore.js?v=9b8480a6:12785
-__PRIVATE_fillWritePipeline @ firebase_firestore.js?v=9b8480a6:13320
-await in __PRIVATE_fillWritePipeline
-__PRIVATE_onMutationResult @ firebase_firestore.js?v=9b8480a6:13354
-await in __PRIVATE_onMutationResult
-onNext @ firebase_firestore.js?v=9b8480a6:12983
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12871
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12891
-(anonymous) @ firebase_firestore.js?v=9b8480a6:15977
-(anonymous) @ firebase_firestore.js?v=9b8480a6:16008
-Promise.then
-cc @ firebase_firestore.js?v=9b8480a6:16008
-enqueue @ firebase_firestore.js?v=9b8480a6:15977
-enqueueAndForget @ firebase_firestore.js?v=9b8480a6:15959
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12891
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12871
-u_ @ firebase_firestore.js?v=9b8480a6:12485
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12624
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12588
-Va @ firebase_firestore.js?v=9b8480a6:920
-D @ firebase_firestore.js?v=9b8480a6:888
-Z2.qa @ firebase_firestore.js?v=9b8480a6:2477
-Lb @ firebase_firestore.js?v=9b8480a6:1387
-N2.Y @ firebase_firestore.js?v=9b8480a6:1238
-N2.ba @ firebase_firestore.js?v=9b8480a6:1189
-Va @ firebase_firestore.js?v=9b8480a6:920
-D @ firebase_firestore.js?v=9b8480a6:888
-Qc @ firebase_firestore.js?v=9b8480a6:1885
-h.Xa @ firebase_firestore.js?v=9b8480a6:1880
-h.Ca @ firebase_firestore.js?v=9b8480a6:1877
-Gc @ firebase_firestore.js?v=9b8480a6:1778
-h.Ma @ firebase_firestore.js?v=9b8480a6:1745
-Promise.then
-Ic @ firebase_firestore.js?v=9b8480a6:1736
-h.Ma @ firebase_firestore.js?v=9b8480a6:1746
-Promise.then
-Ic @ firebase_firestore.js?v=9b8480a6:1736
-h.Pa @ firebase_firestore.js?v=9b8480a6:1732
-Promise.then
-h.send @ firebase_firestore.js?v=9b8480a6:1712
-h.ea @ firebase_firestore.js?v=9b8480a6:1853
-Eb @ firebase_firestore.js?v=9b8480a6:1182
-$c @ firebase_firestore.js?v=9b8480a6:2278
-h.Da @ firebase_firestore.js?v=9b8480a6:2245
-sa @ firebase_firestore.js?v=9b8480a6:624
-Promise.then
-u @ firebase_firestore.js?v=9b8480a6:618
-ac @ firebase_firestore.js?v=9b8480a6:2231
-Lb @ firebase_firestore.js?v=9b8480a6:1384
-N2.Y @ firebase_firestore.js?v=9b8480a6:1238
-N2.ba @ firebase_firestore.js?v=9b8480a6:1189
-Va @ firebase_firestore.js?v=9b8480a6:920
-D @ firebase_firestore.js?v=9b8480a6:888
-Qc @ firebase_firestore.js?v=9b8480a6:1885
-h.Xa @ firebase_firestore.js?v=9b8480a6:1880
-h.Ca @ firebase_firestore.js?v=9b8480a6:1877
-Gc @ firebase_firestore.js?v=9b8480a6:1778
-h.Ma @ firebase_firestore.js?v=9b8480a6:1745
-Promise.then
-Ic @ firebase_firestore.js?v=9b8480a6:1736
-h.Pa @ firebase_firestore.js?v=9b8480a6:1732
-Promise.then
-h.send @ firebase_firestore.js?v=9b8480a6:1712
-h.ea @ firebase_firestore.js?v=9b8480a6:1853
-Eb @ firebase_firestore.js?v=9b8480a6:1177
-Cb @ firebase_firestore.js?v=9b8480a6:1152
-h.Ea @ firebase_firestore.js?v=9b8480a6:2154
-sa @ firebase_firestore.js?v=9b8480a6:624
-Promise.then
-u @ firebase_firestore.js?v=9b8480a6:618
-bc @ firebase_firestore.js?v=9b8480a6:2098
-h.connect @ firebase_firestore.js?v=9b8480a6:2058
-Y2.m @ firebase_firestore.js?v=9b8480a6:2425
-Yo @ firebase_firestore.js?v=9b8480a6:12582
-send @ firebase_firestore.js?v=9b8480a6:12473
-q_ @ firebase_firestore.js?v=9b8480a6:12789
-ra @ firebase_firestore.js?v=9b8480a6:12992
-__PRIVATE_onWriteStreamOpen @ firebase_firestore.js?v=9b8480a6:13344
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12867
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12891
-(anonymous) @ firebase_firestore.js?v=9b8480a6:15977
-(anonymous) @ firebase_firestore.js?v=9b8480a6:16008
-Promise.then
-cc @ firebase_firestore.js?v=9b8480a6:16008
-enqueue @ firebase_firestore.js?v=9b8480a6:15977
-enqueueAndForget @ firebase_firestore.js?v=9b8480a6:15959
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12891
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12867
-__ @ firebase_firestore.js?v=9b8480a6:12479
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12629
-setTimeout
-T_ @ firebase_firestore.js?v=9b8480a6:12628
-j_ @ firebase_firestore.js?v=9b8480a6:12971
-G_ @ firebase_firestore.js?v=9b8480a6:12864
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12854
-Promise.then
-auth @ firebase_firestore.js?v=9b8480a6:12850
-start @ firebase_firestore.js?v=9b8480a6:12749
-start @ firebase_firestore.js?v=9b8480a6:12965
-__PRIVATE_startWriteStream @ firebase_firestore.js?v=9b8480a6:13341
-__PRIVATE_fillWritePipeline @ firebase_firestore.js?v=9b8480a6:13327
-await in __PRIVATE_fillWritePipeline
-__PRIVATE_syncEngineWrite @ firebase_firestore.js?v=9b8480a6:14345
-await in __PRIVATE_syncEngineWrite
-(anonymous) @ firebase_firestore.js?v=9b8480a6:17988
-await in (anonymous)
-(anonymous) @ firebase_firestore.js?v=9b8480a6:15977
-(anonymous) @ firebase_firestore.js?v=9b8480a6:16008
-Promise.then
-cc @ firebase_firestore.js?v=9b8480a6:16008
-enqueue @ firebase_firestore.js?v=9b8480a6:15977
-enqueueAndForget @ firebase_firestore.js?v=9b8480a6:15959
-__PRIVATE_firestoreClientWrite @ firebase_firestore.js?v=9b8480a6:17988
-executeWrite @ firebase_firestore.js?v=9b8480a6:17989
-updateDoc @ firebase_firestore.js?v=9b8480a6:17831
-switchGym @ GymContext.jsx:65
-await in switchGym
-(anonymous) @ GymContext.jsx:160
-next @ firebase_firestore.js?v=9b8480a6:17869
-(anonymous) @ firebase_firestore.js?v=9b8480a6:14982
-setTimeout
-Ou @ firebase_firestore.js?v=9b8480a6:14981
-next @ firebase_firestore.js?v=9b8480a6:14972
-ka @ firebase_firestore.js?v=9b8480a6:13821
-Fa @ firebase_firestore.js?v=9b8480a6:13798
-__PRIVATE_eventManagerOnWatchChange @ firebase_firestore.js?v=9b8480a6:13746
-__PRIVATE_syncEngineEmitNewSnapsAndNotifyLocalStore @ firebase_firestore.js?v=9b8480a6:14522
-await in __PRIVATE_syncEngineEmitNewSnapsAndNotifyLocalStore
-__PRIVATE_syncEngineApplyRemoteEvent @ firebase_firestore.js?v=9b8480a6:14360
-await in __PRIVATE_syncEngineApplyRemoteEvent
-__PRIVATE_raiseWatchSnapshot @ firebase_firestore.js?v=9b8480a6:13285
-__PRIVATE_onWatchStreamChange @ firebase_firestore.js?v=9b8480a6:13286
-await in __PRIVATE_onWatchStreamChange
-onNext @ firebase_firestore.js?v=9b8480a6:12912
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12871
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12891
-(anonymous) @ firebase_firestore.js?v=9b8480a6:15977
-(anonymous) @ firebase_firestore.js?v=9b8480a6:16008
-Promise.then
-cc @ firebase_firestore.js?v=9b8480a6:16008
-enqueue @ firebase_firestore.js?v=9b8480a6:15977
-enqueueAndForget @ firebase_firestore.js?v=9b8480a6:15959
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12891
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12871
-u_ @ firebase_firestore.js?v=9b8480a6:12485
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12624
-(anonymous) @ firebase_firestore.js?v=9b8480a6:12588
-Va @ firebase_firestore.js?v=9b8480a6:920
-D @ firebase_firestore.js?v=9b8480a6:888
-Z2.qa @ firebase_firestore.js?v=9b8480a6:2477
-Lb @ firebase_firestore.js?v=9b8480a6:1387
-N2.Y @ firebase_firestore.js?v=9b8480a6:1238
-N2.ba @ firebase_firestore.js?v=9b8480a6:1189
-Va @ firebase_firestore.js?v=9b8480a6:920
-D @ firebase_firestore.js?v=9b8480a6:888
-Qc @ firebase_firestore.js?v=9b8480a6:1885
-h.Xa @ firebase_firestore.js?v=9b8480a6:1880
-h.Ca @ firebase_firestore.js?v=9b8480a6:1877
-Gc @ firebase_firestore.js?v=9b8480a6:1778
-h.Ma @ firebase_firestore.js?v=9b8480a6:1745
-Promise.then
-Ic @ firebase_firestore.js?v=9b8480a6:1736
-h.Ma @ firebase_firestore.js?v=9b8480a6:1746
-Promise.then
-Ic @ firebase_firestore.js?v=9b8480a6:1736
-h.Ma @ firebase_firestore.js?v=9b8480a6:1746
-Promise.then
-Ic @ firebase_firestore.js?v=9b8480a6:1736
-h.Pa @ firebase_firestore.js?v=9b8480a6:1732
-Promise.then
-h.send @ firebase_firestore.js?v=9b8480a6:1712
-h.ea @ firebase_firestore.js?v=9b8480a6:1853
-Eb @ firebase_firestore.js?v=9b8480a6:1182
-$c @ firebase_firestore.js?v=9b8480a6:2278
-h.Da @ firebase_firestore.js?v=9b8480a6:2245
-sa @ firebase_firestore.js?v=9b8480a6:624
-Promise.then
-u @ firebase_firestore.js?v=9b8480a6:618
-ac @ firebase_firestore.js?v=9b8480a6:2231
-Lb @ firebase_firestore.js?v=9b8480a6:1384
-N2.Y @ firebase_firestore.js?v=9b8480a6:1238
-N2.ba @ firebase_firestore.js?v=9b8480a6:1189
-Va @ firebase_firestore.js?v=9b8480a6:920
-D @ firebase_firestore.js?v=9b8480a6:888
-Qc @ firebase_firestore.js?v=9b8480a6:1885
-h.Xa @ firebase_firestore.js?v=9b8480a6:1880
-h.Ca @ firebase_firestore.js?v=9b8480a6:1877
-Gc @ firebase_firestore.js?v=9b8480a6:1778
-h.Ma @ firebase_firestore.js?v=9b8480a6:1745
-Promise.then
-Ic @ firebase_firestore.js?v=9b8480a6:1736
-h.Pa @ firebase_firestore.js?v=9b8480a6:1732
-Promise.then
-h.send @ firebase_firestore.js?v=9b8480a6:1712
-h.ea @ firebase_firestore.js?v=9b8480a6:1853
-Eb @ firebase_firestore.js?v=9b8480a6:1177
-Cb @ firebase_firestore.js?v=9b8480a6:1152
-h.Ea @ firebase_firestore.js?v=9b8480a6:2154
-sa @ firebase_firestore.js?v=9b8480a6:624
-memberships.js:299  POST https://us-central1-gymdash-4e911.cloudfunctions.net/createShopCheckout 500 (Internal Server Error)Failed to create checkout: Received unknown parameter: product_data[images]
+**11.3 Shop Checkout Error with `product_data[images]`** ✅
+- **Problem**: Shop product checkout failed with "Received unknown parameter: product_data[images]"
+- **Root Cause**: Stripe's inline price_data doesn't support images parameter for all configurations
+- **Fix** (`functions/index.js` in `createShopCheckout`):
+  - Only include `images` in `product_data` if valid HTTP URLs exist
+  - Check that image is a string starting with "http" before including
+  - Prevents Stripe API error for products without images or with invalid image URLs
 
-I think there was a misunderstanding regarding the feature for "**[x] 10.2 Auto-Clear Payment Links on Tier Changes**
+**11.4 Payment Link UI Not Clearing on Billing Changes** ✅
+- **Problem**: In the admin member modal, generated payment links remained visible even after changing billing rate or start date
+- **Root Cause**: No effect to watch for billing field changes and clear the payment link state
+- **Fix** (`packages/web/src/components/admin/MemberFormModal/MemberBillingTab.jsx`):
+  - `handlePlanChange()` now clears `paymentLinkUrl` and `paymentLinkError` states
+  - Added `useEffect` to watch `customPrice` and `formData.startDate` changes
+  - Automatically clears payment link when these values change
 
-When an admin generates a payment link for a membership tier and later changes the tier's price or details, the existing link becomes stale. We now automatically invalidate it."
+---
 
-The generated link that shows up upon the user clicking generate payment link, I want that form to be cleared and go back to the button upon detecting any changes within the billing rate and start date sections of the assign membership fields. Right now it doesn't clear that link if I change any of those, it should fix that section back.
+### Stripe Webhook Configuration
+
+**IMPORTANT**: For the membership sync fix to work, your Stripe webhook must be configured to receive events from connected accounts.
+
+#### Required Webhook Configuration in Stripe Dashboard:
+
+1. Go to **Stripe Dashboard → Developers → Webhooks**
+2. Select your webhook endpoint (or create one pointing to `https://us-central1-gymdash-4e911.cloudfunctions.net/stripeWebhook`)
+3. **CRITICAL**: Enable **"Listen to events on Connected accounts"** checkbox
+4. Ensure these events are selected:
+   - `checkout.session.completed`
+   - `invoice.paid`
+   - `invoice.payment_failed`
+   - `customer.subscription.updated`
+   - `customer.subscription.deleted`
+   - `charge.refunded`
+   - `charge.dispute.created`
+   - `charge.dispute.closed`
+   - `account.updated`
+
+When "Listen to events on Connected accounts" is enabled, Stripe will include the `event.account` property with the connected account ID, allowing the webhook handler to properly route events to the correct gym.
+
+#### Files Modified:
+- `functions/index.js` - Webhook handler, checkout, payment methods
+- `packages/web/src/components/admin/MemberFormModal/MemberBillingTab.jsx` - Payment link UI clearing
 
 ### Environment Variables Setup
 

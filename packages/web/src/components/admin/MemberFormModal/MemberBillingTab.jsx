@@ -300,7 +300,20 @@ export const MemberBillingTab = ({
 
         if (plan) setCustomPrice(plan.price);
         else setCustomPrice('');
+
+        // Clear payment link when plan changes
+        setPaymentLinkUrl(null);
+        setPaymentLinkError(null);
     };
+
+    // Clear payment link when billing rate or start date changes
+    useEffect(() => {
+        if (paymentLinkUrl) {
+            setPaymentLinkUrl(null);
+            setPaymentLinkError(null);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [customPrice, formData.startDate]);
 
     const formatDate = (dateVal) => {
         if (!dateVal) return 'N/A';

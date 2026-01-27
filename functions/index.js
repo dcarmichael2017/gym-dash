@@ -1199,7 +1199,9 @@ exports.stripeWebhook = onRequest(
         return;
       }
 
-      console.log(`Received Stripe event: ${event.type} (${event.id})`);
+      // Log event details including connected account if present
+      const connectedAccountId = event.account || null;
+      console.log(`Received Stripe event: ${event.type} (${event.id})${connectedAccountId ? ` from account ${connectedAccountId}` : ""}`);
 
       try {
         // Handle the event based on type
@@ -1209,7 +1211,7 @@ exports.stripeWebhook = onRequest(
             break;
 
           case "checkout.session.completed":
-            await handleCheckoutSessionCompleted(db, event);
+            await handleCheckoutSessionCompleted(db, event, connectedAccountId);
             break;
 
           case "invoice.paid":
@@ -1338,21 +1340,40 @@ async function updateGymStripeStatus(db, gymId, account, eventId) {
 /**
  * Handle checkout.session.completed event
  * This is where we fulfill orders, add credits, or create memberships
+ *
+ * For Stripe Connect, events come from connected accounts.
+ * If gymId is not in metadata, we look it up by stripeAccountId.
  */
-async function handleCheckoutSessionCompleted(db, event) {
+async function handleCheckoutSessionCompleted(db, event, connectedAccountId = null) {
   const session = event.data.object;
   const metadata = session.metadata || {};
 
   console.log("Checkout session completed:", session.id);
-  console.log("Metadata:", metadata);
+  console.log("Metadata:", JSON.stringify(metadata));
+  console.log("Connected account:", connectedAccountId);
 
   // Check what type of purchase this is based on metadata
   const purchaseType = metadata.type; // 'membership', 'class_pack', 'shop_order'
-  const gymId = metadata.gymId;
+  let gymId = metadata.gymId;
   const userId = metadata.userId;
 
+  // If gymId not in metadata but we have a connected account ID, look up the gym
+  if (!gymId && connectedAccountId) {
+    console.log(`Looking up gym for connected account: ${connectedAccountId}`);
+    const gymQuery = await db.collection("gyms")
+        .where("stripeAccountId", "==", connectedAccountId)
+        .limit(1)
+        .get();
+
+    if (!gymQuery.empty) {
+      gymId = gymQuery.docs[0].id;
+      console.log(`Found gym ${gymId} for connected account ${connectedAccountId}`);
+    }
+  }
+
   if (!gymId) {
-    console.log("No gymId in session metadata, cannot process.");
+    console.error("No gymId in session metadata and could not look up from connected account. Cannot process.");
+    console.error("Event data:", JSON.stringify(event.data.object));
     return;
   }
 
@@ -2543,16 +2564,32 @@ exports.getPaymentMethods = onCall(
         const defaultPaymentMethodId = customer.invoice_settings?.default_payment_method || null;
 
         // Sanitize payment method data - NEVER return full card numbers
-        const sanitizedMethods = paymentMethods.data.map((pm) => ({
-          id: pm.id,
-          brand: pm.card.brand,
-          last4: pm.card.last4,
-          expMonth: pm.card.exp_month,
-          expYear: pm.card.exp_year,
-          isDefault: pm.id === defaultPaymentMethodId,
-        }));
+        // Also deduplicate cards with same fingerprint (brand + last4 + expiry)
+        const seenCards = new Set();
+        const sanitizedMethods = [];
 
-        console.log(`Retrieved ${sanitizedMethods.length} payment methods for user ${userId} at gym ${gymId}`);
+        for (const pm of paymentMethods.data) {
+          // Create a unique key for this card
+          const cardKey = `${pm.card.brand}-${pm.card.last4}-${pm.card.exp_month}-${pm.card.exp_year}`;
+
+          // Skip if we've already seen this card (keep first occurrence)
+          if (seenCards.has(cardKey)) {
+            console.log(`Skipping duplicate payment method ${pm.id} (${cardKey})`);
+            continue;
+          }
+
+          seenCards.add(cardKey);
+          sanitizedMethods.push({
+            id: pm.id,
+            brand: pm.card.brand,
+            last4: pm.card.last4,
+            expMonth: pm.card.exp_month,
+            expYear: pm.card.exp_year,
+            isDefault: pm.id === defaultPaymentMethodId,
+          });
+        }
+
+        console.log(`Retrieved ${paymentMethods.data.length} payment methods, returning ${sanitizedMethods.length} (after deduplication) for user ${userId} at gym ${gymId}`);
 
         return {
           paymentMethods: sanitizedMethods,
@@ -3228,12 +3265,23 @@ exports.createShopCheckout = onCall(
           }
 
           // Create price for this item
+          // Note: images must be absolute URLs accessible by Stripe
+          // Skip images parameter if not available or invalid to avoid API errors
+          const productDataForStripe = {
+            name: variantName ? `${productData.name} - ${variantName}` : productData.name,
+          };
+
+          // Only include images if they exist and are valid HTTP URLs
+          if (productData.images?.length > 0) {
+            const firstImage = productData.images[0];
+            if (firstImage && typeof firstImage === "string" && firstImage.startsWith("http")) {
+              productDataForStripe.images = [firstImage];
+            }
+          }
+
           const stripePrice = await stripeClient.prices.create(
               {
-                product_data: {
-                  name: variantName ? `${productData.name} - ${variantName}` : productData.name,
-                  images: productData.images?.length > 0 ? [productData.images[0]] : [],
-                },
+                product_data: productDataForStripe,
                 unit_amount: Math.round(price * 100),
                 currency: "usd",
               },
