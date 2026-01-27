@@ -3313,7 +3313,6 @@ exports.createShopCheckout = onCall(
           customer: stripeCustomerId,
           mode: "payment",
           line_items: lineItems,
-          payment_method_collection: "if_required",
           payment_intent_data: {
             setup_future_usage: "on_session",
           },
