@@ -3117,9 +3117,30 @@ PHASE 11: Bug Fixes & Webhook Improvements ✅ COMPLETED
 
 When "Listen to events on Connected accounts" is enabled, Stripe will include the `event.account` property with the connected account ID, allowing the webhook handler to properly route events to the correct gym.
 
+**11.5 Remove "Payment Link Needs Regeneration" Warning from Tier Cards** ✅
+- **Problem**: RecurringPlansTab showed a misleading "payment link needs regeneration" amber warning on tier cards whenever `stripePaymentLink` was null but `stripeProductId` existed
+- **Why It's Wrong**: Payment links are generated per-member in the MemberFormModal, not per-tier. Changing a tier's price/name doesn't invalidate anything visible on the tier card level. The `onMembershipTierUpdated` trigger already auto-creates a new Stripe Price when the price changes.
+- **Fix**:
+  - Removed payment link status indicators (amber warning + green active) from `RecurringPlansTab.jsx`
+  - Removed `stripePaymentLink` clearing logic from `onMembershipTierUpdated` Cloud Function (kept the auto-create new Price logic)
+  - Removed unused `Link` and `AlertTriangle` icon imports
+
+**11.6 Shop Checkout `product_data[images]` Error (Final Fix)** ✅
+- **Problem**: Stripe's `prices.create` with inline `product_data` does not reliably support the `images` parameter, causing "Received unknown parameter: product_data[images]" errors
+- **Fix**: Removed the `images` parameter from `product_data` entirely in `createShopCheckout`. Product images are not shown on the Stripe Checkout page for inline price data anyway.
+
+**11.7 Stripe Branding Sync Enhancement** ✅
+- **Problem**: Gym's theme colors and logo were not appearing on Stripe Checkout and Customer Portal pages
+- **Root Cause**: The `syncGymBrandingToStripe` function was only syncing `primary_color` and `secondary_color` but not the gym's logo
+- **Fix**: Updated `syncGymBrandingToStripe` to also pass `icon` and `logo` from `gymData.logoUrl` to Stripe's account branding settings
+- **Note on Stripe Branding Limitations**: Stripe's account-level branding (`settings.branding`) provides limited control. It sets button/link accent colors and logo on Checkout and Customer Portal pages, but the overall page layout and background remain Stripe's default design. Full custom styling is only possible with Stripe Elements (embedded forms), not with hosted Checkout or Customer Portal pages. To apply branding:
+  1. Go to admin **Settings → Branding** and save (this triggers `syncGymBrandingToStripe`)
+  2. Verify in Stripe Dashboard → Settings → Branding that your colors and logo appear
+
 #### Files Modified:
-- `functions/index.js` - Webhook handler, checkout, payment methods
+- `functions/index.js` - Webhook handler, checkout, payment methods, branding sync, tier update trigger
 - `packages/web/src/components/admin/MemberFormModal/MemberBillingTab.jsx` - Payment link UI clearing
+- `packages/web/src/screens/admin/MembershipsScreen/RecurringPlansTab.jsx` - Removed payment link status indicators
 
 ### Environment Variables Setup
 

@@ -3265,23 +3265,11 @@ exports.createShopCheckout = onCall(
           }
 
           // Create price for this item
-          // Note: images must be absolute URLs accessible by Stripe
-          // Skip images parameter if not available or invalid to avoid API errors
-          const productDataForStripe = {
-            name: variantName ? `${productData.name} - ${variantName}` : productData.name,
-          };
-
-          // Only include images if they exist and are valid HTTP URLs
-          if (productData.images?.length > 0) {
-            const firstImage = productData.images[0];
-            if (firstImage && typeof firstImage === "string" && firstImage.startsWith("http")) {
-              productDataForStripe.images = [firstImage];
-            }
-          }
-
           const stripePrice = await stripeClient.prices.create(
               {
-                product_data: productDataForStripe,
+                product_data: {
+                  name: variantName ? `${productData.name} - ${variantName}` : productData.name,
+                },
                 unit_amount: Math.round(price * 100),
                 currency: "usd",
               },
@@ -5243,14 +5231,24 @@ exports.syncGymBrandingToStripe = onCall(
         const theme = gymData.theme || {};
         const primaryColor = theme.primaryColor || "#2563eb";
         const secondaryColor = theme.secondaryColor || "#4f46e5";
+        const logoUrl = gymData.logoUrl || null;
+
+        // Build branding settings
+        const brandingSettings = {
+          primary_color: primaryColor,
+          secondary_color: secondaryColor,
+        };
+
+        // Include logo/icon if available (must be accessible public URL)
+        if (logoUrl && typeof logoUrl === "string" && logoUrl.startsWith("http")) {
+          brandingSettings.icon = logoUrl;
+          brandingSettings.logo = logoUrl;
+        }
 
         // Update Stripe account branding
         await stripeClient.accounts.update(stripeAccountId, {
           settings: {
-            branding: {
-              primary_color: primaryColor,
-              secondary_color: secondaryColor,
-            },
+            branding: brandingSettings,
           },
           business_profile: {
             name: gymData.name || undefined,
@@ -5289,8 +5287,7 @@ exports.syncGymBrandingToStripe = onCall(
 );
 
 /**
- * Firestore trigger: Auto-clear payment links when membership tier details change
- * This prevents stale links from being used after price/interval changes
+ * Firestore trigger: Auto-create new Stripe Price when membership tier price changes
  */
 exports.onMembershipTierUpdated = onDocumentUpdated(
     {
@@ -5325,17 +5322,6 @@ exports.onMembershipTierUpdated = onDocumentUpdated(
       if (nameChanged) changes.push(`name: ${beforeData.name} → ${afterData.name}`);
 
       console.log(`Tier ${event.params.tierId} changed: ${changes.join(", ")}`);
-
-      // Clear payment link if it exists
-      if (afterData.stripePaymentLink) {
-        await event.data.after.ref.update({
-          stripePaymentLink: null,
-          stripePaymentLinkClearedAt: admin.firestore.FieldValue.serverTimestamp(),
-          stripePaymentLinkClearedReason: `Tier details changed: ${changes.join(", ")}`,
-        });
-
-        console.log(`Cleared payment link for tier ${event.params.tierId}`);
-      }
 
       // If the price changed and there's an existing Stripe Price, we should create a new one
       // But we don't deactivate the old one as existing subscriptions may still use it
