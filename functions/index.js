@@ -2783,6 +2783,7 @@ exports.createSubscriptionCheckout = onCall(
           customer: stripeCustomerId,
           mode: "subscription",
           line_items: lineItems,
+          payment_method_collection: "if_required",
           success_url: `${origin}/members/membership/success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/members/store?category=memberships`,
           metadata: {
@@ -3070,6 +3071,7 @@ exports.createAdminCheckoutLink = onCall(
           customer: stripeCustomerId,
           mode: "subscription",
           line_items: lineItems,
+          payment_method_collection: "if_required",
           success_url: `${origin}/members/membership/success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/members/store?category=memberships`,
           metadata: {
@@ -3311,6 +3313,10 @@ exports.createShopCheckout = onCall(
           customer: stripeCustomerId,
           mode: "payment",
           line_items: lineItems,
+          payment_method_collection: "if_required",
+          payment_intent_data: {
+            setup_future_usage: "on_session",
+          },
           success_url: `${origin}/members/store/order-success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/members/store`,
           metadata: {
