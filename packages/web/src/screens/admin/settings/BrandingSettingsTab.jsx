@@ -48,7 +48,9 @@ export const BrandingSettingsTab = ({ gymId, initialData, showMessage, theme }) 
       // Sync branding colors to Stripe checkout/portal
       const stripeSync = await syncGymBrandingToStripe(gymId);
       if (stripeSync.success) {
-        showMessage('success', 'Branding updated & synced to Stripe!');
+        showMessage('success', 'Branding updated & synced to Stripe checkout!');
+      } else if (stripeSync.reason === 'standard_account') {
+        showMessage('info', 'Branding saved! To theme your Stripe checkout pages, visit your Stripe Dashboard → Settings → Branding.');
       } else {
         showMessage('success', 'Branding updated! (Stripe sync pending - connect Stripe to theme checkout pages)');
       }

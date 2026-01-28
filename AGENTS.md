@@ -3142,6 +3142,80 @@ When "Listen to events on Connected accounts" is enabled, Stripe will include th
 - `packages/web/src/components/admin/MemberFormModal/MemberBillingTab.jsx` - Payment link UI clearing
 - `packages/web/src/screens/admin/MembershipsScreen/RecurringPlansTab.jsx` - Removed payment link status indicators
 
+---
+
+PHASE 12: Saved Payment Methods & Stripe Branding ✅ COMPLETED
+
+### Root Causes Identified
+
+**Saved Payment Methods Not Auto-Filling:**
+- `setup_future_usage: "on_session"` was missing from `createClassPackCheckout`, so cards used for class pack purchases were not being saved to the customer for future use
+- Subscription checkouts automatically save cards (Stripe requires it for recurring billing)
+- Shop checkout already had `setup_future_usage` set
+- The same `stripeCustomerId` is used across all checkout types, so once all types save cards, they auto-fill everywhere
+
+**Stripe Branding Not Applying:**
+- The app was creating **Standard** Connect accounts (`type: "standard"`)
+- Standard accounts are fully controlled by the connected account owner — the platform **cannot** programmatically set branding via `accounts.update()`
+- The `settings.branding` fields are only settable for Express and Custom accounts
+- Existing Standard accounts cannot be converted to Express via API
+
+### Changes Implemented
+
+**12.1 Add `setup_future_usage` to Class Pack Checkout** ✅
+- Added `payment_intent_data: { setup_future_usage: "on_session" }` to `createClassPackCheckout` session config
+- Cards used for class pack purchases are now saved to the customer for reuse on all future checkouts
+
+**12.2 Diagnostic Logging for Customer ID Resolution** ✅
+- Added `console.log` after customer ID resolution in all 4 checkout functions:
+  - `createSubscriptionCheckout`
+  - `createAdminCheckoutLink`
+  - `createShopCheckout`
+  - `createClassPackCheckout`
+- Logs: function name, customer ID, user ID, gym ID, and whether customer was existing or newly created
+- Check Firebase Functions logs to verify customer resolution is working correctly
+
+**12.3 Switch New Account Creation to Express** ✅
+- Changed `type: "standard"` to `type: "express"` in `createStripeAccountLink`
+- Added `capabilities: { card_payments: { requested: true }, transfers: { requested: true } }`
+- **Only affects NEW gyms** — existing Standard accounts are unchanged
+- Onboarding flow (`accountLinks.create` redirect) works identically for Express accounts
+- Express accounts allow the platform to programmatically set branding colors and logo
+
+**12.4 Store Account Type in Firestore** ✅
+- During account creation: stores `stripeAccountType: "express"` in gym document
+- During `verifyStripeAccount`: stores `stripeAccountType: account.type` from Stripe API response
+- This backfills existing gyms' account types on their next verification call
+
+**12.5 Account-Type-Aware Branding Sync** ✅
+- `syncGymBrandingToStripe` now checks the account type before attempting to set branding
+- If account type is unknown, retrieves it from Stripe and stores it in Firestore
+- **Standard accounts**: Returns `{ success: false, reason: "standard_account" }` with a message directing the gym owner to configure branding in their own Stripe Dashboard
+- **Express/Custom accounts**: Proceeds with `accounts.update()` to set colors and logo, wrapped in try-catch for error handling
+
+**12.6 Updated Branding UI Messaging** ✅
+- `BrandingSettingsTab.jsx` now handles the `"standard_account"` response
+- Standard account gyms see: "Branding saved! To theme your Stripe checkout pages, visit your Stripe Dashboard → Settings → Branding."
+- Express account gyms see: "Branding updated & synced to Stripe checkout!"
+
+### Standard vs Express Account Differences
+
+| Feature | Standard | Express |
+|---|---|---|
+| Branding via API | Not supported | Supported |
+| Onboarding | Redirect to Stripe (full form) | Redirect to Stripe (simplified form) |
+| Dashboard | Full Stripe Dashboard | Simplified Express Dashboard |
+| Platform control | Limited | Full (branding, fees, etc.) |
+
+### For Existing Standard Account Gyms
+- Cannot convert to Express via API — this is a Stripe limitation
+- Branding must be configured by the gym owner at: **Stripe Dashboard → Settings → Branding**
+- All other features (checkout, saved cards, subscriptions) work identically
+
+#### Files Modified:
+- `functions/index.js` - Account creation, verification, all checkout functions, branding sync
+- `packages/web/src/screens/admin/settings/BrandingSettingsTab.jsx` - Standard account messaging
+
 ### Environment Variables Setup
 
 **Create `.env.example`:**

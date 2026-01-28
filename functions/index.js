@@ -71,10 +71,15 @@ exports.createStripeAccountLink = onCall(
           return {url: accountLink.url};
         }
 
-        // Create new Stripe account
+        // Create new Stripe Express account
+        // Express accounts allow platform-controlled branding and simplified onboarding
         const account = await stripeClient.accounts.create({
-          type: "standard",
+          type: "express",
           email: user.email,
+          capabilities: {
+            card_payments: {requested: true},
+            transfers: {requested: true},
+          },
           metadata: {
             gymId: gymId,
             uid: request.auth.uid,
@@ -83,6 +88,7 @@ exports.createStripeAccountLink = onCall(
 
         await gymRef.update({
           stripeAccountId: account.id,
+          stripeAccountType: "express",
           stripeAccountStatus: "PENDING",
           stripeAccountCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
@@ -163,6 +169,7 @@ exports.verifyStripeAccount = onCall(
         // Update Firestore with latest status
         await gymRef.update({
           stripeAccountStatus: status,
+          stripeAccountType: account.type,
           stripeChargesEnabled: account.charges_enabled,
           stripePayoutsEnabled: account.payouts_enabled,
           stripeDetailsSubmitted: account.details_submitted,
@@ -2750,6 +2757,8 @@ exports.createSubscriptionCheckout = onCall(
           }, {merge: true});
         }
 
+        console.log(`[createSubscriptionCheckout] Customer ${stripeCustomerId} for user=${userId} gym=${gymId} (source: ${membershipDoc.exists && membershipDoc.data().stripeCustomerId ? "existing" : "new"})`);
+
         // Build line items for checkout
         const lineItems = [
           {
@@ -3006,6 +3015,8 @@ exports.createAdminCheckoutLink = onCall(
           }, {merge: true});
         }
 
+        console.log(`[createAdminCheckoutLink] Customer ${stripeCustomerId} for user=${memberId} gym=${gymId} (source: ${membershipDoc.exists && membershipDoc.data().stripeCustomerId ? "existing" : "new"})`);
+
         // Determine the price to use (custom or default)
         const useCustomPrice = customPrice !== undefined &&
             customPrice !== null &&
@@ -3217,6 +3228,8 @@ exports.createShopCheckout = onCall(
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           }, {merge: true});
         }
+
+        console.log(`[createShopCheckout] Customer ${stripeCustomerId} for user=${userId} gym=${gymId} (source: ${membershipDoc.exists && membershipDoc.data().stripeCustomerId ? "existing" : "new"})`);
 
         // Validate cart items and build line items
         const lineItems = [];
@@ -3492,6 +3505,8 @@ exports.createClassPackCheckout = onCall(
           }, {merge: true});
         }
 
+        console.log(`[createClassPackCheckout] Customer ${stripeCustomerId} for user=${userId} gym=${gymId} (source: ${membershipDoc.exists && membershipDoc.data().stripeCustomerId ? "existing" : "new"})`);
+
         // Build line items
         const lineItems = [
           {
@@ -3505,6 +3520,9 @@ exports.createClassPackCheckout = onCall(
           customer: stripeCustomerId,
           mode: "payment",
           line_items: lineItems,
+          payment_intent_data: {
+            setup_future_usage: "on_session",
+          },
           success_url: `${origin}/members/store/pack-success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/members/store?category=packs`,
           metadata: {
@@ -5232,6 +5250,25 @@ exports.syncGymBrandingToStripe = onCall(
           throw new HttpsError("failed-precondition", "Gym has no connected Stripe account.");
         }
 
+        // Determine account type (retrieve from Stripe if not stored)
+        let accountType = gymData.stripeAccountType;
+        if (!accountType) {
+          const account = await stripeClient.accounts.retrieve(stripeAccountId);
+          accountType = account.type;
+          await gymRef.update({stripeAccountType: accountType});
+        }
+
+        // Standard accounts cannot have branding set via API - the account owner
+        // must configure branding in their own Stripe Dashboard
+        if (accountType === "standard") {
+          console.log(`Gym ${gymId} has a Standard Stripe account. Branding must be configured in their Stripe Dashboard.`);
+          return {
+            success: false,
+            reason: "standard_account",
+            message: "Your Stripe account type (Standard) requires branding to be configured directly in your Stripe Dashboard at https://dashboard.stripe.com/settings/branding",
+          };
+        }
+
         // Extract branding info
         const theme = gymData.theme || {};
         const primaryColor = theme.primaryColor || "#2563eb";
@@ -5250,15 +5287,24 @@ exports.syncGymBrandingToStripe = onCall(
           brandingSettings.logo = logoUrl;
         }
 
-        // Update Stripe account branding
-        await stripeClient.accounts.update(stripeAccountId, {
-          settings: {
-            branding: brandingSettings,
-          },
-          business_profile: {
-            name: gymData.name || undefined,
-          },
-        });
+        // Update Stripe account branding (works for Express and Custom accounts)
+        try {
+          await stripeClient.accounts.update(stripeAccountId, {
+            settings: {
+              branding: brandingSettings,
+            },
+            business_profile: {
+              name: gymData.name || undefined,
+            },
+          });
+        } catch (stripeError) {
+          console.error(`Failed to update Stripe branding for gym ${gymId}:`, stripeError.message);
+          return {
+            success: false,
+            reason: "stripe_api_error",
+            message: "Could not update Stripe branding. " + stripeError.message,
+          };
+        }
 
         // Update gym doc to track last sync
         await gymRef.update({
@@ -5269,7 +5315,7 @@ exports.syncGymBrandingToStripe = onCall(
           },
         });
 
-        console.log(`Synced branding for gym ${gymId} to Stripe account ${stripeAccountId}`);
+        console.log(`Synced branding for gym ${gymId} to Stripe account ${stripeAccountId} (type: ${accountType})`);
 
         return {
           success: true,
