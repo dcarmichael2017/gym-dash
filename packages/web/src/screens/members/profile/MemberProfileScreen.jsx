@@ -4,6 +4,7 @@ import { useMemberProfile } from './useMemberProfile';
 import { ProfileField } from './ProfileFields';
 import { MembershipSection } from './MembershipSection';
 import { LegalSection } from './LegalSection';
+import { OrderHistorySection } from './OrderHistorySection';
 import WaiverModal from '../dashboard/WaiverModal';
 import { auth } from '../../../../../../packages/shared/api/firebaseConfig';
 
@@ -181,7 +182,7 @@ const MemberProfileScreen = () => {
                 />
 
                 {currentGym && (
-                    <LegalSection 
+                    <LegalSection
                         hasWaiver={hasWaiver}
                         isOutdated={isOutdated}
                         version={userSignedVersion}
@@ -189,7 +190,15 @@ const MemberProfileScreen = () => {
                     />
                 )}
 
-                <button 
+                {currentGym && user && (
+                    <OrderHistorySection
+                        gymId={currentGym.id}
+                        userId={user.uid}
+                        theme={theme}
+                    />
+                )}
+
+                <button
                     onClick={() => auth.signOut()} 
                     className="w-full py-4 rounded-2xl bg-white text-red-600 font-bold text-sm border border-red-100 shadow-sm active:scale-95 transition-transform flex items-center justify-center gap-2"
                 >

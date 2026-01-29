@@ -3216,6 +3216,74 @@ PHASE 12: Saved Payment Methods & Stripe Branding ✅ COMPLETED
 - `functions/index.js` - Account creation, verification, all checkout functions, branding sync
 - `packages/web/src/screens/admin/settings/BrandingSettingsTab.jsx` - Standard account messaging
 
+---
+
+PHASE 13: Order Management, Membership Logs & Checkout Fixes ✅ COMPLETED
+
+### Changes Implemented
+
+**13.1 Member Order History View** ✅
+- Created `OrderHistorySection.jsx` component showing all orders with status
+- Added to member profile screen below the legal section
+- Shows order status with visual indicators: Pending (yellow), Ready for Pickup (blue), Fulfilled (green), Refunded (red)
+- Expandable order details showing items, prices, quantities
+- Special callout when order is ready for pickup
+
+**13.2 Admin Order Fulfillment Controls** ✅
+- Added `READY_FOR_PICKUP` status to `ORDER_STATUS` constants
+- Added `ORDER_STATUS_LABELS` for human-readable status display
+- Created `markOrderReadyForPickup()` function in orders.js
+- Updated admin OrdersTab with two-step workflow:
+  - "Pending" orders show "Ready for Pickup" button
+  - "Ready for Pickup" orders show "Mark Fulfilled" button
+- Refund available at any fulfillment stage
+
+**13.3 Membership Audit Logging** ✅
+- Added status change logging to `handleSubscriptionUpdated` webhook handler
+- Logs old status → new status transitions with descriptive labels
+- Existing logging for cancellation_scheduled, cancellation_reversed, subscription_ended remains
+- Source tracked as "stripe_webhook" for webhook-triggered changes
+
+**13.4 Cart Drawer Product Images** ✅
+- Fixed `StoreContext.jsx` to use `product.images[0]` instead of `product.image`
+- Added fallback: checks `images` array first, then `image` field, then null
+- Updated `CartDrawer.jsx` with proper fallback UI:
+  - Shows image if available
+  - Shows Package icon placeholder if no image
+  - Clean layout in both cases
+
+**13.5 Admin Reports Refund Calculation** ✅
+- Fixed `getOrderStats()` in orders.js
+- Now calculates: `netRevenue = grossRevenue - totalRefunded`
+- Previously excluded fully refunded orders but ignored partial refunds
+- Added `grossRevenue` and `readyForPickup` to stats object
+
+**13.6 Require Card for Trial Memberships** ✅
+- Updated both `createSubscriptionCheckout` and `createAdminCheckoutLink`
+- Changed `payment_method_collection` to `"always"` when tier has trial
+- Keeps `"if_required"` for non-trial subscriptions (allows using saved cards)
+- Ensures card is collected for automatic renewal after trial ends
+
+**13.7 Saved Payment Methods at Checkout** ✅
+- Diagnostic logging added in Phase 12 to all 4 checkout functions
+- Logs customer ID, source (existing vs new), user ID, gym ID
+- `setup_future_usage: "on_session"` on all payment-mode checkouts (shop, class packs)
+- Customer ID is correctly resolved from `users/{userId}/memberships/{gymId}.stripeCustomerId`
+- **To verify**: Check Firebase Functions logs after deployment to confirm customer resolution
+- **Note**: Stripe hosted checkout automatically shows saved methods when:
+  1. Customer has saved payment methods attached
+  2. Checkout session includes that customer ID
+  3. Both conditions are verified by the diagnostic logging
+
+#### Files Modified:
+- `functions/index.js` - Trial checkout, membership status logging
+- `packages/shared/api/firestore/orders.js` - Order status, getMemberOrders, stats calculation
+- `packages/web/src/screens/members/profile/OrderHistorySection.jsx` - NEW: Member order history
+- `packages/web/src/screens/members/profile/MemberProfileScreen.jsx` - Added OrderHistorySection
+- `packages/web/src/screens/admin/OrdersScreen/OrdersTab.jsx` - Ready for pickup workflow
+- `packages/web/src/screens/members/store/CartDrawer.jsx` - Image fallback
+- `packages/web/src/screens/members/store/StoreContext.jsx` - Product images array fix
+
 ### Environment Variables Setup
 
 **Create `.env.example`:**

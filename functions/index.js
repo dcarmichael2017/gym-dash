@@ -2021,6 +2021,29 @@ async function handleSubscriptionUpdated(db, event) {
 
     await membershipRef.update(updateData);
 
+    // Log to history if status changed
+    const oldStatus = membershipData.status;
+    const newStatus = updateData.status;
+    if (newStatus && oldStatus !== newStatus) {
+      const historyRef = membershipRef.collection("history").doc();
+      const statusLabels = {
+        active: "Active",
+        trialing: "Trialing",
+        past_due: "Past Due",
+        cancelled: "Cancelled",
+        paused: "Paused",
+        pending: "Pending",
+      };
+      await historyRef.set({
+        action: "status_changed",
+        description: `Membership status changed from ${statusLabels[oldStatus] || oldStatus} to ${statusLabels[newStatus] || newStatus}`,
+        previousStatus: oldStatus,
+        newStatus: newStatus,
+        source: "stripe_webhook",
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
     // Log to history if cancellation was scheduled
     if (subscription.cancel_at_period_end && !membershipData.cancelAtPeriodEnd) {
       const historyRef = membershipRef.collection("history").doc();
@@ -2788,11 +2811,13 @@ exports.createSubscriptionCheckout = onCall(
         }
 
         // Build checkout session options
+        // Always collect payment method for trials so the card is on file for auto-renewal
+        const hasTrial = tierData.hasTrial && tierData.trialDays > 0;
         const sessionConfig = {
           customer: stripeCustomerId,
           mode: "subscription",
           line_items: lineItems,
-          payment_method_collection: "if_required",
+          payment_method_collection: hasTrial ? "always" : "if_required",
           success_url: `${origin}/members/membership/success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/members/store?category=memberships`,
           metadata: {
@@ -3078,11 +3103,13 @@ exports.createAdminCheckoutLink = onCall(
         }
 
         // Build checkout session
+        // Always collect payment method for trials so the card is on file for auto-renewal
+        const hasTrial = tierData.hasTrial && tierData.trialDays > 0;
         const sessionConfig = {
           customer: stripeCustomerId,
           mode: "subscription",
           line_items: lineItems,
-          payment_method_collection: "if_required",
+          payment_method_collection: hasTrial ? "always" : "if_required",
           success_url: `${origin}/members/membership/success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/members/store?category=memberships`,
           metadata: {

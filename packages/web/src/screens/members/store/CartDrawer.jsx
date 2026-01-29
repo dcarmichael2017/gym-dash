@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Trash2, CreditCard, Loader2, AlertCircle, Tag, Check } from 'lucide-react';
+import { X, Trash2, CreditCard, Loader2, AlertCircle, Tag, Check, Package } from 'lucide-react';
 import { useStore } from './StoreContext';
 import { useGym } from '../../../context/GymContext';
 import { createShopCheckout, validateCoupon } from '../../../../../../packages/shared/api/firestore';
@@ -101,9 +101,15 @@ export const CartDrawer = () => {
                     ) : (
                         cart.map(item => (
                             <div key={item.cartItemId} className="flex gap-4">
-                                <div className="w-16 h-16 bg-gray-50 rounded-lg overflow-hidden shrink-0">
-                                    {item.image && <img src={item.image} alt={item.name} className="w-full h-full object-cover" />}
-                                </div>
+                                {item.image ? (
+                                    <div className="w-16 h-16 bg-gray-50 rounded-lg overflow-hidden shrink-0">
+                                        <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                                    </div>
+                                ) : (
+                                    <div className="w-16 h-16 bg-gray-100 rounded-lg shrink-0 flex items-center justify-center">
+                                        <Package size={24} className="text-gray-400" />
+                                    </div>
+                                )}
                                 <div className="flex-1">
                                     <h4 className="font-bold text-sm text-gray-900">{item.name}</h4>
                                     {item.variantName && (

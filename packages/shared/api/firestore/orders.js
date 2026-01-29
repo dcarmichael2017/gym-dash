@@ -5,11 +5,23 @@ import { db } from "../firebaseConfig";
 // --- ORDER STATUS CONSTANTS ---
 export const ORDER_STATUS = {
   PAID: 'paid',
+  READY_FOR_PICKUP: 'ready_for_pickup',
   FULFILLED: 'fulfilled',
   REFUNDED: 'refunded',
   PARTIALLY_REFUNDED: 'partially_refunded',
   DISPUTED: 'disputed',
   CANCELLED: 'cancelled'
+};
+
+// Human-readable status labels
+export const ORDER_STATUS_LABELS = {
+  paid: 'Pending',
+  ready_for_pickup: 'Ready for Pickup',
+  fulfilled: 'Fulfilled',
+  refunded: 'Refunded',
+  partially_refunded: 'Partially Refunded',
+  disputed: 'Disputed',
+  cancelled: 'Cancelled'
 };
 
 export const REFUND_REASONS = [
@@ -94,6 +106,39 @@ export const getOrderById = async (gymId, orderId) => {
   }
 };
 
+/**
+ * Get orders for a specific member
+ * @param {string} gymId - Gym ID
+ * @param {string} memberId - Member's user ID
+ * @returns {Promise<{success: boolean, orders?: array, error?: string}>}
+ */
+export const getMemberOrders = async (gymId, memberId) => {
+  try {
+    const collectionRef = collection(db, "gyms", gymId, "orders");
+    const q = query(
+      collectionRef,
+      where("memberId", "==", memberId),
+      orderBy("createdAt", "desc")
+    );
+
+    const snapshot = await getDocs(q);
+    const orders = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate?.() || doc.data().createdAt,
+      paidAt: doc.data().paidAt?.toDate?.() || doc.data().paidAt,
+      fulfilledAt: doc.data().fulfilledAt?.toDate?.() || doc.data().fulfilledAt,
+      readyForPickupAt: doc.data().readyForPickupAt?.toDate?.() || doc.data().readyForPickupAt,
+      refundedAt: doc.data().refundedAt?.toDate?.() || doc.data().refundedAt,
+    }));
+
+    return { success: true, orders };
+  } catch (error) {
+    console.error("[getMemberOrders] Error:", error);
+    return { success: false, error: error.message };
+  }
+};
+
 // --- ORDER MANAGEMENT ---
 
 /**
@@ -114,6 +159,26 @@ export const fulfillOrder = async (gymId, orderId, notes = null) => {
     return { success: true };
   } catch (error) {
     console.error("[fulfillOrder] Error:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Mark an order as ready for pickup
+ * @param {string} gymId - Gym ID
+ * @param {string} orderId - Order ID
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+export const markOrderReadyForPickup = async (gymId, orderId) => {
+  try {
+    const docRef = doc(db, "gyms", gymId, "orders", orderId);
+    await updateDoc(docRef, {
+      status: ORDER_STATUS.READY_FOR_PICKUP,
+      readyForPickupAt: new Date()
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("[markOrderReadyForPickup] Error:", error);
     return { success: false, error: error.message };
   }
 };
@@ -261,14 +326,22 @@ export const getOrderStats = async (gymId, startDate = null, endDate = null) => 
       return true;
     });
 
+    // Calculate total revenue: sum all orders, then subtract refunded amounts
+    // This correctly handles partial refunds (order total minus refund amount)
+    const grossRevenue = orders.reduce((sum, o) => sum + (o.total || 0), 0);
+    const totalRefunded = orders.reduce((sum, o) => sum + (o.refundedAmount || 0), 0);
+    const netRevenue = grossRevenue - totalRefunded;
+
     const stats = {
       totalOrders: orders.length,
-      totalRevenue: orders.filter(o => o.status !== 'refunded').reduce((sum, o) => sum + (o.total || 0), 0),
+      totalRevenue: netRevenue,
+      grossRevenue: grossRevenue,
       pendingFulfillment: orders.filter(o => o.status === 'paid').length,
+      readyForPickup: orders.filter(o => o.status === 'ready_for_pickup').length,
       fulfilled: orders.filter(o => o.status === 'fulfilled').length,
       refunded: orders.filter(o => o.status === 'refunded' || o.status === 'partially_refunded').length,
       disputed: orders.filter(o => o.hasDispute).length,
-      refundedAmount: orders.reduce((sum, o) => sum + (o.refundedAmount || 0), 0),
+      refundedAmount: totalRefunded,
     };
 
     return { success: true, stats };

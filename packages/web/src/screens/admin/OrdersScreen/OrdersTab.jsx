@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import {
-  Package, CheckCircle, XCircle, AlertTriangle, Clock,
+  Package, CheckCircle, XCircle, AlertTriangle, Clock, PackageCheck,
   ChevronDown, ChevronUp, Loader2, RotateCcw, DollarSign
 } from 'lucide-react';
-import { fulfillOrder, processOrderRefund, REFUND_REASONS } from '../../../../../../packages/shared/api/firestore';
+import { fulfillOrder, markOrderReadyForPickup, processOrderRefund, REFUND_REASONS } from '../../../../../../packages/shared/api/firestore';
 
 const STATUS_STYLES = {
   paid: { bg: 'bg-yellow-50', text: 'text-yellow-700', border: 'border-yellow-200', label: 'Pending', icon: Clock },
+  ready_for_pickup: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', label: 'Ready for Pickup', icon: PackageCheck },
   fulfilled: { bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200', label: 'Fulfilled', icon: CheckCircle },
   refunded: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', label: 'Refunded', icon: XCircle },
   partially_refunded: { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', label: 'Partial Refund', icon: RotateCcw },
@@ -18,6 +19,23 @@ export const OrdersTab = ({ orders, gymId, onRefresh, primaryColor, filter }) =>
   const [processingAction, setProcessingAction] = useState(null);
   const [refundModal, setRefundModal] = useState({ isOpen: false, order: null });
   const [actionError, setActionError] = useState(null);
+
+  const handleMarkReadyForPickup = async (orderId) => {
+    setProcessingAction(orderId);
+    setActionError(null);
+    try {
+      const result = await markOrderReadyForPickup(gymId, orderId);
+      if (result.success) {
+        onRefresh();
+      } else {
+        setActionError(result.error);
+      }
+    } catch (err) {
+      setActionError(err.message);
+    } finally {
+      setProcessingAction(null);
+    }
+  };
 
   const handleFulfill = async (orderId) => {
     setProcessingAction(orderId);
@@ -180,6 +198,21 @@ export const OrdersTab = ({ orders, gymId, onRefresh, primaryColor, filter }) =>
                 <div className="flex gap-2 pt-2 border-t border-gray-200">
                   {order.status === 'paid' && (
                     <button
+                      onClick={() => handleMarkReadyForPickup(order.id)}
+                      disabled={processingAction === order.id}
+                      className="flex-1 py-2 px-4 bg-blue-600 text-white font-bold text-sm rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {processingAction === order.id ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : (
+                        <PackageCheck size={16} />
+                      )}
+                      Ready for Pickup
+                    </button>
+                  )}
+
+                  {order.status === 'ready_for_pickup' && (
+                    <button
                       onClick={() => handleFulfill(order.id)}
                       disabled={processingAction === order.id}
                       className="flex-1 py-2 px-4 bg-green-600 text-white font-bold text-sm rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
@@ -193,7 +226,7 @@ export const OrdersTab = ({ orders, gymId, onRefresh, primaryColor, filter }) =>
                     </button>
                   )}
 
-                  {(order.status === 'paid' || order.status === 'fulfilled') && !order.hasDispute && (
+                  {(order.status === 'paid' || order.status === 'ready_for_pickup' || order.status === 'fulfilled') && !order.hasDispute && (
                     <button
                       onClick={() => setRefundModal({ isOpen: true, order })}
                       className="flex-1 py-2 px-4 bg-red-50 text-red-700 font-bold text-sm rounded-lg hover:bg-red-100 transition-colors flex items-center justify-center gap-2 border border-red-200"

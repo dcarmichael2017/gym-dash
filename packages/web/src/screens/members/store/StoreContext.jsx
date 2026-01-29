@@ -25,12 +25,15 @@ export const StoreProvider = ({ children }) => {
                 );
             }
 
+            // Get the first image from images array, or fall back to image field
+            const productImage = product.images?.[0] || product.image || null;
+
             return [...prev, {
                 cartItemId,
                 productId: product.id,
                 name: product.name,
                 price: variant ? variant.price : product.price,
-                image: product.image,
+                image: productImage,
                 variantName: variant ? variant.label : null,
                 type: product.type, // 'physical' or 'membership'
                 quantity: 1
