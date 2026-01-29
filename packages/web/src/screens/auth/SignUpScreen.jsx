@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { signUpWithEmail } from '../../../../shared/api/auth.js';
 import { createUserProfile } from '../../../../shared/api/firestore';
-import { Building, User, ChevronLeft, Briefcase, Mail, Lock, Phone, UserCircle } from 'lucide-react';
+import { Building, User, ChevronLeft, Briefcase, Mail, Lock, Phone, UserCircle, Heart, ChevronDown } from 'lucide-react';
 
 export const SignUpScreen = () => {
   const [selectedRole, setSelectedRole] = useState(null); 
@@ -14,7 +14,11 @@ export const SignUpScreen = () => {
     lastName: '',
     email: '',
     phoneNumber: '',
-    password: ''
+    password: '',
+    // Emergency contact (optional, members only)
+    emergencyContactName: '',
+    emergencyContactPhone: '',
+    emergencyContactRelationship: ''
   });
   
   const [error, setError] = useState(null);
@@ -36,7 +40,7 @@ export const SignUpScreen = () => {
 
     if (authResult.success) {
       // 2. Create Profile with detailed data
-      const profileData = { 
+      const profileData = {
           firstName: formData.firstName.trim(),
           lastName: formData.lastName.trim(),
           name: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
@@ -45,6 +49,15 @@ export const SignUpScreen = () => {
           role: selectedRole, // 'owner' or 'member'
           createdAt: new Date()
       };
+
+      // Add emergency contact if provided (members only)
+      if (selectedRole === 'member' && formData.emergencyContactName.trim()) {
+          profileData.emergencyContact = {
+              name: formData.emergencyContactName.trim(),
+              phone: formData.emergencyContactPhone.replace(/[^\d]/g, ''),
+              relationship: formData.emergencyContactRelationship || 'other'
+          };
+      }
 
       const profileResult = await createUserProfile(authResult.user.uid, profileData);
       
@@ -122,6 +135,31 @@ export const SignUpScreen = () => {
           <Input label="Phone Number" name="phoneNumber" type="tel" placeholder="(555) 000-0000" value={formData.phoneNumber} onChange={handleInputChange} icon={Phone} required />
           <Input label="Password" name="password" type="password" placeholder="••••••••" value={formData.password} onChange={handleInputChange} icon={Lock} required />
 
+          {/* Emergency Contact Fields - Members Only (Optional) */}
+          {selectedRole === 'member' && (
+            <div className="pt-4 border-t border-gray-100 mt-2 space-y-4">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Emergency Contact (Optional)</p>
+              <Input label="Contact Name" name="emergencyContactName" placeholder="Jane Doe" value={formData.emergencyContactName} onChange={handleInputChange} icon={Heart} />
+              <div className="grid grid-cols-2 gap-4">
+                <Input label="Contact Phone" name="emergencyContactPhone" type="tel" placeholder="(555) 000-0000" value={formData.emergencyContactPhone} onChange={handleInputChange} icon={Phone} />
+                <SelectInput
+                  label="Relationship"
+                  name="emergencyContactRelationship"
+                  value={formData.emergencyContactRelationship}
+                  onChange={handleInputChange}
+                  options={[
+                    { value: '', label: 'Select...' },
+                    { value: 'parent', label: 'Parent' },
+                    { value: 'spouse', label: 'Spouse/Partner' },
+                    { value: 'sibling', label: 'Sibling' },
+                    { value: 'friend', label: 'Friend' },
+                    { value: 'other', label: 'Other' }
+                  ]}
+                />
+              </div>
+            </div>
+          )}
+
           {error && <div className="bg-red-50 text-red-600 text-sm rounded-xl p-4 border border-red-100">{error}</div>}
 
           <button
@@ -163,10 +201,27 @@ const Input = ({ label, icon: Icon, ...props }) => (
             <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors">
                 <Icon size={18} />
             </div>
-            <input 
+            <input
                 {...props}
                 className="w-full h-12 pl-11 pr-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
             />
+        </div>
+    </div>
+);
+
+const SelectInput = ({ label, options, ...props }) => (
+    <div className="space-y-1.5">
+        <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">{label}</label>
+        <div className="relative group">
+            <select
+                {...props}
+                className="w-full h-12 px-4 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all appearance-none cursor-pointer"
+            >
+                {options.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+            </select>
+            <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         </div>
     </div>
 );

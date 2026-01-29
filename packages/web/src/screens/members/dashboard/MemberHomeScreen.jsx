@@ -16,6 +16,8 @@ import WaiverModal from './WaiverModal';
 import GymSwitcherSheet from './GymSwitcherSheet';
 import GymSearch from './GymSearch';
 import StatsOverView from './StatsOverView';
+import ShopWidget from './ShopWidget';
+import FeaturedProductsWidget from './FeaturedProductsWidget';
 
 const MemberHomeScreen = () => {
     // 1. Get isLoading from context to handle the initial auth check delay
@@ -459,6 +461,16 @@ const MemberHomeScreen = () => {
                     loading={loading}
                     onClick={() => setShowHistoryModal(true)}
                 />
+            )}
+
+            {/* Shop Widget - shows orders or shop link */}
+            {!isInactiveMember && (
+                <ShopWidget gymId={currentGym?.id} theme={theme} />
+            )}
+
+            {/* Featured Products Gallery */}
+            {!isInactiveMember && (
+                <FeaturedProductsWidget gymId={currentGym?.id} theme={theme} />
             )}
 
             {/* Hide Community/Chat widgets for inactive members */}
