@@ -120,7 +120,7 @@ export const OrderHistorySection = ({ gymId, userId, theme }) => {
                     {order.items?.map((item, idx) => {
                       // Handle both old (productName, unitPrice) and new (name, price) field names
                       const itemName = item.name || item.productName || 'Unknown Item';
-                      const itemPrice = item.price ?? item.unitPrice ?? 0;
+                      const itemPrice = parseFloat(item.price ?? item.unitPrice ?? 0) || 0;
 
                       return (
                         <div key={idx} className="flex items-center gap-3">

@@ -139,8 +139,8 @@ export const OrdersTab = ({ orders, gymId, onRefresh, primaryColor, filter }) =>
                     {(order.items || []).map((item, idx) => {
                       // Handle both old (productName, unitPrice) and new (name, price) field names
                       const itemName = item.name || item.productName || 'Unknown Item';
-                      const itemPrice = item.price ?? item.unitPrice ?? 0;
-                      const itemTotal = item.totalPrice ?? (itemPrice * item.quantity);
+                      const itemPrice = parseFloat(item.price ?? item.unitPrice ?? 0) || 0;
+                      const itemTotal = parseFloat(item.totalPrice) || (itemPrice * (item.quantity || 1));
 
                       return (
                         <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100">
