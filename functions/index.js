@@ -3323,14 +3323,20 @@ exports.createShopCheckout = onCall(
             quantity: quantity,
           });
 
+          // Get product image (first from images array or fallback to image field)
+          const productImage = productData.images?.[0] || productData.image || null;
+
           orderItems.push({
             productId: productId,
-            productName: productData.name,
+            name: productData.name,
+            productName: productData.name, // Keep for backward compatibility
             variantId: variantId || null,
             variantName: variantName,
             quantity: quantity,
+            price: price, // Add price field for display
             unitPrice: price,
             totalPrice: price * quantity,
+            image: productImage,
           });
         }
 
@@ -5062,7 +5068,9 @@ exports.getRevenueAnalytics = onCall(
               };
             }
             productSales[key].quantity += item.quantity || 1;
-            productSales[key].revenue += (item.price || 0) * (item.quantity || 1);
+            // Support both old (unitPrice) and new (price) field names
+            const itemPrice = item.price ?? item.unitPrice ?? 0;
+            productSales[key].revenue += itemPrice * (item.quantity || 1);
           });
         });
 
@@ -5081,8 +5089,10 @@ exports.getRevenueAnalytics = onCall(
         filteredOrders.forEach((order) => {
           (order.items || []).forEach((item) => {
             const category = productCategoryMap[item.productId] || "uncategorized";
+            // Support both old (unitPrice) and new (price) field names
+            const catItemPrice = item.price ?? item.unitPrice ?? 0;
             revenueByCategory[category] = (revenueByCategory[category] || 0) +
-              ((item.price || 0) * (item.quantity || 1));
+              (catItemPrice * (item.quantity || 1));
           });
         });
 
@@ -5185,7 +5195,7 @@ exports.getRevenueAnalytics = onCall(
             orders: {
               total: filteredOrders.length,
               fulfilled: filteredOrders.filter((o) => o.status === "fulfilled").length,
-              pending: filteredOrders.filter((o) => o.status === "paid").length,
+              pending: filteredOrders.filter((o) => o.status === "paid" || o.status === "ready_for_pickup").length,
               refunded: refundedOrders.length,
             },
             subscriptions: {

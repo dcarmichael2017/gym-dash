@@ -136,25 +136,36 @@ export const OrdersTab = ({ orders, gymId, onRefresh, primaryColor, filter }) =>
                 <div className="mb-4">
                   <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Items</h4>
                   <div className="space-y-2">
-                    {(order.items || []).map((item, idx) => (
-                      <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100">
-                        <div className="flex items-center gap-3">
-                          {item.image && (
-                            <img src={item.image} alt={item.name} className="w-10 h-10 object-cover rounded" />
-                          )}
-                          <div>
-                            <p className="font-medium text-gray-900">{item.name}</p>
-                            {item.variantName && (
-                              <p className="text-xs text-gray-500">{item.variantName}</p>
+                    {(order.items || []).map((item, idx) => {
+                      // Handle both old (productName, unitPrice) and new (name, price) field names
+                      const itemName = item.name || item.productName || 'Unknown Item';
+                      const itemPrice = item.price ?? item.unitPrice ?? 0;
+                      const itemTotal = item.totalPrice ?? (itemPrice * item.quantity);
+
+                      return (
+                        <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100">
+                          <div className="flex items-center gap-3">
+                            {item.image ? (
+                              <img src={item.image} alt={itemName} className="w-10 h-10 object-cover rounded" />
+                            ) : (
+                              <div className="w-10 h-10 bg-gray-100 rounded flex items-center justify-center">
+                                <Package size={16} className="text-gray-400" />
+                              </div>
                             )}
+                            <div>
+                              <p className="font-medium text-gray-900">{itemName}</p>
+                              {item.variantName && (
+                                <p className="text-xs text-gray-500">{item.variantName}</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-medium text-gray-900">${itemTotal.toFixed(2)}</p>
+                            <p className="text-xs text-gray-500">Qty: {item.quantity}</p>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className="font-medium text-gray-900">${(item.price * item.quantity).toFixed(2)}</p>
-                          <p className="text-xs text-gray-500">Qty: {item.quantity}</p>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 

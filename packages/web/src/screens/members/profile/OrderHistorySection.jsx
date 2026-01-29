@@ -117,27 +117,33 @@ export const OrderHistorySection = ({ gymId, userId, theme }) => {
               {isExpanded && (
                 <div className="px-4 pb-4 pt-2 border-t border-gray-100 bg-gray-50/50">
                   <div className="space-y-2">
-                    {order.items?.map((item, idx) => (
-                      <div key={idx} className="flex items-center gap-3">
-                        {item.image ? (
-                          <img src={item.image} alt={item.name} className="w-10 h-10 rounded-lg object-cover" />
-                        ) : (
-                          <div className="w-10 h-10 rounded-lg bg-gray-200 flex items-center justify-center">
-                            <Package size={16} className="text-gray-400" />
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
-                          {item.variantName && (
-                            <p className="text-xs text-gray-500">{item.variantName}</p>
+                    {order.items?.map((item, idx) => {
+                      // Handle both old (productName, unitPrice) and new (name, price) field names
+                      const itemName = item.name || item.productName || 'Unknown Item';
+                      const itemPrice = item.price ?? item.unitPrice ?? 0;
+
+                      return (
+                        <div key={idx} className="flex items-center gap-3">
+                          {item.image ? (
+                            <img src={item.image} alt={itemName} className="w-10 h-10 rounded-lg object-cover" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg bg-gray-200 flex items-center justify-center">
+                              <Package size={16} className="text-gray-400" />
+                            </div>
                           )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">{itemName}</p>
+                            {item.variantName && (
+                              <p className="text-xs text-gray-500">{item.variantName}</p>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-gray-900">${itemPrice.toFixed(2)}</p>
+                            <p className="text-xs text-gray-500">×{item.quantity}</p>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-gray-900">${item.price?.toFixed(2)}</p>
-                          <p className="text-xs text-gray-500">×{item.quantity}</p>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   {order.status === 'ready_for_pickup' && (

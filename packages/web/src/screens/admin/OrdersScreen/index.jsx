@@ -74,8 +74,8 @@ const OrdersScreen = () => {
     }
   };
 
-  // Filter orders by status
-  const pendingOrders = orders.filter(o => o.status === 'paid');
+  // Filter orders by status (pending includes paid and ready_for_pickup)
+  const pendingOrders = orders.filter(o => o.status === 'paid' || o.status === 'ready_for_pickup');
   const fulfilledOrders = orders.filter(o => o.status === 'fulfilled');
   const refundedOrders = orders.filter(o => o.status === 'refunded' || o.status === 'partially_refunded');
 
